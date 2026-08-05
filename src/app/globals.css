@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+}
+
+/* 네이버 지도 기본 UI(로고/줌 컨트롤 등)는 그대로 두되,
+   우리 커스텀 오버레이가 항상 그 위에 뜨도록 z-index 기준을 여기서 관리 */
+:root {
+  --z-map: 0;
+  --z-overlay: 10;
+  --z-bottomsheet: 20;
+}

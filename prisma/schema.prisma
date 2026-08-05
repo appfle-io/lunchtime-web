@@ -1,0 +1,93 @@
+// lunchtime 멀티테넌트 스키마 초안
+// 모든 도메인 테이블은 companyId로 스코프해서 회사 간 데이터가 섞이지 않도록 설계.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 최상위 테넌트 단위
+model Company {
+  id           String   @id @default(cuid())
+  code         String   @unique // 접속 시 입력하는 회사코드
+  name         String
+  centerLat    Float // 지도 중심좌표(회사 위치)
+  centerLng    Float
+  districtCode String? // 관할 구/시청 코드 - 제로페이 공공데이터 매칭에 사용
+  createdAt    DateTime @default(now())
+
+  users       User[]
+  restaurants Restaurant[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  nickname  String
+  pinHash   String // 4자리 PIN은 평문 저장 금지, 해시로 저장
+  createdAt DateTime @default(now())
+
+  reviews Review[]
+  visits  Visit[]
+  votes   ZeroPayVote[]
+
+  // 닉네임 유일성은 "회사 전체"가 아니라 "같은 회사 내"로만 스코프
+  @@unique([companyId, nickname])
+}
+
+model Restaurant {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id])
+  name          String
+  address       String
+  lat           Float
+  lng           Float
+  category      String?
+  isZeroPay     Boolean  @default(false)
+  // 제로페이 판정 소스 추적: 공공데이터 자동매칭 / 수동 확인 / 사용자 투표
+  zeroPaySource String? // "public_data" | "manual" | "user_vote"
+  createdAt     DateTime @default(now())
+
+  reviews Review[]
+  visits  Visit[]
+  votes   ZeroPayVote[]
+
+  @@index([companyId])
+}
+
+model Review {
+  id           String     @id @default(cuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  content      String
+  rating       Int? // 1~5, 선택
+  createdAt    DateTime   @default(now())
+}
+
+model Visit {
+  id           String     @id @default(cuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  visitedAt    DateTime   @default(now())
+}
+
+// "여기 제로페이 돼요/안돼요" 사내 제보용 투표
+model ZeroPayVote {
+  id           String     @id @default(cuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  isZeroPay    Boolean
+  createdAt    DateTime   @default(now())
+}
