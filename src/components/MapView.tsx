@@ -1,7 +1,7 @@
 "use client";
 
 import Script from "next/script";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import type { FocusTarget } from "./CompanyHome";
 import { getCategoryVisual } from "@/lib/restaurant-category";
@@ -29,6 +29,11 @@ interface MapViewProps {
   disableClustering?: boolean;
   // 값이 바뀔 때마다(0보다 큰 값으로) 지도를 원래 중심/줌으로 되돌린다 ("홈으로" 버튼용).
   homeSignal?: number;
+  // 2026-08-06 밤 신규: 지도 뷰포트 컬링 결과(현재 화면에 실제로 보이는 식당 id들)를 부모에게
+  // 알려준다 - 직방/네이버부동산처럼 "지도에 보이는 것 = 리스트에 보이는 것"을 만들기 위함.
+  // null이면 "제한 없음"(전체를 그대로 보여줘도 됨) - 지도가 아직 준비 안 됐거나, 컬링을
+  // 건너뛰는 상태(disableClustering, 클러스터 클릭 직후)일 때 그렇다.
+  onVisibleRestaurantsChange?: (ids: Set<string> | null) => void;
 }
 
 const FALLBACK_CENTER = { lat: 37.5665, lng: 126.978 };
@@ -64,7 +69,10 @@ const VIEWPORT_CULL_MARGIN_RATIO = 0.6;
 // 맞게, 이제 클러스터 클릭은 줌 단계에 의존하지 않고 그 그룹의 식당 id를 그대로 부모에게 넘겨서
 // (onClusterClick) 부모가 해당 그룹만 다시 restaurants로 내려주고 disableClustering=true로
 // 강제한다 - 그러면 줌/격자 크기와 무관하게 그 그룹 전체가 항상 개별 마커로 그려진다.
-const CLUSTER_ACTIVATION_COUNT = 25;
+// 2026-08-06 밤: 드래그 렉이 계속 보고돼서 25 -> 12로 낮췄다. 화면에 보이는 개별(복잡한 DOM)
+// 마커 수 자체를 더 일찍 줄여서, 지도 SDK가 드래그 중 매 프레임 다시 배치해야 하는 마커
+// 개수를 더 공격적으로 줄인다 - 트레이드오프로 클러스터가 조금 더 자주/일찍 나타난다.
+const CLUSTER_ACTIVATION_COUNT = 12;
 // zoom 16 기준 격자 크기(위도/경도 도 단위). zoom이 1 줄어들 때마다(더 축소) 2배씩 커지고,
 // zoom이 1 늘어날 때마다(더 확대) 절반씩 작아진다 - 확대할수록 클러스터가 잘게 쪼개진다.
 const CLUSTER_GRID_DEGREES_AT_ZOOM16 = 0.0025;
@@ -191,25 +199,40 @@ function focusOnCluster(map: any, restaurants: RestaurantSummary[], fallbackZoom
 // 아니라, 매 mouseenter/mouseleave 시점마다 값을 넣고 빼는 동적 처리다.
 const MARKER_HOVER_ZINDEX = "1000";
 
-// 호버 중일 때만 z-index를 올리고, 벗어나는 즉시 해제한다.
-function bindDynamicHoverZIndex(el: HTMLElement) {
+// 2026-08-06 밤 추가: "지도를 드래그로 움직이면 화면이 마우스보다 늦게 따라온다"는 피드백을
+// 다시 확인했다. 뷰포트 컬링/클러스터링으로 마커 "개수"는 이미 줄여뒀지만, 그 개수 안에서도
+// 마커 하나하나가 무거우면(특히 이름 툴팁/클러스터 이름 목록을 평소에도 DOM에 항상 넣어두고
+// CSS opacity로만 숨겨온 방식) 지도 SDK가 드래그 중 매 프레임 그 마커들을 다시 배치할 때
+// 그만큼 더 많은 DOM/스타일 계산을 해야 한다. 툴팁 DOM을 "호버할 때만" 만들고 벗어나면 즉시
+// 지워서, 평소(드래그하는 동안 포함) 마커의 DOM은 항상 최소한만 유지되게 한다.
+function bindLazyTooltip(el: HTMLElement, buildTooltipHtml: () => string) {
   if (!el.style.position) el.style.position = "relative";
+  let tooltipEl: HTMLElement | null = null;
+
   el.addEventListener("mouseenter", () => {
     el.style.zIndex = MARKER_HOVER_ZINDEX;
+    if (!tooltipEl) {
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = buildTooltipHtml().trim();
+      tooltipEl = wrapper.firstElementChild as HTMLElement;
+      if (tooltipEl) el.appendChild(tooltipEl);
+    }
   });
   el.addEventListener("mouseleave", () => {
     el.style.zIndex = "";
+    tooltipEl?.remove();
+    tooltipEl = null;
   });
 }
 
-// 마커 콘텐츠 HTML 문자열을 실제 DOM 엘리먼트로 만들고, 그 엘리먼트 자체에 동적 z-index
-// 호버 바인딩을 걸어서 반환한다. naver.maps.Marker의 icon.content에 문자열 대신 이 엘리먼트를
-// 그대로 넘기면(NCP Maps v3는 HTMLElement도 허용), 우리가 붙인 리스너가 그대로 유지된다.
-function buildMarkerElement(html: string): HTMLElement {
+// 마커의 "항상 보이는 부분"(bodyHtml)만 실제 DOM으로 만들고, 툴팁(buildTooltipHtml)은
+// 호버할 때만 지연 생성해서 붙인다. naver.maps.Marker의 icon.content에 문자열 대신 이
+// 엘리먼트를 그대로 넘기면(NCP Maps v3는 HTMLElement도 허용) 우리가 붙인 리스너가 유지된다.
+function buildMarkerElement(bodyHtml: string, buildTooltipHtml: () => string): HTMLElement {
   const wrapper = document.createElement("div");
-  wrapper.innerHTML = html.trim();
+  wrapper.innerHTML = bodyHtml.trim();
   const root = wrapper.firstElementChild as HTMLElement;
-  bindDynamicHoverZIndex(root);
+  bindLazyTooltip(root, buildTooltipHtml);
   return root;
 }
 
@@ -227,6 +250,7 @@ export default function MapView({
   onClusterClick,
   disableClustering = false,
   homeSignal = 0,
+  onVisibleRestaurantsChange,
 }: MapViewProps) {
   const mapElRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -236,6 +260,28 @@ export default function MapView({
   // idle(드래그/줌 종료) 이벤트가 발생할 때마다 1씩 증가 - 아래 마커 effect가 이 값을 의존성으로
   // 갖고 있어서, 지도를 움직인 "직후"에만 화면에 보이는 마커를 다시 계산한다.
   const [boundsVersion, setBoundsVersion] = useState(0);
+
+  // 2026-08-06 저녁 추가: "즐겨찾기 하트 하나만 눌러도 지도 마커 전체가 다시 그려져서 렉이 난다"는
+  // 문제를 발견해서 고침. 원인: 부모(CompanyHome)의 visibleRestaurants useMemo가 favoriteIds를
+  // 의존성으로 갖고 있어서, "즐겨찾기" 필터가 켜져있지 않아 실제로는 결과에 아무 영향이 없어도
+  // 즐겨찾기를 토글할 때마다 새 배열이 만들어진다. 그 새 배열이 restaurants prop으로 그대로
+  // 내려오면, 아래 마커 effect가 restaurants "배열 참조"를 의존성으로 삼고 있었기 때문에 내용이
+  // 하나도 안 바뀌었어도 매번 화면의 마커 전체를 지웠다가(setMap(null)) 처음부터 다시 만들었다 -
+  // 식당이 많을 때 즐겨찾기 클릭 한 번마다 눈에 띄는 렉의 원인이었다.
+  // 마커 모양/위치에 실제로 영향을 주는 필드만 뽑아 문자열 시그니처로 만들어서, 배열 참조가
+  // 바뀌어도 "내용이 그대로면" 마커 effect가 다시 실행되지 않게 한다.
+  const markerSignature = useMemo(
+    () =>
+      restaurants
+        .map(
+          (r) =>
+            `${r.id}:${r.lat}:${r.lng}:${r.name}:${r.category ?? ""}:${r.isZeroPay ? 1 : 0}:${
+              r.isZeroPayNeedsReview ? 1 : 0
+            }`
+        )
+        .join("|"),
+    [restaurants]
+  );
 
   // NCP Maps 공식 인증 실패 콜백 - 등록 안 해두면 인증 실패 시 콘솔에 원인이 안 남고
   // 그냥 window.naver.maps가 비어있는 채로 남아서 아래 LatLng 호출에서 뜬금없는
@@ -340,6 +386,14 @@ export default function MapView({
           });
         })();
 
+    // 2026-08-06 밤 신규: "지도에 보이는 것 = 리스트에 보이는 것"을 만들기 위해, 방금 계산한
+    // 뷰포트 컬링 결과를 그대로 부모(CompanyHome)에게도 보고한다. disableClustering일 때는
+    // (클러스터를 막 클릭해서 그 그룹 전체를 보여줘야 하는 상태) 뷰포트로 더 좁히면 안 되므로
+    // null(제한 없음)을 보고해서 리스트가 부모가 이미 좁혀둔 클러스터 멤버 전체를 그대로 쓰게 한다.
+    onVisibleRestaurantsChange?.(
+      disableClustering ? null : new Set(visible.map((restaurant) => restaurant.id))
+    );
+
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = new Map();
 
@@ -411,7 +465,17 @@ export default function MapView({
         markersRef.current.set(restaurant.id, marker);
       }
     }
-  }, [restaurants, ready, onMarkerClick, onClusterClick, disableClustering, boundsVersion]);
+    // restaurants "배열 참조"가 아니라 markerSignature(내용 기반)를 의존성으로 쓴다 - 위 주석 참고.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    markerSignature,
+    ready,
+    onMarkerClick,
+    onClusterClick,
+    disableClustering,
+    boundsVersion,
+    onVisibleRestaurantsChange,
+  ]);
 
   // 리스트에서 "이미 있어요" / 방금 추가한 식당을 눌렀을 때 지도를 그 위치로 이동시키고 마커를 잠깐 튀게 한다.
   useEffect(() => {
@@ -449,8 +513,11 @@ export default function MapView({
 }
 
 // 식당 마커를 카테고리별 이모지 아이콘 + 제로페이 배지로 그리는 헬퍼.
-// 마커 HTML 안에 group/group-hover 클래스를 써서, 마우스 오버 시 순수 CSS로
-// 마커가 커지고 이름 툴팁이 뜨게 한다 (별도 JS 이벤트 리스너 없이 처리).
+// 2026-08-06 밤: 이름 툴팁을 항상 DOM에 넣어두고 CSS group-hover로만 숨기던 방식에서,
+// buildMarkerElement의 두 번째 인자(buildTooltipHtml)로 넘겨서 실제 호버할 때만 만들어
+// 붙이는 방식으로 바꿨다 - 평소 마커의 DOM을 가볍게 유지해서 드래그 중 재배치 비용을 줄인다.
+// shadow-soft(box-shadow)도 마커 자체에서는 빼서(항상 존재하는 요소라 누적 비용이 크다)
+// ring만으로 테두리를 표현한다.
 export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
   const visual = getCategoryVisual(restaurant.category);
   const displayName = (restaurant.name ?? "").normalize("NFC");
@@ -463,13 +530,11 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
     : "";
 
   return {
-    content: buildMarkerElement(`
+    content: buildMarkerElement(
+      `
       <div class="group relative flex flex-col items-center" style="cursor:pointer;">
-        <span class="pointer-events-none absolute -top-7 whitespace-nowrap rounded-full bg-ink px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-soft transition-opacity duration-150 group-hover:opacity-100">
-          ${displayName}
-        </span>
         <div
-          class="relative flex h-8 w-8 items-center justify-center rounded-full text-base shadow-soft ring-2 ring-white transition-transform duration-150 group-hover:scale-125"
+          class="relative flex h-8 w-8 items-center justify-center rounded-full text-base ring-2 ring-white transition-transform duration-150 group-hover:scale-125"
           style="background:${visual.color}"
         >
           ${visual.emoji}
@@ -477,7 +542,13 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
           ${needsReviewBadge}
         </div>
       </div>
-    `),
+    `,
+      () => `
+        <span class="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-ink px-2 py-1 text-[10px] font-medium text-white shadow-soft">
+          ${displayName}
+        </span>
+      `
+    ),
     anchor: new window.naver.maps.Point(16, 16),
   };
 }
@@ -487,44 +558,51 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
 //
 // 마우스를 올렸을 때(클릭하기 전에) 그 안에 어떤 가맹점들이 있는지 미리 볼 수 있게 툴팁으로
 // 보여준다 - 클릭해서 확대하기 전에 "여기 뭐가 있는지" 감을 잡을 수 있게. 이름이 너무 많으면
-// 다 나열하지 않고 상위 N개 + "외 n곳"으로 자른다. 개별 식당 마커의 이름 툴팁
-// (buildRestaurantMarkerIcon)과 동일하게 group/group-hover 클래스만으로 처리해서 별도 JS
-// 이벤트 리스너가 필요 없다.
+// 다 나열하지 않고 상위 N개 + "외 n곳"으로 자른다.
 //
-// 식당이 많을 때(20개 이상) 11px 글자를 여백 없이 다닥다닥 붙여두면 어디서 한 이름이 끝나고
-// 다음 이름이 시작하는지 구분이 안 되고 뭉개져 보인다는 피드백을 받아서, 폭을 200→240px로,
-// 글자를 11→12px로 늘리고 이름 사이에 구분선(divide-y)을 넣어서 줄 단위로 또렷하게 보이게
-// 했다. "총 N곳" 헤더는 스크롤해도 항상 맨 위에 남는다(목록이 어디까지 왔는지 기준점 유지).
+// 2026-08-06 밤: 이름 목록(최대 60개 <div>)을 예전엔 클러스터마다 항상 DOM에 만들어두고
+// CSS로만 숨겼었다 - 클러스터가 여러 개면 그만큼 항상 무거운 DOM을 지도가 드래그 중에도
+// 계속 재배치해야 했다. 이제는 buildMarkerElement의 두 번째 인자로 넘겨서 실제 호버할 때만
+// 이름 목록을 만든다. 식당이 많을 때(20개 이상) 11px 글자를 여백 없이 다닥다닥 붙여두면
+// 어디서 한 이름이 끝나고 다음 이름이 시작하는지 구분이 안 되고 뭉개져 보인다는 피드백을
+// 받아서, 폭을 200→240px로, 글자를 11→12px로 늘리고 이름 사이에 구분선(divide-y)을 넣어서
+// 줄 단위로 또렷하게 보이게 했다. "총 N곳" 헤더는 스크롤해도 항상 맨 위에 남는다.
 function buildClusterMarkerIcon(count: number, names: string[]) {
   // 식당 수가 많을수록 살짝 더 크게 - 한눈에 "여기 많이 모여있다"는 걸 알 수 있게.
   const size = count >= 50 ? 44 : count >= 10 ? 38 : 32;
 
-  const TOOLTIP_MAX_NAMES = 60;
-  const shown = names.slice(0, TOOLTIP_MAX_NAMES);
-  const remaining = names.length - shown.length;
-  const namesHtml =
-    shown.map((name) => `<div class="py-1 break-words">${name}</div>`).join("") +
-    (remaining > 0 ? `<div class="py-1 text-white/60">외 ${remaining}곳</div>` : "");
-
   return {
-    content: buildMarkerElement(`
+    content: buildMarkerElement(
+      `
       <div class="group relative flex flex-col items-center" style="cursor:pointer;">
         <div
-          class="pointer-events-none absolute bottom-full mb-1.5 flex w-[240px] max-h-[260px] flex-col overflow-y-auto whitespace-normal divide-y divide-white/10 rounded-lg bg-ink px-3 py-1 text-left text-[12px] leading-snug text-white opacity-0 shadow-soft transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto"
-          onwheel="event.stopPropagation()"
-          onmousedown="event.stopPropagation()"
-        >
-          <div class="sticky top-0 bg-ink py-1.5 text-[10px] font-semibold text-white/60">총 ${count}곳</div>
-          ${namesHtml}
-        </div>
-        <div
-          class="flex items-center justify-center rounded-full bg-ink text-sm font-bold text-white shadow-soft ring-2 ring-white transition-transform duration-150 group-hover:scale-110"
+          class="flex items-center justify-center rounded-full bg-ink text-sm font-bold text-white ring-2 ring-white transition-transform duration-150 group-hover:scale-110"
           style="width:${size}px;height:${size}px;"
         >
           ${count}
         </div>
       </div>
-    `),
+    `,
+      () => {
+        const TOOLTIP_MAX_NAMES = 60;
+        const shown = names.slice(0, TOOLTIP_MAX_NAMES);
+        const remaining = names.length - shown.length;
+        const namesHtml =
+          shown.map((name) => `<div class="py-1 break-words">${name}</div>`).join("") +
+          (remaining > 0 ? `<div class="py-1 text-white/60">외 ${remaining}곳</div>` : "");
+
+        return `
+          <div
+            class="pointer-events-auto absolute bottom-full left-1/2 mb-1.5 flex w-[240px] max-h-[260px] -translate-x-1/2 flex-col overflow-y-auto whitespace-normal divide-y divide-white/10 rounded-lg bg-ink px-3 py-1 text-left text-[12px] leading-snug text-white shadow-soft"
+            onwheel="event.stopPropagation()"
+            onmousedown="event.stopPropagation()"
+          >
+            <div class="sticky top-0 bg-ink py-1.5 text-[10px] font-semibold text-white/60">총 ${count}곳</div>
+            ${namesHtml}
+          </div>
+        `;
+      }
+    ),
     anchor: new window.naver.maps.Point(size / 2, size / 2),
   };
 }

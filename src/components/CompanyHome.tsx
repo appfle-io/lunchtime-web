@@ -13,6 +13,7 @@ import LunchVoteModal from "./LunchVoteModal";
 import UserMenu from "./UserMenu";
 import PinResetModal from "./PinResetModal";
 import MealLogCalendar from "./MealLogCalendar";
+import CalendarPanel from "./CalendarPanel";
 import Toast from "./Toast";
 import type { RestaurantSummary } from "@/types";
 import { filterRestaurants, type SpecialFilterKey } from "@/lib/restaurant-filters";
@@ -30,6 +31,28 @@ const POPULAR_FETCH_LIMIT = 10;
 // 읍고, 그 외엔 사용자가 새로고침 버튼을 누르거나 브라우저를 새로고침(F5 → 리마운트)했을 때만 다시 읍는다.
 const POPULAR_AUTO_REFRESH_HOURS = [9, 10, 11, 12, 13, 14, 15]; // 로컬 시각 기준 정각(시 단위)
 const POPULAR_SCHEDULE_CHECK_MS = 60 * 1000; // 정각 도달 여부만 확인하는 타이머 - 네트워크 요청 아님
+
+// Tailwind의 md 브레이크포인트(768px)와 맞춘 값. 캘린더뷰를 데스크톱에서는 "주변 식당" 카드
+// 아래 빈 공간에 별도 카드(CalendarPanel)로 띄우고, 모바일에서는 RestaurantList 안의
+// "주변식당/캘린더" 탭으로 전환해서 보여주는데, 이 두 모드 중 하나만 MealLogCalendar를
+// 마운트해야 같은 데이터를 두 번 fetch하지 않는다. CSS만으로는 "어디에 마운트할지"까지는
+// 못 정하므로(mediaquery는 보이기/숨기기만 함) 여기서 JS로 판단한다.
+const DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
+
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const mql = window.matchMedia(DESKTOP_MEDIA_QUERY);
+    setIsDesktop(mql.matches);
+
+    const handleChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mql.addEventListener("change", handleChange);
+    return () => mql.removeEventListener("change", handleChange);
+  }, []);
+
+  return isDesktop;
+}
 
 interface CompanyHomeProps {
   companyCode: string;
@@ -61,6 +84,7 @@ export default function CompanyHome({
   initialFavoriteIds,
 }: CompanyHomeProps) {
   const router = useRouter();
+  const isDesktop = useIsDesktop();
   const [focusTarget, setFocusTarget] = useState<FocusTarget | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedRestaurant, setSelectedRestaurant] = useState<RestaurantSummary | null>(null);
@@ -78,6 +102,15 @@ export default function CompanyHome({
   const [clusterFilterIds, setClusterFilterIds] = useState<Set<string> | null>(null);
   // MapView에게 "원래 중심/줌으로 돌아가라"고 신호를 보내는 카운터 - 값이 바뀔 때마다(0보다 크면) 실행됨.
   const [homeSignal, setHomeSignal] = useState(0);
+
+  // 2026-08-06 밤 신규: 직방/네이버부동산처럼 "지도에 보이는 것 = 리스트에 보이는 것"을 만들기
+  // 위한 상태. MapView가 뷰포트 컬링을 계산할 때마다(지도를 드래그/줌해서 idle이 발생할 때마다)
+  // 그 결과(현재 화면에 실제로 보이는 식당 id들)를 여기로 올려받는다. null이면 "제한 없음"
+  // (지도가 아직 준비 안 됐거나, 클러스터를 클릭해서 그 그룹 전체를 보여줘야 하는 상태) - 이때는
+  // 리스트도 지금까지처럼 mapAndListRestaurants를 그대로 보여준다. 식당이 많을 때(예: 1500건)
+  // 이 동기화 덕분에 리스트에 실제로 그려지는 항목 수가 지도 화면에 보이는 만큼(보통 수십 개)으로
+  // 줄어든다 - 렉의 상당 부분이 여기서 온다는 걸 확인했다(2026-08-06 저녁).
+  const [mapVisibleIds, setMapVisibleIds] = useState<Set<string> | null>(null);
 
   // 2026-08-06 저녁 신규: 밥 먹은 기록(캘린더뷰)이 바뀌었다는 신호 카운터. 식당 상세모달의
   // "오늘 여기서 먹었어요" 버튼으로 기록을 추가/삭제하면, 주변식당 목록 아래에 이어져 있는
@@ -192,6 +225,14 @@ export default function CompanyHome({
     if (!clusterFilterIds) return visibleRestaurants;
     return visibleRestaurants.filter((r) => clusterFilterIds.has(r.id));
   }, [visibleRestaurants, clusterFilterIds]);
+
+  // 2026-08-06 밤 신규: 왼쪽 "주변 식당" 리스트는 mapAndListRestaurants 전체가 아니라, 그중에서도
+  // 지도에 지금 실제로 보이는(mapVisibleIds) 것만 보여준다 - 직방 방식. mapVisibleIds가 null이면
+  // (지도가 아직 준비 안 됐거나 클러스터 확대 상태라 제한이 없는 경우) 지금까지처럼 전체를 보여준다.
+  const listRestaurants = useMemo(() => {
+    if (!mapVisibleIds) return mapAndListRestaurants;
+    return mapAndListRestaurants.filter((r) => mapVisibleIds.has(r.id));
+  }, [mapAndListRestaurants, mapVisibleIds]);
 
   function focusRestaurant(restaurant: RestaurantSummary) {
     if (typeof restaurant.lat !== "number" || typeof restaurant.lng !== "number") return;
@@ -328,6 +369,7 @@ export default function CompanyHome({
         onClusterClick={handleClusterClick}
         disableClustering={clusterFilterIds !== null}
         homeSignal={homeSignal}
+        onVisibleRestaurantsChange={setMapVisibleIds}
       />
 
       <FilterBar
@@ -353,8 +395,9 @@ export default function CompanyHome({
 
       <RestaurantList
         companyCode={companyCode}
-        restaurants={mapAndListRestaurants}
+        restaurants={listRestaurants}
         hasAnyRestaurants={restaurants.length > 0}
+        hasRestaurantsOutOfView={listRestaurants.length === 0 && mapAndListRestaurants.length > 0}
         favoriteIds={favoriteIds}
         onToggleFavorite={toggleFavorite}
         onFocusRestaurant={focusRestaurant}
@@ -379,18 +422,33 @@ export default function CompanyHome({
             onChangePassword={() => setShowPasswordChange(true)}
           />
         }
+        // 2026-08-06 심야 3번째 개편: 데스크톱에서는 MealLogCalendar를 아래 CalendarPanel(별도
+        // 카드)에서만 마운트하고, 여기는 null을 넘겨 모바일 탭 쪽에서 중복 마운트되지 않게 한다.
+        // 모바일(!isDesktop)일 때만 실제로 MealLogCalendar 인스턴스를 만들어 탭 콘텐츠로 넘긴다.
         mealLogSection={
-          <div className="mt-2 border-t border-black/5 pt-4">
-            <h3 className="mb-3 text-sm font-bold text-ink">📅 밥 먹은 기록</h3>
+          isDesktop ? null : (
             <MealLogCalendar
               companyCode={companyCode}
               restaurants={restaurants}
               onNotify={setToastMessage}
               refreshSignal={mealLogVersion}
             />
-          </div>
+          )
         }
       />
+
+      {/* 2026-08-06 심야 3번째 개편: "주변 식당" 카드 바로 아래 빈 공간에 캘린더를 별도 카드로
+          노출해달라는 요청 - 데스크톱 전용(모바일은 위 RestaurantList의 탭으로 대체). */}
+      {isDesktop && (
+        <CalendarPanel>
+          <MealLogCalendar
+            companyCode={companyCode}
+            restaurants={restaurants}
+            onNotify={setToastMessage}
+            refreshSignal={mealLogVersion}
+          />
+        </CalendarPanel>
+      )}
 
       <RestaurantDetail
         restaurant={selectedRestaurant}

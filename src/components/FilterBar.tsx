@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import type { RestaurantSummary } from "@/types";
 import { SPECIAL_FILTERS, getAvailableCategoryLabels, type SpecialFilterKey } from "@/lib/restaurant-filters";
 
@@ -44,7 +45,9 @@ export default function FilterBar({
   homeButtonVisible = false,
   onGoHome,
 }: FilterBarProps) {
-  const categoryLabels = getAvailableCategoryLabels(restaurants);
+  // 2026-08-06 저녁 추가: 식당이 많을 때(공공데이터 시딩) 이 계산이 매 렌더마다 전체 배열을
+  // 훑는 게 누적되면 부담이 되므로, restaurants가 실제로 바뀔 때만 다시 계산한다.
+  const categoryLabels = useMemo(() => getAvailableCategoryLabels(restaurants), [restaurants]);
 
   if (restaurants.length === 0) return null;
 

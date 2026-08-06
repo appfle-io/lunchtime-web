@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import type { RestaurantSummary } from "@/types";
 import type { PopularEntry } from "@/lib/popular-server";
 
@@ -35,9 +36,11 @@ export default function PopularWidget({
   onRefresh,
   isRefreshing,
 }: PopularWidgetProps) {
-  if (entries.length === 0) return null;
+  // 2026-08-06 저녁 추가: 식당이 많을 때 이 Map을 매 렌더마다 새로 만드는 비용이 누적되므로,
+  // restaurants가 실제로 바뀔 때만 다시 만든다(위젯은 top3만 보여주지만 조회 대상은 전체 목록).
+  const restaurantById = useMemo(() => new Map(restaurants.map((r) => [r.id, r])), [restaurants]);
 
-  const restaurantById = new Map(restaurants.map((r) => [r.id, r]));
+  if (entries.length === 0) return null;
 
   return (
     <div className="absolute right-4 bottom-[calc(40vh+0.75rem)] z-20 w-56 rounded-xl2 bg-surface/95 p-3 shadow-soft backdrop-blur md:bottom-auto md:right-6 md:top-6">
