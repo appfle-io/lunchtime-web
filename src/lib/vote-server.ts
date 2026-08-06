@@ -1,0 +1,180 @@
+import { db } from "@/lib/firebase";
+
+// 2026-08-06 신규: "오늘 점심 뭐 먹지?" 투표 - 친구목록에서 참가자를 골라 만드는 투표.
+// companies/{code}/votes/{voteId}
+//   .../responses/{nicknameId} - 참가자별 응답(어떤 옵션을 골랐는지)
+//   .../comments/{commentId}  - 투표 안 댓글
+//
+// "저는 따로 먹을게요" 옵션은 매 투표마다 저장할 필요 없이(어차피 항상 있는 고정 옵션이라 문서에
+// 중복 저장하면 낭비), 조회 시점(withSeparateOption)에 항상 뒤에 붙여서 내려준다.
+export const SEPARATE_OPTION_ID = "separate";
+export const SEPARATE_OPTION_LABEL = "저는 따로 먹을게요";
+
+export interface VoteOption {
+  id: string;
+  label: string;
+  restaurantId?: string;
+}
+
+export interface VoteResponseEntry {
+  nicknameId: string;
+  nickname: string;
+  optionId: string;
+  respondedAt: string;
+}
+
+export interface VoteCommentEntry {
+  id: string;
+  authorNicknameId: string;
+  authorNickname: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface VoteSummary {
+  id: string;
+  title: string;
+  creatorNicknameId: string;
+  creatorNickname: string;
+  options: VoteOption[]; // "저는 따로 먹을게요"가 항상 마지막에 자동 포함되어 내려온다.
+  participantNicknameIds: string[];
+  createdAt: string;
+  responses: VoteResponseEntry[];
+  comments: VoteCommentEntry[];
+}
+
+function votesRef(companyCode: string) {
+  return db.collection("companies").doc(companyCode).collection("votes");
+}
+
+function withSeparateOption(options: VoteOption[]): VoteOption[] {
+  return [...options, { id: SEPARATE_OPTION_ID, label: SEPARATE_OPTION_LABEL }];
+}
+
+export async function createVote(
+  companyCode: string,
+  creatorNicknameId: string,
+  creatorNickname: string,
+  title: string,
+  options: { restaurantId?: string; label: string }[],
+  participantNicknameIds: string[]
+): Promise<VoteSummary> {
+  const createdAt = new Date().toISOString();
+  const resolvedTitle = title.trim() || "오늘 점심 뭐 먹지?";
+  const optionDocs: VoteOption[] = options.map((o, i) => ({
+    id: `opt${i}`,
+    label: o.label,
+    restaurantId: o.restaurantId,
+  }));
+
+  // 만든 사람도 참가자로 포함해야 본인도 투표할 수 있다.
+  const participants = Array.from(new Set([creatorNicknameId, ...participantNicknameIds]));
+
+  const docRef = await votesRef(companyCode).add({
+    title: resolvedTitle,
+    creatorNicknameId,
+    creatorNickname,
+    options: optionDocs,
+    participantNicknameIds: participants,
+    createdAt,
+  });
+
+  return {
+    id: docRef.id,
+    title: resolvedTitle,
+    creatorNicknameId,
+    creatorNickname,
+    options: withSeparateOption(optionDocs),
+    participantNicknameIds: participants,
+    createdAt,
+    responses: [],
+    comments: [],
+  };
+}
+
+export async function getVote(companyCode: string, voteId: string): Promise<VoteSummary | null> {
+  const voteRef = votesRef(companyCode).doc(voteId);
+  const [voteSnap, responsesSnap, commentsSnap] = await Promise.all([
+    voteRef.get(),
+    voteRef.collection("responses").get(),
+    voteRef.collection("comments").get(),
+  ]);
+
+  if (!voteSnap.exists) return null;
+  const data = voteSnap.data()!;
+
+  return {
+    id: voteSnap.id,
+    title: data.title,
+    creatorNicknameId: data.creatorNicknameId,
+    creatorNickname: data.creatorNickname,
+    options: withSeparateOption(data.options ?? []),
+    participantNicknameIds: data.participantNicknameIds ?? [],
+    createdAt: data.createdAt,
+    responses: responsesSnap.docs.map((d) => {
+      const r = d.data();
+      return { nicknameId: d.id, nickname: r.nickname, optionId: r.optionId, respondedAt: r.respondedAt };
+    }),
+    comments: commentsSnap.docs
+      .map((d) => {
+        const c = d.data();
+        return {
+          id: d.id,
+          authorNicknameId: c.authorNicknameId,
+          authorNickname: c.authorNickname,
+          content: c.content,
+          createdAt: c.createdAt,
+        };
+      })
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1)),
+  };
+}
+
+// 참가자로 등록된 투표만(히스토리 포함) 조회한다. array-contains + orderBy를 같이 쓰면 Firestore가
+// 복합 인덱스를 요구하게 되므로(popular-server.ts에서와 같은 이유로 피함), orderBy 없이 조회해서
+// 메모리에서 최신순 정렬한다.
+export async function listVotesForUser(companyCode: string, nicknameId: string): Promise<VoteSummary[]> {
+  const snapshot = await votesRef(companyCode)
+    .where("participantNicknameIds", "array-contains", nicknameId)
+    .get();
+
+  // 2026-08-06 3차: 목록 탭에 검색/페이징 기능이 추가된 걸 감안해 50 -> 200개로 늘렸다
+  // (토이 프로젝트 규모라 충분한 상한선).
+  const voteIds = snapshot.docs
+    .map((doc) => ({ id: doc.id, createdAt: doc.data().createdAt as string }))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    .slice(0, 200)
+    .map((v) => v.id);
+
+  const votes = await Promise.all(voteIds.map((id) => getVote(companyCode, id)));
+  return votes.filter((v): v is VoteSummary => v !== null);
+}
+
+export async function respondToVote(
+  companyCode: string,
+  voteId: string,
+  nicknameId: string,
+  nickname: string,
+  optionId: string
+): Promise<void> {
+  await votesRef(companyCode)
+    .doc(voteId)
+    .collection("responses")
+    .doc(nicknameId)
+    .set({ nickname, optionId, respondedAt: new Date().toISOString() });
+}
+
+export async function addVoteComment(
+  companyCode: string,
+  voteId: string,
+  authorNicknameId: string,
+  authorNickname: string,
+  content: string
+): Promise<VoteCommentEntry> {
+  const createdAt = new Date().toISOString();
+  const docRef = await votesRef(companyCode)
+    .doc(voteId)
+    .collection("comments")
+    .add({ authorNicknameId, authorNickname, content, createdAt });
+  return { id: docRef.id, authorNicknameId, authorNickname, content, createdAt };
+}

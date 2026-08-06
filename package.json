@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start -p 3300",
     "lint": "next lint",
-    "seed:restaurants": "tsx scripts/seed-restaurants.ts"
+    "seed:restaurants": "tsx scripts/seed-restaurants.ts",
+    "seed:security-question": "tsx scripts/seed-security-question.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

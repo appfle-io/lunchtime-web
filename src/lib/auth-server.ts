@@ -123,3 +123,122 @@ export async function authenticate(
     nicknameId,
   };
 }
+
+// ---- 비밀번호(PIN) 찾기 (보안 질문/답변) ----
+// 2026-08-06 3차 신규: PIN을 잊었을 때 복구할 방법이 전혀 없었다 - 그래서 계정에 "질문/답변"을
+// 하나 미리 등록해두고, 답변만 맞히면 PIN을 새로 설정할 수 있게 한다. 답변은 PIN과 동일한
+// scrypt 해시 방식(hashPin 재사용)으로 저장한다(평문 저장 금지). 대소문자/공백 차이로 실패하는
+// 걸 막기 위해 비교 전에 normalizeAnswer로 정규화한다. 이 기능 도입 이전에 가입한 계정은 질문이
+// 없으므로 getSecurityQuestion이 null을 돌려주고, 그런 계정은 비밀번호 찾기를 쓸 수 없다(로그인
+// 상태에서 '비밀번호 변경'을 통해 새로 등록하는 것만 가능 - PinResetModal 참고).
+function normalizeAnswer(answer: string): string {
+  return answer.trim().toLowerCase();
+}
+
+export interface SecurityQuestionResult {
+  question: string;
+}
+
+export async function getSecurityQuestion(
+  companyCode: string,
+  rawNickname: string
+): Promise<SecurityQuestionResult | null> {
+  const nicknameId = toNicknameId(rawNickname);
+  const doc = await db.collection("companies").doc(companyCode).collection("users").doc(nicknameId).get();
+  if (!doc.exists) return null;
+  const data = doc.data()!;
+  if (!data.securityQuestion || !data.answerHash || !data.answerSalt) return null;
+  return { question: data.securityQuestion };
+}
+
+export async function setSecurityQuestion(
+  companyCode: string,
+  nicknameId: string,
+  question: string,
+  answer: string
+): Promise<void> {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const answerHash = hashPin(normalizeAnswer(answer), salt);
+  await db
+    .collection("companies")
+    .doc(companyCode)
+    .collection("users")
+    .doc(nicknameId)
+    .set({ securityQuestion: question, answerHash, answerSalt: salt }, { merge: true });
+}
+
+export async function verifySecurityAnswer(
+  companyCode: string,
+  rawNickname: string,
+  answer: string
+): Promise<{ ok: true; nicknameId: string } | { ok: false }> {
+  const nicknameId = toNicknameId(rawNickname);
+  const doc = await db.collection("companies").doc(companyCode).collection("users").doc(nicknameId).get();
+  if (!doc.exists) return { ok: false };
+  const data = doc.data()!;
+  if (!data.answerHash || !data.answerSalt) return { ok: false };
+  const computed = hashPin(normalizeAnswer(answer), data.answerSalt);
+  if (!timingSafeEqualHex(computed, data.answerHash)) return { ok: false };
+  return { ok: true, nicknameId };
+}
+
+export async function resetPin(
+  companyCode: string,
+  nicknameId: string,
+  newPin: string
+): Promise<{ nickname: string }> {
+  const userRef = db.collection("companies").doc(companyCode).collection("users").doc(nicknameId);
+  const doc = await userRef.get();
+  if (!doc.exists) throw new Error("계정을 찾을 수 없습니다.");
+  const salt = crypto.randomBytes(16).toString("hex");
+  const pinHash = hashPin(newPin, salt);
+  await userRef.set({ pinHash, pinSalt: salt }, { merge: true });
+  return { nickname: doc.data()!.nickname };
+}
+
+// ---- PIN 재설정용 단기 토큰 ----
+// forgot-password(답변 검증)와 reset-pin(실제 변경) API 호출을 두 번으로 나눠서, "답변을 안다"는
+// 사실 확인과 "새 PIN을 저장한다"는 동작 사이에 검증되지 않은 값이 그대로 오가지 않게 한다.
+// 세션 토큰과 같은 HMAC 서명 방식을 쓰지만 목적(purpose)과 만료 시간(10분, 세션의 180일보다
+// 훨씬 짧게)이 다른 별도 토큰이다.
+const VERIFY_TOKEN_TTL_SECONDS = 60 * 10;
+
+export interface VerifyTokenPayload {
+  companyCode: string;
+  nicknameId: string;
+  purpose: "pin-reset";
+  exp: number;
+}
+
+export function signVerifyToken(payload: Omit<VerifyTokenPayload, "exp">): string {
+  const exp = Math.floor(Date.now() / 1000) + VERIFY_TOKEN_TTL_SECONDS;
+  const full: VerifyTokenPayload = { ...payload, exp };
+  const payloadB64 = Buffer.from(JSON.stringify(full)).toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", getSessionSecret())
+    .update(payloadB64)
+    .digest("base64url");
+  return `${payloadB64}.${signature}`;
+}
+
+export function verifyVerifyToken(token: string | undefined | null): VerifyTokenPayload | null {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [payloadB64, signature] = parts;
+
+  const expectedSignature = crypto
+    .createHmac("sha256", getSessionSecret())
+    .update(payloadB64)
+    .digest("base64url");
+
+  if (!timingSafeEqualHex(signature, expectedSignature)) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString()) as VerifyTokenPayload;
+    if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}

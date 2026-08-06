@@ -35,3 +35,27 @@ export function isFoodRelatedCategory(category: string | null | undefined): bool
   if (!category) return false;
   return /^\s*(음식점|카페)/.test(category);
 }
+
+// "회식"에 어울리는 곳(고기/술자리 위주)을 category/name 키워드로 대충 골라내는 휴리스틱.
+// 실제 회식 적합도 데이터가 없어서 카테고리·상호명 텍스트 매칭으로 근사한다 - 정교하지 않으니
+// 나중에 사내 투표/리뷰 기반으로 더 정확하게 다듬을 수 있음 (2026-08-06 신규 필터 요청 대응).
+const GROUP_DINING_KEYWORDS = /고기|삼겹살|갈비|곱창|막창|이자카야|호프|술집|포차|무한리필/;
+
+export function isGroupDiningFriendly(
+  category: string | null | undefined,
+  name: string | null | undefined
+): boolean {
+  const text = `${category ?? ""} ${name ?? ""}`;
+  return GROUP_DINING_KEYWORDS.test(text);
+}
+
+// "여름별미"도 마찬가지로 계절 데이터가 없어서 냉면/빙수류 키워드로 근사하는 휴리스틱.
+const SUMMER_SPECIALTY_KEYWORDS = /냉면|콩국수|빙수|냉모밀|메밀국수|냉국수|냉국|밀면/;
+
+export function isSummerSpecialty(
+  category: string | null | undefined,
+  name: string | null | undefined
+): boolean {
+  const text = `${category ?? ""} ${name ?? ""}`;
+  return SUMMER_SPECIALTY_KEYWORDS.test(text);
+}

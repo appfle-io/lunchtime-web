@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import { db } from "@/lib/firebase";
 import { getCompanyByCode } from "@/lib/company-server";
 import { searchNaverLocal, stripHtmlTags, parseNaverCoords } from "@/lib/naver-local-search";
-import { isFoodRelatedCategory } from "@/lib/restaurant-category";
 import { haversineMeters } from "@/lib/geo";
 import type { RestaurantSummary } from "@/types";
 
@@ -29,6 +28,8 @@ export async function listRestaurants(companyCode: string): Promise<RestaurantSu
       lng: data.lng,
       category: data.category ?? null,
       isZeroPay: Boolean(data.isZeroPay),
+      // 2026-08-06 신규: 제로페이 엄지척 투표에서 계산되어 캐시된 값 (lib/zeropay-server.ts 참고).
+      isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
       distanceMeters: data.distanceMeters,
     };
   });
@@ -39,66 +40,102 @@ export interface AddRestaurantResult {
   existing: boolean; // true면 이미 있던 식당이라 새로 만들지 않고 기존 항목을 그대로 반환한 것
 }
 
-// 자동 시딩에서 빠진 식당을 사용자가 직접 추가할 때 쓴다.
-// name(+선택적 addressHint)으로 네이버 지역검색을 돌려서 가장 위 결과를 매칭한 뒤,
-// 이미 같은 식당(같은 id)이 있으면 새로 만들지 않고 existing:true로 기존 데이터를 돌려준다.
-// 매칭 결과가 음식점/카페 카테고리가 아니면(자전거 대여소, 병원 등) 그 결과는 버리고 다음 검색어로 넘어간다.
-// 끝까지 못 찾으면 에러를 던지니, 호출하는 쪽(API route)에서 사용자에게 다른 검색어를 안내해야 한다.
-export async function addRestaurantManually(
+export interface RestaurantCandidate {
+  title: string;
+  address: string;
+  lat: number;
+  lng: number;
+  category: string | null;
+  distanceMeters: number; // 회사 중심좌표로부터의 거리(반올림, m)
+}
+
+// 2026-08-06 개편 (5차 → "직접 추가" 2단계 방식으로 전면 변경):
+// 예전엔 이름(+주소힌트)으로 후보를 하나 자동으로 골라서 바로 저장했는데("addRestaurantManually"),
+// "궁중삼계탕" 사례에서 여러 차례(거리검증/정렬방식/랜드마크 앵커) 고쳐도 계속 실패했다.
+// 사용자 제안: "사업자가 업종을 다르게 등록해뒀을 수 있으니, 후보 목록(상호명+주소)을 보여주고
+// 사용자가 직접 고르게 하자" — 이게 훨씬 근본적인 해결책이라 채택함. 자동 매칭(1개 확정) 대신
+// "후보 검색 → 사용자가 선택 → 그 선택 그대로 저장" 2단계로 바꿨다.
+//
+// 그래서 isFoodRelatedCategory 필터를 여기서는 일부러 안 쓴다 - 네이버 카테고리가 "도소매"처럼
+// 엉뚱하게 등록된 실제 식당이 있을 수 있는데, 자동으로 걸러버리면 그 후보 자체가 안 보이게 된다.
+// 카테고리 텍스트는 그대로 후보 목록에 같이 보여줘서 사용자가 판단하게 한다.
+//
+// 거리 상한(구 MAX_MANUAL_ADD_DISTANCE_METERS)도 더 이상 "거부" 용도로 안 쓰고, 프론트엔드에서
+// "회사에서 좀 멀어요" 같은 경고 배지 표시용 참고값으로만 쓴다 - 최종 판단은 사용자가 주소를 보고 내린다.
+export async function searchRestaurantCandidates(
   companyCode: string,
   name: string,
   addressHint?: string
+): Promise<RestaurantCandidate[]> {
+  const company = await getCompanyByCode(companyCode);
+  if (!company) {
+    throw new Error(`companies/${companyCode} 문서를 찾을 수 없습니다.`);
+  }
+
+  // 검색어 후보: (이름+주소힌트) → (구/동+이름) → (landmark+이름, landmark마다 하나씩) → (이름 단독).
+  // landmark는 자동 시딩 스크립트에서 이미 검증된 "네이버가 잘 인식하는 구체적 장소명"이라
+  // districtCode 하나보다 훨씬 좁고 정확한 위치 앵커 역할을 한다.
+  const queries = [
+    addressHint ? `${name} ${addressHint}` : null,
+    `${company.districtCode ?? ""} ${name}`.trim(),
+    ...(company.landmarks ?? []).map((landmark) => `${landmark} ${name}`),
+    name,
+  ].filter((q): q is string => Boolean(q));
+
+  const candidates = new Map<string, RestaurantCandidate>();
+
+  for (const query of queries) {
+    let items;
+    try {
+      // sort="random"(정확도순): 검색어 텍스트와의 관련도 기준. "comment"(리뷰순)를 쓰면 검색어와
+      // 무관하게 리뷰 많은 타지역 지점이 상위로 잡혀서 회사 근처 후보 자체가 안 보일 수 있었다.
+      items = await searchNaverLocal(query, 5, "random");
+    } catch {
+      continue; // 검색어 하나가 실패해도(네트워크 등) 나머지 검색어는 계속 시도
+    }
+
+    for (const item of items) {
+      const { lat, lng } = parseNaverCoords(item);
+      if (Number.isNaN(lat) || Number.isNaN(lng)) continue;
+
+      const title = stripHtmlTags(item.title);
+      const address = item.roadAddress || item.address;
+      const key = `${title}|${address}`;
+      if (candidates.has(key)) continue; // 이미 다른 검색어에서 잡힌 동일 장소는 중복 제외
+
+      const category = item.category ? stripHtmlTags(item.category) : null;
+      const distanceMeters = haversineMeters(company.centerLat, company.centerLng, lat, lng);
+
+      candidates.set(key, {
+        title,
+        address,
+        lat,
+        lng,
+        category,
+        distanceMeters: Math.round(distanceMeters),
+      });
+    }
+  }
+
+  // 회사에서 가까운 순으로 정렬하고, 고르기 너무 힘들지 않도록 상위 10곳까지만 반환.
+  return Array.from(candidates.values())
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .slice(0, 10);
+}
+
+// "직접 추가" 2단계 플로우의 2단계: 사용자가 searchRestaurantCandidates 결과 중 직접 고른 후보를
+// 검증 없이 그대로 저장한다(사용자가 이미 상호명+주소를 보고 확인했으므로). 이미 같은 식당(같은 id)이
+// 있으면 새로 만들지 않고 existing:true로 기존 데이터를 돌려준다.
+export async function addRestaurantFromCandidate(
+  companyCode: string,
+  candidate: { title: string; address: string; lat: number; lng: number; category: string | null }
 ): Promise<AddRestaurantResult> {
   const company = await getCompanyByCode(companyCode);
   if (!company) {
     throw new Error(`companies/${companyCode} 문서를 찾을 수 없습니다.`);
   }
 
-  const queries = [
-    addressHint ? `${name} ${addressHint}` : null,
-    `${company.districtCode ?? ""} ${name}`.trim(),
-    name,
-  ].filter((q): q is string => Boolean(q));
-
-  let matched: { title: string; address: string; lat: number; lng: number; category: string | null } | null =
-    null;
-  let sawNonFoodMatch = false;
-
-  for (const query of queries) {
-    const items = await searchNaverLocal(query, 1);
-    if (items.length === 0) continue;
-    const item = items[0];
-    const { lat, lng } = parseNaverCoords(item);
-    if (Number.isNaN(lat) || Number.isNaN(lng)) continue;
-
-    const category = item.category ? stripHtmlTags(item.category) : null;
-    if (!isFoodRelatedCategory(category)) {
-      sawNonFoodMatch = true;
-      continue; // 음식점/카페가 아니면 이 결과는 버리고 다음 검색어로 시도
-    }
-
-    matched = {
-      title: stripHtmlTags(item.title),
-      address: item.roadAddress || item.address,
-      lat,
-      lng,
-      category,
-    };
-    break;
-  }
-
-  if (!matched) {
-    if (sawNonFoodMatch) {
-      throw new Error(
-        `"${name}"은 음식점/카페로 보이지 않는 곳으로만 찾아졌어요. 상호명/지점명을 더 정확히 입력해서 다시 시도해주세요.`
-      );
-    }
-    throw new Error(
-      `"${name}"을 네이버 지역검색에서 찾지 못했어요. 정확한 상호명이나 지점명을 포함해서 다시 시도해주세요.`
-    );
-  }
-
-  const id = makeRestaurantId(matched.title, matched.address);
+  const id = makeRestaurantId(candidate.title, candidate.address);
   const docRef = db.collection("companies").doc(companyCode).collection("restaurants").doc(id);
 
   const existingSnapshot = await docRef.get();
@@ -114,22 +151,24 @@ export async function addRestaurantManually(
         lng: data.lng,
         category: data.category ?? null,
         isZeroPay: Boolean(data.isZeroPay),
+        isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
         distanceMeters: data.distanceMeters,
       },
     };
   }
 
   const distanceMeters = Math.round(
-    haversineMeters(company.centerLat, company.centerLng, matched.lat, matched.lng)
+    haversineMeters(company.centerLat, company.centerLng, candidate.lat, candidate.lng)
   );
 
   const restaurant = {
-    name: matched.title,
-    address: matched.address,
-    lat: matched.lat,
-    lng: matched.lng,
-    category: matched.category,
-    isZeroPay: false, // TODO: 제로페이 공공데이터 매칭/사내 투표로 추후 갱신
+    name: candidate.title,
+    address: candidate.address,
+    lat: candidate.lat,
+    lng: candidate.lng,
+    category: candidate.category,
+    isZeroPay: false, // 제로페이 엄지척 투표로 추후 true로 바뀔 수 있음 (lib/zeropay-server.ts)
+    isZeroPayNeedsReview: false,
     distanceMeters,
     source: "manual" as const,
     addedAt: new Date().toISOString(),
@@ -147,6 +186,7 @@ export async function addRestaurantManually(
       lng: restaurant.lng,
       category: restaurant.category,
       isZeroPay: restaurant.isZeroPay,
+      isZeroPayNeedsReview: restaurant.isZeroPayNeedsReview,
       distanceMeters: restaurant.distanceMeters,
     },
   };

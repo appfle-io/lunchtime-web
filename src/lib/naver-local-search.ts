@@ -36,7 +36,16 @@ export function parseNaverCoords(item: NaverLocalItem): { lat: number; lng: numb
   };
 }
 
-export async function searchNaverLocal(query: string, display = 5): Promise<NaverLocalItem[]> {
+// sort: "comment"(리뷰 많은 순, 기본값) - 자동 시딩처럼 "이 지역에서 인기 있는 곳을 넓게 추려내기"에 적합.
+// "random"(정확도순) - 검색어 자체와의 텍스트 관련도 기준이라, "지역명+상호명" 조합으로 특정 지점을
+// 정확히 찾아야 하는 경우에 적합 (2026-08-06: addRestaurantManually에서 "comment" 정렬을 쓰니, 리뷰가
+// 더 많은 타지역 체인점이 지역명 토큰과의 관련도와 무관하게 상위로 잡혀서, 회사 근처의 실제 지점이
+// 검색 결과 상위 5건에도 안 잡히는 문제가 있었다 - "궁중삼계탕" 재현 사례).
+export async function searchNaverLocal(
+  query: string,
+  display = 5,
+  sort: "random" | "comment" = "comment"
+): Promise<NaverLocalItem[]> {
   const clientId = process.env.NAVER_SEARCH_CLIENT_ID;
   const clientSecret = process.env.NAVER_SEARCH_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
@@ -45,7 +54,7 @@ export async function searchNaverLocal(query: string, display = 5): Promise<Nave
     );
   }
 
-  const url = `${NAVER_LOCAL_SEARCH_URL}?query=${encodeURIComponent(query)}&display=${display}&start=1&sort=comment`;
+  const url = `${NAVER_LOCAL_SEARCH_URL}?query=${encodeURIComponent(query)}&display=${display}&start=1&sort=${sort}`;
   const res = await fetch(url, {
     headers: {
       "X-NCP-APIGW-API-KEY-ID": clientId,

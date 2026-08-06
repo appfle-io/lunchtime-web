@@ -80,15 +80,39 @@ async function main() {
   );
 
   const anchor = company.districtCode ?? "";
-  const queries: string[] = CATEGORY_KEYWORDS.map((keyword) => `${anchor} ${keyword}`.trim());
 
-  // landmarks(자주 가는 장소)는 카테고리 없이 단독으로도 검색하고, 대표 카테고리(맛집/카페/푸드코트)와도 조합.
+  // district 단위 카테고리 검색: "영등포구 중식"처럼 구 전체를 훑는 넓은 검색이라, 결과가
+  // 회사에서 먼 곳일 수도 있어서 아래 radius 필터를 반드시 적용한다.
+  const districtQueries: string[] = CATEGORY_KEYWORDS.map((keyword) => `${anchor} ${keyword}`.trim());
+
+  // landmark(자주 가는 장소) 검색: landmark 자체가 이미 "회사 근처에서 자주 언급되는 곳"이라는
+  // 신호라서 radius 필터를 적용하지 않는다.
+  // (2026-08-06 수정: 기존엔 landmark 검색 결과에도 중심좌표 기준 radius 필터를 걸었는데, 그러면
+  //  landmark 자체가 중심좌표에서 조금만 벗어나도 - 예: landmark로 등록해둔 "영등포동4가" 근처의
+  //  실제 단골집인 "송죽장" 같은 곳도 - 반경 밖으로 판정돼서 통째로 누락되는 문제가 있었다.
+  //  또한 landmark 검색어당 카테고리 키워드 조합("영등포동4가 중식" 등)도 추가해서, 예전엔
+  //  "landmark 맛집/카페/푸드코트"처럼 뭉뚱그린 키워드로만 찾던 걸 카테고리별로 더 정확하게 찾게 했다.
+  //  네이버 지역검색 API가 검색어당 최대 5건까지만 응답하는 제약이 있어서(페이지네이션 없음),
+  //  검색어 자체를 늘려서 커버리지를 넓히는 게 이 API 안에서 할 수 있는 사실상 유일한 방법이다.)
+  const landmarkQueries: string[] = [];
   for (const landmark of company.landmarks ?? []) {
-    queries.push(landmark);
-    queries.push(`${landmark} 맛집`);
-    queries.push(`${landmark} 카페`);
-    queries.push(`${landmark} 푸드코트`);
+    landmarkQueries.push(landmark);
+    landmarkQueries.push(`${landmark} 맛집`);
+    landmarkQueries.push(`${landmark} 카페`);
+    landmarkQueries.push(`${landmark} 푸드코트`);
+    for (const keyword of CATEGORY_KEYWORDS) {
+      landmarkQueries.push(`${landmark} ${keyword}`);
+    }
   }
+
+  const queries: { text: string; applyRadiusFilter: boolean }[] = [
+    ...districtQueries.map((text) => ({ text, applyRadiusFilter: true })),
+    ...landmarkQueries.map((text) => ({ text, applyRadiusFilter: false })),
+  ];
+
+  console.log(
+    `[검색어 준비] district 검색 ${districtQueries.length}개 + landmark 검색 ${landmarkQueries.length}개 = 총 ${queries.length}개`
+  );
 
   const collected = new Map<
     string,
@@ -102,7 +126,13 @@ async function main() {
     }
   >();
 
-  for (const query of queries) {
+  let queryIndex = 0;
+  for (const { text: query, applyRadiusFilter } of queries) {
+    queryIndex += 1;
+    if (queryIndex % 20 === 0) {
+      console.log(`  ...진행 중 (${queryIndex}/${queries.length}), 지금까지 ${collected.size}곳 수집`);
+    }
+
     let items;
     try {
       items = await searchNaverLocal(query, 5);
@@ -119,7 +149,7 @@ async function main() {
       if (!isFoodRelatedCategory(category)) continue;
 
       const distanceMeters = haversineMeters(company.centerLat, company.centerLng, lat, lng);
-      if (distanceMeters > radiusMeters) continue;
+      if (applyRadiusFilter && distanceMeters > radiusMeters) continue;
 
       const name = stripHtmlTags(item.title);
       const address = item.roadAddress || item.address;
