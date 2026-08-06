@@ -35,6 +35,12 @@ interface RestaurantListProps {
   // 2026-08-06 3차 신규: BottomSheet의 title("주변 식당") 줄 오른쪽 끝에 얹을 사용자 메뉴
   // (UserMenu - 닉네임 버튼 + 로그아웃/비밀번호 변경 드롭다운). 여기서는 그대로 전달만 한다.
   userMenu?: ReactNode;
+  // 2026-08-06 저녁 신규: 처음엔 "주변식당 아래에 캘린더뷰를 추가해달라"를 위/아래 절반 분할로
+  // 구현했었는데, 사용자 피드백은 "주변식당은 원래대로 두고, 그 아래 여백에 캘린더를 추가하라는
+  // 것 - 절반씩 쪼개는 게 아니다"였다. 그래서 분할 모드를 걷어내고, 이 리스트는 BottomSheet를
+  // 그대로 쓰면서 식당 목록(<ul>) 바로 다음에 캘린더 섹션을 이어붙이는 방식으로 바꿨다 - 같은
+  // 스크롤 영역(children) 안에서 리스트 다음에 캘린더가 나오는 단일 스크롤 구조.
+  mealLogSection?: ReactNode;
 }
 
 // 이보다 멀면 후보 목록에 "회사에서 좀 멀어요" 배지를 표시한다. 자동으로 거부하지는 않음 -
@@ -75,6 +81,7 @@ export default function RestaurantList({
   clusterFilterCount = null,
   onClearClusterFilter,
   userMenu,
+  mealLogSection,
 }: RestaurantListProps) {
   const router = useRouter();
   const [showAddModal, setShowAddModal] = useState(false);
@@ -294,6 +301,10 @@ export default function RestaurantList({
             ))}
           </ul>
         )}
+
+        {/* 2026-08-06 저녁 신규: 밥 먹은 기록(캘린더뷰). 주변식당 목록과 같은 스크롤 영역 안에
+            이어서 나오게 해서, 주변식당 영역은 그대로 두고 그 아래 여백만 같이 쓴다(절반 분할 아님). */}
+        {mealLogSection}
       </BottomSheet>
 
       {/* "직접 추가" 모달. BottomSheet 바깥의 독립된 오버레이라 리스트 스크롤과 완전히 분리됨. */}

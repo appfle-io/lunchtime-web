@@ -28,6 +28,11 @@ interface BottomSheetProps {
 // 70vh->80vh)와 데스크톱 상하 여백(24px->16px)을 줄여서 카드 자체를 키움. 모바일 접힘 높이는
 // PopularWidget.tsx가 그대로 참조하는 값이라(바텀시트 접힌 높이 바로 위에 배치), 여기서 바꾸면
 // PopularWidget.tsx의 오프셋도 같이 맞춰야 한다 - 안 그러면 또 겹침 회귀가 난다.
+// 2026-08-06 저녁: "주변식당 아래에 캘린더뷰(밥 먹은 기록)를 추가해달라"는 요청으로 한 번
+// 위/아래 절반 분할 모드를 만들었었는데, 사용자 피드백은 "주변식당은 그대로 두고 그 아래
+// 공간에 캘린더를 추가하라는 것 - 반으로 쪼개는 게 아니다"였다. 그래서 분할 모드를 되돌리고,
+// 캘린더는 RestaurantList.tsx가 children 맨 아래에 그냥 이어서 넣는 방식(단일 스크롤 영역
+// 안에서 리스트 다음에 캘린더가 나오는 것)으로 처리한다 - 이 컴포넌트 자체는 다시 원래 형태로.
 // TODO: 실제 드래그 제스처(Framer Motion)로 높이 조절, snap point(접힘/반펼침/완전펼침) 추가.
 export default function BottomSheet({ children, title, titleRight, header }: BottomSheetProps) {
   const [expanded, setExpanded] = useState(false);

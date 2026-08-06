@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import type { RestaurantSummary, ReviewSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
 import type { ZeroPayStatus } from "@/lib/zeropay-server";
+import type { MealLogEntry } from "@/lib/meal-log-server";
+
+function todayDateKey(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 interface RestaurantDetailProps {
   restaurant: RestaurantSummary | null;
@@ -15,10 +24,16 @@ interface RestaurantDetailProps {
   // 2026-08-06 신규: 투표 결과로 이 식당의 isZeroPay/isZeroPayNeedsReview가 바뀌었을 수 있으니,
   // 상위(CompanyHome)가 restaurants 목록도 같이 갱신할 수 있게 알려준다 (지도 배지/리스트 배지 동기화용).
   onZeroPayStatusChange?: (restaurantId: string, status: ZeroPayStatus) => void;
+  // 2026-08-06 저녁 신규: 토스트 알림용.
+  onNotify?: (message: string) => void;
+  // 2026-08-06 저녁 신규: "오늘 여기서 먹었어요" 버튼으로 기록을 추가/삭제하면, 지금 화면에 떠 있는
+  // 캘린더뷰(주변식당 목록 아래)도 다시 불러오게 CompanyHome에 신호를 보낸다 (MapView의 homeSignal과
+  // 같은 "카운터를 신호로 쓰는" 패턴).
+  onMealLogged?: () => void;
 }
 
-// 마커 클릭 / 리스트 클릭으로 열리는 식당 상세 모달. 댓글과 제로페이 투표 현황은 열릴 때마다
-// 서버에서 새로 불러온다.
+// 마커 클릭 / 리스트 클릭으로 열리는 식당 상세 모달. 댓글과 제로페이 투표 현황, 오늘 이 식당을
+// 밥 먹은 기록으로 남겼는지는 열릴 때마다 서버에서 새로 불러온다.
 export default function RestaurantDetail({
   restaurant,
   companyCode,
@@ -27,6 +42,8 @@ export default function RestaurantDetail({
   onToggleFavorite,
   onClose,
   onZeroPayStatusChange,
+  onNotify,
+  onMealLogged,
 }: RestaurantDetailProps) {
   const [reviews, setReviews] = useState<ReviewSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -37,6 +54,12 @@ export default function RestaurantDetail({
 
   const [zeroPayStatus, setZeroPayStatus] = useState<ZeroPayStatus | null>(null);
   const [voting, setVoting] = useState(false);
+
+  // 2026-08-06 저녁 신규: 오늘 밥 먹은 기록 목록. 하루에 여러 건(회식 등) 가능해서 배열로 관리한다.
+  // null이면 아직 로딩 전.
+  const [todayLogs, setTodayLogs] = useState<MealLogEntry[] | null>(null);
+  const [loggingMeal, setLoggingMeal] = useState(false);
+  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!restaurant) return;
@@ -61,6 +84,12 @@ export default function RestaurantDetail({
       .catch(() => {
         // 투표 현황은 부가 정보라 실패해도 조용히 무시 - 기존 isZeroPay 배지만 보여준다.
       });
+
+    setTodayLogs(null);
+    fetch(`/api/meal-logs?companyCode=${encodeURIComponent(companyCode)}&date=${todayDateKey()}`)
+      .then((res) => res.json())
+      .then((data) => setTodayLogs((data.logs ?? []) as MealLogEntry[]))
+      .catch(() => setTodayLogs([]));
   }, [restaurant, companyCode]);
 
   if (!restaurant) return null;
@@ -84,6 +113,60 @@ export default function RestaurantDetail({
       // 네트워크 오류 시 조용히 무시 - 다시 눌러보게 둔다.
     } finally {
       setVoting(false);
+    }
+  }
+
+  // "오늘 여기서 먹었어요" - 오늘 날짜 기록을 새로 추가한다. 하루에 여러 건(회식 등)이 가능해서
+  // 이미 오늘 기록이 있어도 버튼은 계속 눌러서 추가할 수 있다 - 캘린더뷰(MealLogCalendar)의
+  // 날짜별 기록 추가와 같은 API를 쓴다.
+  async function handleLogMealToday() {
+    if (!restaurant || loggingMeal) return;
+    setLoggingMeal(true);
+    try {
+      const res = await fetch("/api/meal-logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyCode,
+          date: todayDateKey(),
+          restaurantId: restaurant.id,
+          restaurantName: restaurant.name,
+          category: restaurant.category ?? null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        onNotify?.(data.error ?? "기록을 남기지 못했어요.");
+        return;
+      }
+      setTodayLogs((prev) => [...(prev ?? []), data.log as MealLogEntry]);
+      onNotify?.("오늘 여기서 먹었다고 기록했어요.");
+      onMealLogged?.();
+    } catch {
+      onNotify?.("네트워크 오류로 기록을 남기지 못했어요.");
+    } finally {
+      setLoggingMeal(false);
+    }
+  }
+
+  async function handleRemoveTodayLog(id: string) {
+    setDeletingLogId(id);
+    try {
+      const res = await fetch("/api/meal-logs", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyCode, id }),
+      });
+      if (!res.ok) {
+        onNotify?.("기록을 삭제하지 못했어요.");
+        return;
+      }
+      setTodayLogs((prev) => (prev ?? []).filter((e) => e.id !== id));
+      onMealLogged?.();
+    } catch {
+      onNotify?.("네트워크 오류로 삭제하지 못했어요.");
+    } finally {
+      setDeletingLogId(null);
     }
   }
 
@@ -185,6 +268,38 @@ export default function RestaurantDetail({
             </span>
           )}
         </div>
+
+        {/* 2026-08-06 저녁 신규: "오늘 여기서 먹었어요" - 밥 먹은 기록(캘린더뷰)에 오늘 날짜로
+            새 기록을 추가한다. 하루에 여러 건(회식 등) 가능해서 이미 기록이 있어도 계속 추가할
+            수 있고, 오늘 이미 남긴 기록은 아래 칩으로 보여주고 바로 지울 수도 있다. */}
+        <button
+          onClick={handleLogMealToday}
+          disabled={loggingMeal}
+          className="mt-3 w-full rounded-xl2 bg-surface-muted px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-primary-light hover:text-primary-dark disabled:opacity-70"
+        >
+          {loggingMeal ? "기록하는 중..." : "🍽️ 오늘 여기서 먹었어요"}
+        </button>
+
+        {todayLogs && todayLogs.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {todayLogs.map((log) => (
+              <span
+                key={log.id}
+                className="flex items-center gap-1 rounded-full bg-primary-light px-2.5 py-1 text-xs text-primary-dark"
+              >
+                ✅ {log.restaurantName}
+                <button
+                  onClick={() => handleRemoveTodayLog(log.id)}
+                  disabled={deletingLogId === log.id}
+                  aria-label="오늘 기록 삭제"
+                  className="text-primary-dark/70 hover:text-primary-dark"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* 2026-08-06 신규: 제로페이 엄지척/거꾸로엄지척 투표. "됨" 표시가 있어도 최근 거꾸로엄지척이
             많아지면 needsReview 배지가 뜨니, 이 버튼들로 계속 최신 상태를 유지해간다. */}

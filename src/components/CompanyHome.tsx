@@ -12,6 +12,7 @@ import NotificationsModal, { type NotificationEntry } from "./NotificationsModal
 import LunchVoteModal from "./LunchVoteModal";
 import UserMenu from "./UserMenu";
 import PinResetModal from "./PinResetModal";
+import MealLogCalendar from "./MealLogCalendar";
 import Toast from "./Toast";
 import type { RestaurantSummary } from "@/types";
 import { filterRestaurants, type SpecialFilterKey } from "@/lib/restaurant-filters";
@@ -71,6 +72,11 @@ export default function CompanyHome({
   // MapView에게 "원래 중심/줌으로 돌아가라"고 신호를 보내는 카운터 - 값이 바뀔 때마다(0보다 크면) 실행됨.
   const [homeSignal, setHomeSignal] = useState(0);
 
+  // 2026-08-06 저녁 신규: 밥 먹은 기록(캘린더뷰)이 바뀌었다는 신호 카운터. 식당 상세모달의
+  // "오늘 여기서 먹었어요" 버튼으로 기록을 추가/삭제하면, 주변식당 목록 아래에 이어져 있는
+  // MealLogCalendar도 같은 값 변화를 보고 다시 불러온다(MapView의 homeSignal과 같은 패턴).
+  const [mealLogVersion, setMealLogVersion] = useState(0);
+
   // 2026-08-06 신규: 제로페이 엄지척 투표 결과로 특정 식당의 isZeroPay/isZeroPayNeedsReview가
   // 바로바로 바뀔 수 있어서, restaurants를 prop 그대로 쓰지 않고 로컬 state로 복사해둔다
   // (favoriteIds와 동일한 패턴) - 상세모달에서 투표하면 페이지 새로고침 없이 지도 마커/리스트
@@ -99,6 +105,10 @@ export default function CompanyHome({
   const [showPasswordChange, setShowPasswordChange] = useState(false);
 
   const unreadNotifCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+
+  function handleMealLogged() {
+    setMealLogVersion((v) => v + 1);
+  }
 
   function refreshNotifications() {
     fetch(`/api/notifications?companyCode=${encodeURIComponent(companyCode)}`)
@@ -345,6 +355,17 @@ export default function CompanyHome({
             onChangePassword={() => setShowPasswordChange(true)}
           />
         }
+        mealLogSection={
+          <div className="mt-2 border-t border-black/5 pt-4">
+            <h3 className="mb-3 text-sm font-bold text-ink">📅 밥 먹은 기록</h3>
+            <MealLogCalendar
+              companyCode={companyCode}
+              restaurants={restaurants}
+              onNotify={setToastMessage}
+              refreshSignal={mealLogVersion}
+            />
+          </div>
+        }
       />
 
       <RestaurantDetail
@@ -355,6 +376,8 @@ export default function CompanyHome({
         onToggleFavorite={() => selectedRestaurant && toggleFavorite(selectedRestaurant)}
         onClose={() => setSelectedRestaurant(null)}
         onZeroPayStatusChange={handleZeroPayStatusChange}
+        onNotify={setToastMessage}
+        onMealLogged={handleMealLogged}
       />
 
       <FriendsModal
