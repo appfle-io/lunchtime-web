@@ -23,7 +23,13 @@ import type { ZeroPayStatus } from "@/lib/zeropay-server";
 // 인기 Top3(위젯)과 "최근많이찾는" 필터 태그가 같은 데이터를 쓰므로, top10 정도를 한 번만 받아와서
 // 위젯은 앞 3개만 자르고 필터 태그는 id Set으로 전체를 쓴다.
 const POPULAR_FETCH_LIMIT = 10;
-const POPULAR_REFRESH_MS = 10 * 60 * 1000; // 10분마다 갱신
+
+// 2026-08-06: "10분마다 무조건 다시 읍기(setInterval)" 방식을 버렸다. 탭을 켜두기만 해도(클릭이 없어도)
+// 하루 내내, 심지어 방치된 밤사이에도 계속 Firestore를 읍는 게 문제였음(방치 탭이 밤새 폴링해서
+// 읍기가 급증한 사례 있음). 지금은 로그인/페이지 진입 시 1회 + 아래 업무시간 정각에만 자동으로 다시
+// 읍고, 그 외엔 사용자가 새로고침 버튼을 누르거나 브라우저를 새로고침(F5 → 리마운트)했을 때만 다시 읍는다.
+const POPULAR_AUTO_REFRESH_HOURS = [9, 10, 11, 12, 13, 14, 15]; // 로컬 시각 기준 정각(시 단위)
+const POPULAR_SCHEDULE_CHECK_MS = 60 * 1000; // 정각 도달 여부만 확인하는 타이머 - 네트워크 요청 아님
 
 interface CompanyHomeProps {
   companyCode: string;
@@ -64,6 +70,7 @@ export default function CompanyHome({
     () => new Set()
   );
   const [popularEntries, setPopularEntries] = useState<PopularEntry[]>([]);
+  const [isRefreshingPopular, setIsRefreshingPopular] = useState(false);
 
   // 2026-08-06 오후 신규: 지도에서 클러스터 마커를 클릭하면, 그 그룹에 속한 식당 id들을 여기 담아둔다.
   // null이면 "구역 확대" 상태가 아님(평소 상태). 이 값이 있으면 지도와 좌측 리스트 둘 다 이 id들로만
@@ -125,31 +132,46 @@ export default function CompanyHome({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyCode]);
 
-  // 실시간 인기 Top3 (2026-08-06 신규): 클릭 통계가 쌓이는 대로 10분마다 다시 불러온다.
-  // 위젯 노출용 top3와 "최근많이찾는" 필터 태그용 id Set이 같은 응답을 공유한다.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchPopular() {
-      try {
-        const res = await fetch(
-          `/api/popular?companyCode=${encodeURIComponent(companyCode)}&limit=${POPULAR_FETCH_LIMIT}`
-        );
-        if (!res.ok) return;
-        const data = (await res.json()) as { entries: PopularEntry[] };
-        if (!cancelled) setPopularEntries(data.entries ?? []);
-      } catch {
-        // 인기 위젯은 부가 기능이라 실패해도 조용히 무시하고 다음 주기에 다시 시도한다.
-      }
+  // 실시간 인기 Top3 (2026-08-06 신규, 2026-08-06 갱신주기 변경): 위젯 노출용 top3와 "최근많이찾는"
+  // 필터 태그용 id Set이 같은 응답을 공유한다.
+  const fetchPopular = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/popular?companyCode=${encodeURIComponent(companyCode)}&limit=${POPULAR_FETCH_LIMIT}`
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { entries: PopularEntry[] };
+      setPopularEntries(data.entries ?? []);
+    } catch {
+      // 인기 위젯은 부가 기능이라 실패해도 조용히 무시한다.
     }
-
-    fetchPopular();
-    const interval = setInterval(fetchPopular, POPULAR_REFRESH_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
   }, [companyCode]);
+
+  // 새로고침 버튼 클릭 시 - 버튼에 "새로고침 중" 표시를 잠깐 보여주기 위해 fetchPopular를 감싼다.
+  const handleManualPopularRefresh = useCallback(async () => {
+    setIsRefreshingPopular(true);
+    await fetchPopular();
+    setIsRefreshingPopular(false);
+  }, [fetchPopular]);
+
+  useEffect(() => {
+    fetchPopular(); // 로그인/페이지 진입 시(또는 F5로 이 컴포넌트가 다시 마운트될 때) 1회
+
+    // 실제 네트워크 요청은 정각에만 나간다 - 이 타이머는 "지금이 그 정각인지"만 1분마다 가볍게 확인한다.
+    // 방치된 탭은 POPULAR_AUTO_REFRESH_HOURS 시간대 외엔 어떤 요청도 만들지 않는다.
+    let lastFetchedHourKey: string | null = null;
+    const checkInterval = setInterval(() => {
+      const now = new Date();
+      if (now.getMinutes() !== 0 || !POPULAR_AUTO_REFRESH_HOURS.includes(now.getHours())) return;
+
+      const hourKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;
+      if (lastFetchedHourKey === hourKey) return; // 같은 정각에 중복 호출 방지
+      lastFetchedHourKey = hourKey;
+      fetchPopular();
+    }, POPULAR_SCHEDULE_CHECK_MS);
+
+    return () => clearInterval(checkInterval);
+  }, [fetchPopular]);
 
   const popularIds = useMemo(
     () => new Set(popularEntries.map((e) => e.restaurantId)),
@@ -325,6 +347,8 @@ export default function CompanyHome({
           focusRestaurant(restaurant);
           handleSelectRestaurant(restaurant);
         }}
+        onRefresh={handleManualPopularRefresh}
+        isRefreshing={isRefreshingPopular}
       />
 
       <RestaurantList

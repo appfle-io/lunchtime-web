@@ -4,9 +4,11 @@ import type { RestaurantSummary } from "@/types";
 import type { PopularEntry } from "@/lib/popular-server";
 
 interface PopularWidgetProps {
-  entries: PopularEntry[]; // 이미 상위 3개로 잘려서 들어옴 (CompanyHome이 10분마다 갱신)
+  entries: PopularEntry[]; // 이미 상위 3개로 잘려서 들어옴 (2026-08-06: 로그인 1회 + 업무시간 정각에만 갱신)
   restaurants: RestaurantSummary[]; // id -> 이름/카테고리 조회용. 필터 적용 전 전체 목록을 받는다.
   onSelect?: (restaurant: RestaurantSummary) => void;
+  onRefresh?: () => void; // 새로고침 버튼 클릭 핸들러 (2026-08-06 신규)
+  isRefreshing?: boolean; // 새로고침 진행 중 표시용
 }
 
 // 실시간 인기 Top3 카드.
@@ -26,14 +28,33 @@ interface PopularWidgetProps {
 //   지도/위젯이 잠깐 안 보이는 건 자연스러운 트레이드오프로 봄. 데스크톱은 FilterBar가 지도 하단
 //   중앙으로 옮겨가서(FilterBar.tsx 참고) 상단이 비게 되므로 그대로 우상단(로그아웃 배지와 대칭,
 //   md:top-6 md:right-6) 유지.
-export default function PopularWidget({ entries, restaurants, onSelect }: PopularWidgetProps) {
+export default function PopularWidget({
+  entries,
+  restaurants,
+  onSelect,
+  onRefresh,
+  isRefreshing,
+}: PopularWidgetProps) {
   if (entries.length === 0) return null;
 
   const restaurantById = new Map(restaurants.map((r) => [r.id, r]));
 
   return (
     <div className="absolute right-4 bottom-[calc(40vh+0.75rem)] z-20 w-56 rounded-xl2 bg-surface/95 p-3 shadow-soft backdrop-blur md:bottom-auto md:right-6 md:top-6">
-      <p className="mb-2 text-xs font-semibold text-ink-soft">🔥 실시간 인기 Top3</p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-ink-soft">🔥 실시간 인기 Top3</p>
+        {onRefresh && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] text-ink-soft transition hover:bg-surface-muted disabled:opacity-50"
+            aria-label="인기 Top3 새로고침"
+          >
+            {isRefreshing ? "새로고침 중..." : "↻ 새로고침"}
+          </button>
+        )}
+      </div>
       <ul className="flex flex-col gap-1.5">
         {entries.map((entry, index) => {
           const restaurant = restaurantById.get(entry.restaurantId);
