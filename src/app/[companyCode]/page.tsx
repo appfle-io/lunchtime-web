@@ -1,21 +1,34 @@
-import MapView from "@/components/MapView";
-import RestaurantList from "@/components/RestaurantList";
+import { cookies } from "next/headers";
+import CompanyHome from "@/components/CompanyHome";
+import AuthGate from "@/components/AuthGate";
 import { normalizeCompanyCode } from "@/lib/company";
+import { getCompanyByCode } from "@/lib/company-server";
+import { listRestaurants } from "@/lib/restaurant-server";
+import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth-server";
 
-// 회사별 메인 화면. 지도를 배경 전체로 깔고, 리스트/필터는 바텀시트(모바일) /
-// 플로팅 카드(데스크톱)로 얹는다 - 전형적인 "좌측 리스트 + 우측 지도" 틀을 피하는 구성.
-// URL에 대문자가 섞여 들어와도(예: /SSG) 항상 정규화된 코드로 다뤄서
-// Firestore의 companies/{정규화된코드} 문서와 일치시킨다.
-// TODO: 정규화된 companyCode로 회사 정보(중심좌표) 조회 후 MapView에 전달.
-export default function CompanyHomePage({ params }: { params: { companyCode: string } }) {
+// 회사별 메인 화면. 로그인 세션이 없으면(또는 다른 회사 세션이면) AuthGate(닉네임+PIN)를 먼저 보여준다.
+// 데이터 페칭은 여기(서버 컴포넌트)에서 하고,
+// 지도/리스트 간 상태 공유(마커 포커스, 토스트 등)가 필요한 부분은 클라이언트 컴포넌트인 CompanyHome에 넘긴다.
+export default async function CompanyHomePage({ params }: { params: { companyCode: string } }) {
   const companyCode = normalizeCompanyCode(params.companyCode);
 
-  return (
-    <main className="relative h-screen w-full overflow-hidden">
-      <MapView companyCode={companyCode} />
+  const sessionToken = cookies().get(SESSION_COOKIE_NAME)?.value;
+  const session = verifySessionToken(sessionToken);
 
-      {/* 데스크톱: 플로팅 카드 / 모바일: 하단 바텀시트로 전환되는 리스트 패널 */}
-      <RestaurantList companyCode={companyCode} />
-    </main>
+  if (!session || session.companyCode !== companyCode) {
+    return <AuthGate companyCode={companyCode} />;
+  }
+
+  const company = await getCompanyByCode(companyCode);
+  const restaurants = await listRestaurants(companyCode);
+
+  return (
+    <CompanyHome
+      companyCode={companyCode}
+      centerLat={company?.centerLat}
+      centerLng={company?.centerLng}
+      restaurants={restaurants}
+      nickname={session.nickname}
+    />
   );
 }

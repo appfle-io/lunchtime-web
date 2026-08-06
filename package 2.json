@@ -4,17 +4,17 @@
   "private": true,
   "description": "회사 점심 메뉴 추천 서비스 (lunchtime.seeuson.com) - 멀티테넌트 구조 초안",
   "scripts": {
-    "dev": "next dev -p 3300",
+    "dev": "next dev",
     "build": "next build",
-    "start": "next start -p 3300",
+    "start": "next start",
     "lint": "next lint",
-    "seed:restaurants": "tsx scripts/seed-restaurants.ts"
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "dotenv": "^16.4.5",
-    "firebase": "^10.13.0",
-    "firebase-admin": "^12.5.0",
+    "@prisma/client": "^5.20.0",
     "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -27,8 +27,8 @@
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.35",
     "postcss": "^8.4.38",
+    "prisma": "^5.20.0",
     "tailwindcss": "^3.4.4",
-    "tsx": "^4.19.0",
     "typescript": "^5.5.2"
   }
 }

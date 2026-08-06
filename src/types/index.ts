@@ -4,6 +4,8 @@ export interface CompanySummary {
   name: string;
   centerLat: number;
   centerLng: number;
+  districtCode?: string;
+  landmarks?: string[];
 }
 
 export interface RestaurantSummary {
