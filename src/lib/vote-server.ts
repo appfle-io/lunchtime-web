@@ -61,10 +61,15 @@ export async function createVote(
 ): Promise<VoteSummary> {
   const createdAt = new Date().toISOString();
   const resolvedTitle = title.trim() || "오늘 점심 뭐 먹지?";
+  // "목록에 없는 메뉴 직접 입력"으로 추가한 옵션은 restaurantId가 없다. 이를
+  // `restaurantId: o.restaurantId`로 그대로 넣으면 필드 값이 undefined가 된다. Firestore는
+  // undefined 필드를 거부하므로("Cannot use undefined as a Firestore value") 직접 입력
+  // 옵션이 하나라도 있으면 투표 생성 자체가 500 에러로 실패했다. restaurantId가
+  // 있을 때만 필드를 넣도록(spread) 고쳐서, 없으면 그 필드 자체가 문서에서 빠지게 한다.
   const optionDocs: VoteOption[] = options.map((o, i) => ({
     id: `opt${i}`,
     label: o.label,
-    restaurantId: o.restaurantId,
+    ...(o.restaurantId ? { restaurantId: o.restaurantId } : {}),
   }));
 
   // 만든 사람도 참가자로 포함해야 본인도 투표할 수 있다.
@@ -150,6 +155,9 @@ export async function listVotesForUser(companyCode: string, nicknameId: string):
   return votes.filter((v): v is VoteSummary => v !== null);
 }
 
+// 2026-08-06 추가: 같은 옵션을 다시 누르는 경우(이미 그 옵션에 응답해둔 상태에서 같은 옵션을
+// 또 클릭) 새 응답을 쓰지 않고 응답 문서 자체를 삭제해서 "토글로 취소"되게 한다(사용자 요청).
+// 다른 옵션을 누르면 평소처럼 그 옵션으로 덮어쓴다.
 export async function respondToVote(
   companyCode: string,
   voteId: string,
@@ -157,11 +165,15 @@ export async function respondToVote(
   nickname: string,
   optionId: string
 ): Promise<void> {
-  await votesRef(companyCode)
-    .doc(voteId)
-    .collection("responses")
-    .doc(nicknameId)
-    .set({ nickname, optionId, respondedAt: new Date().toISOString() });
+  const responseRef = votesRef(companyCode).doc(voteId).collection("responses").doc(nicknameId);
+  const existing = await responseRef.get();
+
+  if (existing.exists && existing.data()?.optionId === optionId) {
+    await responseRef.delete();
+    return;
+  }
+
+  await responseRef.set({ nickname, optionId, respondedAt: new Date().toISOString() });
 }
 
 export async function addVoteComment(

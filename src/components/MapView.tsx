@@ -34,6 +34,11 @@ interface MapViewProps {
 const FALLBACK_CENTER = { lat: 37.5665, lng: 126.978 };
 const HOME_ZOOM = 16;
 
+// NCP 콘솔의 Map Style Editor에서 만든 커스텀 지도 스타일 ID (gl 벡터 지도 모드에서만 동작한다).
+// 이 값이 비어있으면(아직 스타일을 안 만들었을 때) 아무것도 하지 않고 자동으로 기본(일반) 지도로
+// 폴백된다 - 스타일 설정 여부와 무관하게 항상 안전하게 지도가 뜬다.
+const NAVER_MAP_STYLE_ID = process.env.NEXT_PUBLIC_NAVER_MAP_STYLE_ID;
+
 // 화면(지도 뷰포트) 밖 마커까지 다 그리면 식당이 많을 때 지도를 드래그할 때마다 브라우저가
 // 수백 개의 DOM 오버레이 마커를 매 프레임 다시 배치해야 해서 눈에 띄게 렉이 생긴다
 // (2026-08-06, "마커가 많을 때 맵을 움직이면 렉이 심해" 피드백). 그래서 현재 지도 화면 +
@@ -171,46 +176,47 @@ function focusOnCluster(map: any, restaurants: RestaurantSummary[], fallbackZoom
   }
 }
 
-// 2026-08-06 5차 수정: 네이버 지도 마커는 기본적으로 내부 규칙(위치 등)으로 z-index가 정해져서,
-// 툴팁이 위로 펼쳐지는 마커라도 근처의 다른 마커 배지가 툴팁 위로 덮어버리는 문제가 있었다
-// (스크린샷으로 확인 - 다른 숫자 배지가 툴팁 박스 위에 얹혀서 깨진 것처럼 보임). 마우스오버한
-// 마커의 zIndex를 그 순간만 아주 높게 올려서 항상 다른 마커보다 위에 그려지게 하고, 마우스가
-// 빠지면 원래 값으로 되돌린다.
-// ROLLED BACK 2026-08-06 (7th round): the per-marker z-index hover boost below caused a
-// worse bug - hovering empty map area near a marker (not the marker itself) could still
-// trigger the tooltip, because raising z-index made the marker's whole content box (including
-// the large invisible tooltip area) sit on top of everything else and intercept hover.
-// Removed entirely; see the pointer-events fix on the tooltip element itself instead, which is
-// the actual correct fix for hover targeting.
-/* const MARKER_DEFAULT_ZINDEX = 100;
-const MARKER_HOVER_ZINDEX = 1000;
+// 2026-08-06 8차 수정: 7차에서는 naver Marker의 SDK 레벨 mouseover/mouseout 이벤트에서
+// marker.setZIndex()로 z-index를 올리고 내렸다가 롤백했다 - 마커가 아닌 곳에서도 툴팁이 뜨는
+// 새 버그가 생겼기 때문(스크린샷 확인). naver의 "mouseover"/"mouseout"은 SDK 자체의 근사
+// 히트박스로 판정되고, setZIndex 호출이 오버레이 DOM을 다시 그리면서 실제 마우스 위치와
+// 어긋난 채로 호버 상태(=툴팁 표시)가 남는 경우가 있었던 것으로 보임.
+//
+// 이번엔 SDK의 마커 이벤트/setZIndex를 전혀 쓰지 않는다. 마커 콘텐츠를 문자열이 아니라 실제
+// HTMLElement로 직접 만들어서, 그 엘리먼트에 브라우저 네이티브 mouseenter/mouseleave를 건다.
+// 네이티브 이벤트는 정확히 "이 엘리먼트의 실제 렌더링된 픽셀 위에 마우스가 있을 때"만 발생하고
+// pointer-events:none인 (호버 전) 툴팁 영역은 히트테스트에서 자동으로 제외되므로, 마커가 아닌
+// 곳에서 뜨는 문제 없이 z-index를 정확히 "호버 중인 그 순간에만" 계산해서 올리고, 벗어나면
+// 즉시 원래 값(빈 문자열 = 기본 스택 순서)으로 되돌린다 - 정적 상수를 대입해두는 하드코딩이
+// 아니라, 매 mouseenter/mouseleave 시점마다 값을 넣고 빼는 동적 처리다.
+const MARKER_HOVER_ZINDEX = "1000";
 
-function bindHoverZIndexBoost(marker: any) {
-  try {
-    marker.setZIndex(MARKER_DEFAULT_ZINDEX);
-  } catch {
-    // 구버전 Naver Maps API에 setZIndex가 없을 가능성 대비 - 없으면 기본 스택 순서로 둔다.
-  }
-  window.naver.maps.Event.addListener(marker, "mouseover", () => {
-    try {
-      marker.setZIndex(MARKER_HOVER_ZINDEX);
-    } catch {}
+// 호버 중일 때만 z-index를 올리고, 벗어나는 즉시 해제한다.
+function bindDynamicHoverZIndex(el: HTMLElement) {
+  if (!el.style.position) el.style.position = "relative";
+  el.addEventListener("mouseenter", () => {
+    el.style.zIndex = MARKER_HOVER_ZINDEX;
   });
-  window.naver.maps.Event.addListener(marker, "mouseout", () => {
-    try {
-      marker.setZIndex(MARKER_DEFAULT_ZINDEX);
-    } catch {}
+  el.addEventListener("mouseleave", () => {
+    el.style.zIndex = "";
   });
-} */
-function bindHoverZIndexBoost(marker: any) {
-  // no-op: rolled back, see comment above
+}
+
+// 마커 콘텐츠 HTML 문자열을 실제 DOM 엘리먼트로 만들고, 그 엘리먼트 자체에 동적 z-index
+// 호버 바인딩을 걸어서 반환한다. naver.maps.Marker의 icon.content에 문자열 대신 이 엘리먼트를
+// 그대로 넘기면(NCP Maps v3는 HTMLElement도 허용), 우리가 붙인 리스너가 그대로 유지된다.
+function buildMarkerElement(html: string): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html.trim();
+  const root = wrapper.firstElementChild as HTMLElement;
+  bindDynamicHoverZIndex(root);
+  return root;
 }
 
 // 네이버 지도(NCP Maps)를 쓰되, 기본 UI 느낌이 나지 않도록 스타일링 레이어를 별도로 관리한다.
-// - 지도 색감: NCP 콘솔의 Map Style Editor에서 만든 커스텀 스타일 ID를 적용 (아래 mapStyleId)
+// - 지도 색감: NCP 콘솔의 Map Style Editor에서 만든 커스텀 스타일 ID를 적용 (NAVER_MAP_STYLE_ID)
 // - 마커: 카테고리별 이모지 아이콘 + 제로페이 배지, 호버 시 확대/이름 툴팁, 클릭 시 상세 모달 오픈
 // - 마커가 많을 때는 뷰포트 컬링 + 클러스터링으로 실제 DOM 마커 수를 줄여 드래그 성능을 지킨다.
-// TODO: 네이버 지도 Map Style Editor 커스텀 스타일 ID 발급 후 적용
 export default function MapView({
   companyCode,
   centerLat,
@@ -257,8 +263,13 @@ export default function MapView({
     mapRef.current = new window.naver.maps.Map(mapElRef.current, {
       center,
       zoom: HOME_ZOOM,
-      // NCP 콘솔 > Map Style Editor에서 발급한 커스텀 스타일 ID로 교체
-      // customStyleId: process.env.NEXT_PUBLIC_NAVER_MAP_STYLE_ID,
+      // 2026-08-06 신규: 식당 마커를 워낙 많이 쌓다 보니(공공데이터 CSV 시딩) 네이버 지도 기본
+      // POI 아이콘/상호명 라벨/버스정류장 등이 우리 마커와 겹쳐서 화면이 복잡해 보인다는
+      // 피드백을 받았다. NCP Maps는 코드만으로 "단순 지도 모드"를 켜는 옵션이 따로 없고,
+      // NCP 콘솔의 Map Style Editor에서 만든 커스텀 스타일(불필요한 레이어/라벨을 꺼둔 스타일)을
+      // 발급받아 gl 벡터 지도 + customStyleId로 적용하는 방식만 지원한다. 스타일 ID를 아직 안
+      // 만들었으면 NAVER_MAP_STYLE_ID가 비어있을 테니, 그럴 땐 자동으로 기본 지도로 폴백한다.
+      ...(NAVER_MAP_STYLE_ID ? { gl: true, customStyleId: NAVER_MAP_STYLE_ID } : {}),
       zoomControl: false,
     });
 
@@ -354,7 +365,6 @@ export default function MapView({
             map: mapRef.current,
             icon: buildRestaurantMarkerIcon(restaurant),
           });
-          bindHoverZIndexBoost(marker);
           if (onMarkerClick) {
             window.naver.maps.Event.addListener(marker, "click", () => onMarkerClick(restaurant));
           }
@@ -376,7 +386,6 @@ export default function MapView({
             group.restaurants.map((r) => (r.name ?? "").normalize("NFC"))
           ),
         });
-        bindHoverZIndexBoost(marker);
 
         // 2026-08-06 오후 수정: 클릭하면 "몇 단계 확대"가 아니라, 그 그룹 전체를 부모에게 넘겨서
         // (부모가 disableClustering=true로 다시 내려줌) 항상 한 번에 전부 개별 마커로 드러나게 한다.
@@ -396,7 +405,6 @@ export default function MapView({
           map: mapRef.current,
           icon: buildRestaurantMarkerIcon(restaurant),
         });
-        bindHoverZIndexBoost(marker);
         if (onMarkerClick) {
           window.naver.maps.Event.addListener(marker, "click", () => onMarkerClick(restaurant));
         }
@@ -429,7 +437,9 @@ export default function MapView({
   return (
     <>
       <Script
-        src={`https://openapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${process.env.NEXT_PUBLIC_NAVER_MAP_CLIENT_ID}`}
+        src={`https://openapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${process.env.NEXT_PUBLIC_NAVER_MAP_CLIENT_ID}${
+          NAVER_MAP_STYLE_ID ? "&submodules=gl" : ""
+        }`}
         strategy="afterInteractive"
         onReady={() => setReady(true)}
       />
@@ -453,7 +463,7 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
     : "";
 
   return {
-    content: `
+    content: buildMarkerElement(`
       <div class="group relative flex flex-col items-center" style="cursor:pointer;">
         <span class="pointer-events-none absolute -top-7 whitespace-nowrap rounded-full bg-ink px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-soft transition-opacity duration-150 group-hover:opacity-100">
           ${displayName}
@@ -467,7 +477,7 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
           ${needsReviewBadge}
         </div>
       </div>
-    `,
+    `),
     anchor: new window.naver.maps.Point(16, 16),
   };
 }
@@ -475,20 +485,20 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
 // 클러스터(여러 식당이 모인 지점) 마커 - 개별 식당 아이콘 대신 숫자 배지 원 하나로 표시해서
 // 실제 DOM 마커 수를 줄인다. 클릭하면 그 그룹 전체가 (줌 단계와 무관하게) 바로 개별 마커로 풀린다.
 //
-// 2026-08-06 3차 신규: 마우스를 올렸을 때(클릭하기 전에) 그 안에 어떤 가맹점들이 있는지 미리
-// 볼 수 있게 툴팁으로 보여준다 - 클릭해서 확대하기 전에 "여기 뭐가 있는지" 감을 잡을 수 있게.
-// 이름이 너무 많으면 다 나열하지 않고 상위 N개 + "외 n곳"으로 자른다. 개별 식당 마커의 이름
-// 툴팁(buildRestaurantMarkerIcon)과 동일하게 group/group-hover 클래스만으로 처리해서 별도
-// JS 이벤트 리스너가 필요 없다.
+// 마우스를 올렸을 때(클릭하기 전에) 그 안에 어떤 가맹점들이 있는지 미리 볼 수 있게 툴팁으로
+// 보여준다 - 클릭해서 확대하기 전에 "여기 뭐가 있는지" 감을 잡을 수 있게. 이름이 너무 많으면
+// 다 나열하지 않고 상위 N개 + "외 n곳"으로 자른다. 개별 식당 마커의 이름 툴팁
+// (buildRestaurantMarkerIcon)과 동일하게 group/group-hover 클래스만으로 처리해서 별도 JS
+// 이벤트 리스너가 필요 없다.
+//
+// 식당이 많을 때(20개 이상) 11px 글자를 여백 없이 다닥다닥 붙여두면 어디서 한 이름이 끝나고
+// 다음 이름이 시작하는지 구분이 안 되고 뭉개져 보인다는 피드백을 받아서, 폭을 200→240px로,
+// 글자를 11→12px로 늘리고 이름 사이에 구분선(divide-y)을 넣어서 줄 단위로 또렷하게 보이게
+// 했다. "총 N곳" 헤더는 스크롤해도 항상 맨 위에 남는다(목록이 어디까지 왔는지 기준점 유지).
 function buildClusterMarkerIcon(count: number, names: string[]) {
   // 식당 수가 많을수록 살짝 더 크게 - 한눈에 "여기 많이 모여있다"는 걸 알 수 있게.
   const size = count >= 50 ? 44 : count >= 10 ? 38 : 32;
 
-  // 2026-08-06 6차 수정: 4~5차에서 폭/힌게이마임, z-index는 고쳤는데, 식당이 26개대로 정말 많을 땐는
-  // 11px 글자를 gap만 둔 다닥다닥 붙놓아서 어디서 이름이 끓냂고 다음 이름이 시작하는지 구뚞이
-  // 안 되고 화상이 눌린 것처럼 깨져 보인다는 피럜백을 받았음(스크린샷 확인). 폭을 200→240px,
-  // 글자를 11→12px로 살짝 늘리고, 이름 사이에 구보선(divide-y)을 넣어서 줄 단위로 따럜하게 스쳨되게
-  // 했다. "총 N곳" 헤더는 스크롤해도 항상 농다(목록이 어딴까지 왜는지 기준점 유지).
   const TOOLTIP_MAX_NAMES = 60;
   const shown = names.slice(0, TOOLTIP_MAX_NAMES);
   const remaining = names.length - shown.length;
@@ -497,7 +507,7 @@ function buildClusterMarkerIcon(count: number, names: string[]) {
     (remaining > 0 ? `<div class="py-1 text-white/60">외 ${remaining}곳</div>` : "");
 
   return {
-    content: `
+    content: buildMarkerElement(`
       <div class="group relative flex flex-col items-center" style="cursor:pointer;">
         <div
           class="pointer-events-none absolute bottom-full mb-1.5 flex w-[240px] max-h-[260px] flex-col overflow-y-auto whitespace-normal divide-y divide-white/10 rounded-lg bg-ink px-3 py-1 text-left text-[12px] leading-snug text-white opacity-0 shadow-soft transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto"
@@ -514,7 +524,7 @@ function buildClusterMarkerIcon(count: number, names: string[]) {
           ${count}
         </div>
       </div>
-    `,
+    `),
     anchor: new window.naver.maps.Point(size / 2, size / 2),
   };
 }

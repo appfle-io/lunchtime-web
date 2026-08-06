@@ -90,6 +90,13 @@ function formatRelativeTime(iso: string): string {
 // - 메뉴(식당) 옵션 검색 결과/선택된 칩에 카테고리 라벨(예: "중식")을 작게 같이 보여준다.
 // - 투표함 탭에 검색창 + 10개씩 페이징을 추가했다(서버가 이미 최신순으로 내려주므로 정렬은
 //   그대로 두고, 클라이언트에서 검색 필터링 + 페이지 자르기만 한다).
+//
+// 2026-08-06 4차 개편:
+// - "새 투표 만들기" 폼이 검색 결과 목록이 인라인으로 계속 늘어나면서 지저분하다는 피드백을 받아
+//   전체 레이아웃을 정리했다. 참가자/메뉴 옵션을 각각 카드 섹션으로 묶고, 검색 결과는 입력창
+//   아래 떠있는(absolute) 드롭다운으로 바꿔서 다른 요소를 밀어내지 않게 했다.
+// - 이미 응답한 옵션을 다시 누르면 응답이 취소되는(토글) 동작은 서버(vote-server.ts
+//   respondToVote)에서 처리하므로, 이 컴포넌트의 응답 버튼 클릭 핸들러는 그대로 둔다.
 export default function LunchVoteModal({
   companyCode,
   myNickname,
@@ -183,14 +190,20 @@ export default function LunchVoteModal({
   const filteredParticipantUsers = useMemo(() => {
     const q = participantSearch.trim().toLowerCase();
     if (!q) return [];
-    return companyUsers.filter((u) => u.nickname.toLowerCase().includes(q)).slice(0, 20);
-  }, [participantSearch, companyUsers]);
+    return companyUsers
+      .filter((u) => u.nickname.toLowerCase().includes(q))
+      .filter((u) => !selectedParticipantIds.has(u.nicknameId))
+      .slice(0, 20);
+  }, [participantSearch, companyUsers, selectedParticipantIds]);
 
   const filteredRestaurants = useMemo(() => {
     const q = restaurantFilter.trim().toLowerCase();
     if (!q) return [];
-    return restaurants.filter((r) => r.name.toLowerCase().includes(q)).slice(0, 15);
-  }, [restaurantFilter, restaurants]);
+    return restaurants
+      .filter((r) => r.name.toLowerCase().includes(q))
+      .filter((r) => !selectedOptions.some((o) => o.key === r.id))
+      .slice(0, 15);
+  }, [restaurantFilter, restaurants, selectedOptions]);
 
   if (!open) return null;
 
@@ -202,8 +215,14 @@ export default function LunchVoteModal({
     });
   }
 
+  function addParticipant(nicknameId: string) {
+    setSelectedParticipantIds((prev) => new Set(prev).add(nicknameId));
+    setParticipantSearch("");
+  }
+
   function addOption(option: DraftOption) {
     setSelectedOptions((prev) => (prev.some((o) => o.key === option.key) ? prev : [...prev, option]));
+    setRestaurantFilter("");
   }
 
   function removeOption(key: string) {
@@ -269,7 +288,7 @@ export default function LunchVoteModal({
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="flex max-h-[85vh] w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-xl2 bg-surface p-5 shadow-soft"
+        className="flex max-h-[85vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-xl2 bg-surface p-5 shadow-soft"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -362,31 +381,37 @@ export default function LunchVoteModal({
         )}
 
         {!loading && tab === "create" && (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-4">
             <div>
-              <label className="mb-1 block text-xs font-medium text-ink-soft">투표 제목</label>
+              <label className="mb-1.5 block text-sm font-semibold text-ink">투표 제목</label>
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="오늘 점심 뭐 먹지?"
-                className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
+                className="w-full rounded-xl border border-black/10 px-3 py-2.5 text-sm outline-none focus:border-primary"
               />
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-medium text-ink-soft">
-                참가자 초대 (누구나 초대할 수 있어요)
-              </label>
+            {/* 참가자 섹션 - 카드로 묶어서 아래 메뉴 옵션 섹션과 시각적으로 분리한다. */}
+            <div className="rounded-2xl border border-black/5 bg-surface-muted/50 p-3.5">
+              <div className="mb-2.5 flex items-baseline justify-between">
+                <p className="text-sm font-semibold text-ink">👥 참가자</p>
+                <p className="text-[11px] text-ink-soft">누구나 초대할 수 있어요</p>
+              </div>
 
               {selectedParticipantIds.size > 0 && (
-                <ul className="mb-1.5 flex flex-wrap gap-1.5">
+                <ul className="mb-2 flex flex-wrap gap-1.5">
                   {Array.from(selectedParticipantIds).map((id) => (
                     <li
                       key={id}
-                      className="flex items-center gap-1 rounded-full bg-primary-light px-2.5 py-1 text-xs text-primary-dark"
+                      className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-medium text-white"
                     >
                       {nicknameById.get(id) ?? id}
-                      <button onClick={() => toggleParticipant(id)} aria-label="참가자 제거">
+                      <button
+                        onClick={() => toggleParticipant(id)}
+                        aria-label="참가자 제거"
+                        className="text-white/80 hover:text-white"
+                      >
                         ✕
                       </button>
                     </li>
@@ -394,38 +419,36 @@ export default function LunchVoteModal({
                 </ul>
               )}
 
-              <input
-                value={participantSearch}
-                onChange={(e) => setParticipantSearch(e.target.value)}
-                placeholder="닉네임으로 검색해서 초대"
-                className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
-              />
-              {participantSearch.trim() && (
-                <ul className="mt-1.5 flex flex-col gap-1">
-                  {filteredParticipantUsers.length === 0 && (
-                    <li className="text-xs text-ink-soft">일치하는 닉네임이 없어요.</li>
-                  )}
-                  {filteredParticipantUsers.map((u) => (
-                    <li key={u.nicknameId}>
-                      <button
-                        onClick={() => toggleParticipant(u.nicknameId)}
-                        className={[
-                          "w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition",
-                          selectedParticipantIds.has(u.nicknameId)
-                            ? "border-primary bg-primary-light text-primary-dark"
-                            : "border-black/10 hover:border-primary",
-                        ].join(" ")}
-                      >
-                        {u.nickname} {selectedParticipantIds.has(u.nicknameId) ? "· 선택됨" : ""}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <div className="relative">
+                <input
+                  value={participantSearch}
+                  onChange={(e) => setParticipantSearch(e.target.value)}
+                  placeholder="닉네임으로 검색해서 초대"
+                  className="w-full rounded-xl border border-black/10 bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+                {participantSearch.trim() && (
+                  <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-xl border border-black/10 bg-surface p-1.5 shadow-soft">
+                    {filteredParticipantUsers.length === 0 && (
+                      <li className="px-2 py-1.5 text-xs text-ink-soft">일치하는 닉네임이 없어요.</li>
+                    )}
+                    {filteredParticipantUsers.map((u) => (
+                      <li key={u.nicknameId}>
+                        <button
+                          onClick={() => addParticipant(u.nicknameId)}
+                          className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm text-ink transition hover:bg-primary-light hover:text-primary-dark"
+                        >
+                          {u.nickname}
+                          <span className="text-xs text-ink-soft">+ 추가</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
               {friends.length > 0 && (
-                <div className="mt-2">
-                  <p className="mb-1 text-[11px] text-ink-soft">내 친구 중에서 빠르게 선택</p>
+                <div className="mt-2.5 border-t border-black/5 pt-2.5">
+                  <p className="mb-1.5 text-[11px] font-medium text-ink-soft">내 친구 중에서 빠르게 선택</p>
                   <ul className="flex flex-wrap gap-1.5">
                     {friends.map((friend) => (
                       <li key={friend.nicknameId}>
@@ -435,7 +458,7 @@ export default function LunchVoteModal({
                             "rounded-full px-3 py-1.5 text-xs font-medium transition",
                             selectedParticipantIds.has(friend.nicknameId)
                               ? "bg-primary text-white"
-                              : "bg-surface-muted text-ink-soft hover:bg-primary-light",
+                              : "bg-surface text-ink-soft ring-1 ring-inset ring-black/10 hover:bg-primary-light",
                           ].join(" ")}
                         >
                           {friend.nickname}
@@ -447,70 +470,81 @@ export default function LunchVoteModal({
               )}
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-medium text-ink-soft">메뉴(식당) 옵션</label>
+            {/* 메뉴(식당) 옵션 섹션 - 참가자 섹션과 동일한 카드 스타일로 통일한다. */}
+            <div className="rounded-2xl border border-black/5 bg-surface-muted/50 p-3.5">
+              <p className="mb-2.5 text-sm font-semibold text-ink">🍽️ 메뉴 옵션</p>
+
               {selectedOptions.length > 0 && (
-                <ul className="mb-1.5 flex flex-wrap gap-1.5">
+                <ul className="mb-2 flex flex-wrap gap-1.5">
                   {selectedOptions.map((option) => (
                     <li
                       key={option.key}
-                      className="flex items-center gap-1 rounded-full bg-primary-light px-2.5 py-1 text-xs text-primary-dark"
+                      className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-medium text-white"
                     >
                       {option.label}
                       {option.category && (
-                        <span className="text-[10px] text-primary-dark/70">· {option.category}</span>
+                        <span className="text-[10px] text-white/70">· {option.category}</span>
                       )}
-                      <button onClick={() => removeOption(option.key)} aria-label="옵션 제거">
+                      <button
+                        onClick={() => removeOption(option.key)}
+                        aria-label="옵션 제거"
+                        className="text-white/80 hover:text-white"
+                      >
                         ✕
                       </button>
                     </li>
                   ))}
                 </ul>
               )}
-              <input
-                value={restaurantFilter}
-                onChange={(e) => setRestaurantFilter(e.target.value)}
-                placeholder="식당 이름으로 검색해서 옵션 추가"
-                className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
-              />
-              {restaurantFilter.trim() && (
-                <ul className="mt-1.5 flex flex-col gap-1">
-                  {filteredRestaurants.length === 0 && (
-                    <li className="text-xs text-ink-soft">일치하는 식당이 없어요.</li>
-                  )}
-                  {filteredRestaurants.map((r) => (
-                    <li key={r.id}>
-                      <button
-                        onClick={() =>
-                          addOption({
-                            key: r.id,
-                            label: r.name,
-                            restaurantId: r.id,
-                            category: getCategoryVisual(r.category).label,
-                          })
-                        }
-                        disabled={selectedOptions.some((o) => o.key === r.id)}
-                        className="flex w-full items-center gap-1.5 rounded-lg border border-black/10 px-2.5 py-1.5 text-left text-xs transition hover:border-primary disabled:opacity-50"
-                      >
-                        <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                        <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-ink-soft">
-                          {getCategoryVisual(r.category).label}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-1.5 flex gap-1.5">
+
+              <div className="relative">
+                <input
+                  value={restaurantFilter}
+                  onChange={(e) => setRestaurantFilter(e.target.value)}
+                  placeholder="식당 이름으로 검색해서 옵션 추가"
+                  className="w-full rounded-xl border border-black/10 bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+                {restaurantFilter.trim() && (
+                  <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-xl border border-black/10 bg-surface p-1.5 shadow-soft">
+                    {filteredRestaurants.length === 0 && (
+                      <li className="px-2 py-1.5 text-xs text-ink-soft">일치하는 식당이 없어요.</li>
+                    )}
+                    {filteredRestaurants.map((r) => (
+                      <li key={r.id}>
+                        <button
+                          onClick={() =>
+                            addOption({
+                              key: r.id,
+                              label: r.name,
+                              restaurantId: r.id,
+                              category: getCategoryVisual(r.category).label,
+                            })
+                          }
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-ink transition hover:bg-primary-light hover:text-primary-dark"
+                        >
+                          <span className="min-w-0 flex-1 truncate">{r.name}</span>
+                          <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-ink-soft">
+                            {getCategoryVisual(r.category).label}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="mt-2 flex gap-1.5">
                 <input
                   value={customOptionText}
                   onChange={(e) => setCustomOptionText(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addCustomOption()}
                   placeholder="목록에 없는 메뉴 직접 입력"
-                  className="min-w-0 flex-1 rounded-lg border border-black/10 px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+                  className="min-w-0 flex-1 rounded-xl border border-black/10 bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
                 />
                 <button
                   onClick={addCustomOption}
-                  className="rounded-lg bg-surface-muted px-2.5 py-1.5 text-xs font-medium text-ink-soft transition hover:bg-primary-light"
+                  disabled={!customOptionText.trim()}
+                  className="shrink-0 rounded-xl bg-surface px-3.5 py-2 text-sm font-medium text-ink-soft ring-1 ring-inset ring-black/10 transition hover:bg-primary-light hover:text-primary-dark disabled:opacity-50"
                 >
                   추가
                 </button>
@@ -519,8 +553,8 @@ export default function LunchVoteModal({
 
             <button
               onClick={handleCreateVote}
-              disabled={creating}
-              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-dark disabled:opacity-60"
+              disabled={creating || selectedOptions.length === 0}
+              className="rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition hover:bg-primary-dark disabled:opacity-50"
             >
               {creating ? "만드는 중..." : "투표 만들기"}
             </button>
@@ -543,6 +577,10 @@ interface VoteCardProps {
 
 // 투표 하나(옵션별 응답 현황 + 댓글)를 보여주는 카드. 응답/댓글 이후에는 서버가 돌려주는
 // 최신 vote 전체를 그대로 반영한다(부분 상태 갱신보다 단순하고 항상 일관됨).
+//
+// 2026-08-06 추가: 이미 응답한 옵션을 다시 누르면 응답이 취소된다(토글). 실제 취소 로직은
+// 서버(vote-server.ts respondToVote)가 처리하므로, 여기서는 그냥 항상 같은 respond(optionId)를
+// 호출하기만 하면 된다 - 서버가 "이미 그 옵션에 응답한 상태인지"를 보고 삭제/저장을 알아서 고른다.
 function VoteCard({
   vote,
   companyCode,
@@ -624,6 +662,7 @@ function VoteCard({
                   <button
                     onClick={() => respond(option.id)}
                     disabled={responding}
+                    title={isMine ? "다시 누르면 취소돼요" : undefined}
                     className={[
                       "flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm transition disabled:opacity-60",
                       isMine ? "border-primary bg-primary-light" : "border-black/10 hover:border-primary/40",

@@ -9,7 +9,13 @@
     "start": "next start -p 3300",
     "lint": "next lint",
     "seed:restaurants": "tsx scripts/seed-restaurants.ts",
-    "seed:security-question": "tsx scripts/seed-security-question.ts"
+    "seed:opendata": "tsx scripts/seed-restaurants-opendata.ts",
+    "seed:csv": "tsx scripts/seed-restaurants-csv.ts",
+    "seed:security-question": "tsx scripts/seed-security-question.ts",
+    "seed:dummy-users": "tsx scripts/seed-dummy-users.ts",
+    "remove:dummy-users": "tsx scripts/remove-dummy-users.ts",
+    "set:neighborhoods": "tsx scripts/set-company-neighborhoods.ts",
+    "set:signgucd": "tsx scripts/set-company-signgucd.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

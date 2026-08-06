@@ -24,8 +24,20 @@ interface FriendsModalProps {
   prefillNickname?: string | null;
 }
 
+// 한 번에 더 보여주는 단위. 숫자 페이징(1,2,3...) 대신 "더보기"를 누를 때마다 이만큼씩 늘어난다.
+const ALL_USERS_PAGE_SIZE = 20;
+
 // 2026-08-06 신규: 친구목록 모달. "직접 추가" 모달과 동일한 fixed inset-0 오버레이 패턴을 따른다.
 // 단방향 추가(상대방 동의 불필요) - 검색해서 찾은 사람에게 간단한 메모를 남기고 바로 추가한다.
+//
+// 2026-08-06 추가: 검색 탭 옆에 "전체 목록" 탭을 신설 - 회사 전체 사용자를 닉네임 가나다순으로
+// 정렬해서 보여주고, 체크박스로 여러 명을 한 번에 선택한 뒤 "선택한 N명 추가하기"로 일괄 추가할
+// 수 있게 한다. 서버에 별도 배치(batch) API를 새로 만들지 않고, 기존 단건 POST /api/friends를
+// 선택된 인원 수만큼 순차 호출하는 방식으로 처리한다(토이 프로젝트 규모라 순차 호출로도 충분).
+//
+// 2026-08-06 추가2: 이미 친구인 사람은 "이미 친구" 배지로 남겨두는 대신, 검색 결과와 전체 목록
+// 둘 다에서 처음부터 제외한다(사용자 요청). 두 탭이 보는 대상 풀 자체를 nonFriendUsers로
+// 미리 걸러두고, 검색/정렬/페이징은 전부 그 풀 위에서만 이뤄진다.
 export default function FriendsModal({
   companyCode,
   open,
@@ -37,6 +49,7 @@ export default function FriendsModal({
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUserEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"search" | "all">("search");
   const [search, setSearch] = useState("");
   const [addingNicknameId, setAddingNicknameId] = useState<string | null>(null);
   const [memoDraft, setMemoDraft] = useState("");
@@ -44,9 +57,17 @@ export default function FriendsModal({
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [editingMemoDraft, setEditingMemoDraft] = useState("");
 
+  // "전체 목록" 탭 전용 상태 - 다중 선택 체크박스 + "더보기" 페이징.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [visibleAllUsersCount, setVisibleAllUsersCount] = useState(ALL_USERS_PAGE_SIZE);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     setSearch(prefillNickname ?? "");
+    setActiveTab("search");
+    setSelectedIds(new Set());
+    setVisibleAllUsersCount(ALL_USERS_PAGE_SIZE);
     setLoading(true);
     Promise.all([
       fetch(`/api/friends?companyCode=${encodeURIComponent(companyCode)}`).then((r) => r.json()),
@@ -62,11 +83,25 @@ export default function FriendsModal({
 
   const friendIds = useMemo(() => new Set(friends.map((f) => f.nicknameId)), [friends]);
 
+  // 검색/전체목록 두 탭이 공통으로 바라보는 "아직 친구가 아닌 사용자" 풀.
+  const nonFriendUsers = useMemo(
+    () => companyUsers.filter((u) => !friendIds.has(u.nicknameId)),
+    [companyUsers, friendIds]
+  );
+
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
-    return companyUsers.filter((u) => u.nickname.toLowerCase().includes(q)).slice(0, 20);
-  }, [search, companyUsers]);
+    return nonFriendUsers.filter((u) => u.nickname.toLowerCase().includes(q)).slice(0, 20);
+  }, [search, nonFriendUsers]);
+
+  // 닉네임 가나다순(ㄱㄴㄷ 순)으로 정렬 - "전체 목록" 탭에서만 쓰인다.
+  const allUsersSorted = useMemo(
+    () => [...nonFriendUsers].sort((a, b) => a.nickname.localeCompare(b.nickname, "ko")),
+    [nonFriendUsers]
+  );
+  const visibleAllUsers = allUsersSorted.slice(0, visibleAllUsersCount);
+  const hasMoreAllUsers = visibleAllUsersCount < allUsersSorted.length;
 
   if (!open) return null;
 
@@ -98,6 +133,60 @@ export default function FriendsModal({
       onNotify?.("네트워크 오류로 친구를 추가하지 못했어요.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function toggleSelect(nicknameId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(nicknameId)) next.delete(nicknameId);
+      else next.add(nicknameId);
+      return next;
+    });
+  }
+
+  // 선택된 인원 전체를 순차적으로 POST /api/friends 호출해서 한 번에 추가한다. 일부만 실패해도
+  // (예: 그 사이 상대가 탈퇴) 나머지는 계속 진행하고, 끝나면 성공/실패 인원수를 함께 알려준다.
+  async function confirmBulkAdd() {
+    if (selectedIds.size === 0 || bulkSubmitting) return;
+    setBulkSubmitting(true);
+
+    const targets = allUsersSorted.filter((u) => selectedIds.has(u.nicknameId));
+    const added: FriendEntry[] = [];
+    let failCount = 0;
+
+    for (const user of targets) {
+      try {
+        const res = await fetch("/api/friends", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ companyCode, friendNickname: user.nickname, memo: "" }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          added.push(data.friend as FriendEntry);
+        } else {
+          failCount += 1;
+        }
+      } catch {
+        failCount += 1;
+      }
+    }
+
+    if (added.length > 0) {
+      const addedIds = new Set(added.map((f) => f.nicknameId));
+      const next = [...added, ...friends.filter((f) => !addedIds.has(f.nicknameId))];
+      setFriends(next);
+      onFriendsChanged?.(next);
+    }
+
+    setSelectedIds(new Set());
+    setBulkSubmitting(false);
+
+    if (failCount > 0) {
+      onNotify?.(`${added.length}명 추가 완료, ${failCount}명은 실패했어요.`);
+    } else if (added.length > 0) {
+      onNotify?.(`${added.length}명을 친구로 추가했어요.`);
     }
   }
 
@@ -161,65 +250,133 @@ export default function FriendsModal({
           </button>
         </div>
 
-        <div>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="닉네임으로 검색해서 추가하기"
-            className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
-            autoFocus={Boolean(prefillNickname)}
-          />
-          {search.trim() && (
-            <ul className="mt-2 flex flex-col gap-1.5">
-              {searchResults.length === 0 && (
-                <li className="text-xs text-ink-soft">일치하는 닉네임이 없어요.</li>
-              )}
-              {searchResults.map((user) => (
-                <li key={user.nicknameId} className="rounded-xl border border-black/10 p-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-ink">{user.nickname}</span>
-                    {friendIds.has(user.nicknameId) ? (
-                      <span className="text-xs text-ink-soft">이미 친구</span>
-                    ) : addingNicknameId === user.nicknameId ? null : (
-                      <button
-                        onClick={() => startAdding(user)}
-                        className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white transition hover:bg-primary-dark"
-                      >
-                        + 추가
-                      </button>
-                    )}
-                  </div>
-                  {addingNicknameId === user.nicknameId && (
-                    <div className="mt-2 flex flex-col gap-1.5">
-                      <input
-                        value={memoDraft}
-                        onChange={(e) => setMemoDraft(e.target.value)}
-                        placeholder="메모 (선택, 예: 마케팅팀 김OO)"
-                        className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs outline-none focus:border-primary"
-                        autoFocus
-                      />
-                      <div className="flex gap-1.5">
-                        <button
-                          onClick={() => confirmAdd(user)}
-                          disabled={submitting}
-                          className="flex-1 rounded-lg bg-primary px-2 py-1.5 text-xs font-semibold text-white transition hover:bg-primary-dark disabled:opacity-60"
-                        >
-                          {submitting ? "추가하는 중..." : "친구로 추가"}
-                        </button>
-                        <button
-                          onClick={() => setAddingNicknameId(null)}
-                          className="rounded-lg px-2 py-1.5 text-xs text-ink-soft hover:bg-surface-muted"
-                        >
-                          취소
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+        <div className="flex gap-1 rounded-xl bg-surface-muted p-1">
+          <button
+            onClick={() => setActiveTab("search")}
+            className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition ${
+              activeTab === "search" ? "bg-surface text-ink shadow-soft" : "text-ink-soft"
+            }`}
+          >
+            검색해서 추가
+          </button>
+          <button
+            onClick={() => setActiveTab("all")}
+            className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition ${
+              activeTab === "all" ? "bg-surface text-ink shadow-soft" : "text-ink-soft"
+            }`}
+          >
+            전체 목록
+          </button>
         </div>
+
+        {activeTab === "search" && (
+          <div>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="닉네임으로 검색해서 추가하기"
+              className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
+              autoFocus={Boolean(prefillNickname)}
+            />
+            {search.trim() && (
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {searchResults.length === 0 && (
+                  <li className="text-xs text-ink-soft">일치하는 닉네임이 없어요.</li>
+                )}
+                {searchResults.map((user) => (
+                  <li key={user.nicknameId} className="rounded-xl border border-black/10 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-ink">{user.nickname}</span>
+                      {addingNicknameId === user.nicknameId ? null : (
+                        <button
+                          onClick={() => startAdding(user)}
+                          className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white transition hover:bg-primary-dark"
+                        >
+                          + 추가
+                        </button>
+                      )}
+                    </div>
+                    {addingNicknameId === user.nicknameId && (
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        <input
+                          value={memoDraft}
+                          onChange={(e) => setMemoDraft(e.target.value)}
+                          placeholder="메모 (선택, 예: 마케팅팀 김OO)"
+                          className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+                          autoFocus
+                        />
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => confirmAdd(user)}
+                            disabled={submitting}
+                            className="flex-1 rounded-lg bg-primary px-2 py-1.5 text-xs font-semibold text-white transition hover:bg-primary-dark disabled:opacity-60"
+                          >
+                            {submitting ? "추가하는 중..." : "친구로 추가"}
+                          </button>
+                          <button
+                            onClick={() => setAddingNicknameId(null)}
+                            className="rounded-lg px-2 py-1.5 text-xs text-ink-soft hover:bg-surface-muted"
+                          >
+                            취소
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {activeTab === "all" && (
+          <div>
+            {loading && <p className="text-sm text-ink-soft">불러오는 중...</p>}
+            {!loading && allUsersSorted.length === 0 && (
+              <p className="text-sm text-ink-soft">추가할 수 있는 사용자가 없어요.</p>
+            )}
+            {!loading && allUsersSorted.length > 0 && (
+              <>
+                <ul className="flex max-h-64 flex-col gap-1.5 overflow-y-auto pr-1">
+                  {visibleAllUsers.map((user) => {
+                    const checked = selectedIds.has(user.nicknameId);
+                    return (
+                      <li
+                        key={user.nicknameId}
+                        className="flex items-center gap-2 rounded-xl border border-black/5 p-2.5"
+                      >
+                        <label className="flex flex-1 cursor-pointer items-center gap-2 text-sm text-ink">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSelect(user.nicknameId)}
+                            className="h-4 w-4 accent-primary"
+                          />
+                          {user.nickname}
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {hasMoreAllUsers && (
+                  <button
+                    onClick={() => setVisibleAllUsersCount((c) => c + ALL_USERS_PAGE_SIZE)}
+                    className="mt-2 w-full rounded-lg border border-black/10 py-1.5 text-xs text-ink-soft transition hover:bg-surface-muted"
+                  >
+                    더보기 ({allUsersSorted.length - visibleAllUsersCount}명 더)
+                  </button>
+                )}
+                <button
+                  onClick={confirmBulkAdd}
+                  disabled={selectedIds.size === 0 || bulkSubmitting}
+                  className="mt-2 w-full rounded-lg bg-primary py-2 text-sm font-semibold text-white transition hover:bg-primary-dark disabled:opacity-50"
+                >
+                  {bulkSubmitting ? "추가하는 중..." : `선택한 ${selectedIds.size}명 추가하기`}
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="border-t border-black/5 pt-2">
           <p className="mb-2 text-xs font-semibold text-ink-soft">

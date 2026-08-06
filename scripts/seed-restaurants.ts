@@ -3,19 +3,28 @@
 // 사용법:
 //   npm run seed:restaurants -- ssg
 //   npm run seed:restaurants -- ssg --radius=1000   (기본 반경 1500m)
+//   npm run seed:restaurants -- ssg --neighborhoods="영등포동1가,영등포동2가,영등포동3가,영등포동4가,영등포동5가,영등포동6가"
+//     (이 실행에서만 임시로 동 목록을 지정 - company 문서의 neighborhoods 필드는 건드리지 않음.
+//      매번 다시 입력하지 않고 계속 쓰고 싶으면 scripts/set-company-neighborhoods.ts로 회사
+//      문서에 영구 저장해두는 걸 권장.)
 //
 // 필요한 .env.local 값: NAVER_SEARCH_CLIENT_ID, NAVER_SEARCH_CLIENT_SECRET, FIREBASE_SERVICE_ACCOUNT_KEY
 //
-// 검색 앵커 2가지를 조합해서 씀:
+// 검색 앵커 3가지를 조합해서 씀:
 // 1) districtCode(구/동 단위) + 음식 카테고리 키워드  - 구 전체를 넓게 훑기
 // 2) landmarks(자주 가는 장소, 예: "영등포타임스퀘어") 단독 검색  - 특정 건물 안/근처 식당을 정확히 잡기
+// 3) neighborhoods(행정동 이름, 예: "영등포동1가") + 카테고리 키워드  - 동 단위로 촘촘하게 훑기
+//    (2026-08-06 신규: "영등포동1가~6가 음식점이 너무 많이 빠진다"는 피드백으로 추가. district
+//    검색 하나("영등포구 한식")로는 구 전체가 넓어서 특정 동의 가게들이 상위 5건 안에 아예 안 들어오는
+//    경우가 많았다 - 검색어를 동 이름 단위로 쪼개서 후보 풀 자체를 넓히는 접근.)
 //
 // 알아둘 점 (현재 구현의 한계):
 // - 네이버 지역검색 API는 좌표 기반 반경 검색이 아니라 텍스트 검색이라, 회사 중심좌표와의 거리를 직접 계산해서
 //   radius 밖은 걸러내는 방식으로 구현했다.
 // - 한 키워드당 최대 5개까지만 응답되고 페이지네이션이 없다 (네이버 지역검색 API 자체 제약).
-//   -> 이 한계 때문에 자동 시딩만으로 모든 식당을 커버할 수 없다. companies/{code}/restaurants에
-//      "직접 추가" 기능(POST /api/restaurants)으로 빠진 곳을 채워나가는 걸 기본 운영 방식으로 삼는다.
+//   -> 이 한계 때문에 검색어 자체를 최대한 잘게 쪼개는(동 이름 + 카테고리 조합 등) 것 외에는
+//      한 번의 API 호출로 "그 동네 음식점 전체"를 통째로 가져올 방법이 없다. 그래도 빠지는 곳은
+//      companies/{code}/restaurants에 "직접 추가" 기능(POST /api/restaurants)으로 채워나간다.
 // - 제로페이 가맹점 여부(isZeroPay)는 이 스크립트에서는 판단하지 않고 기본값 false로 넣는다.
 //   추후 공공데이터 매칭 파이프라인/사내 투표 기능으로 별도 보정 예정 (기획 문서 참고).
 
@@ -44,12 +53,23 @@ const DEFAULT_RADIUS_METERS = 1500;
 async function main() {
   const [companyCodeArg, ...rest] = process.argv.slice(2);
   if (!companyCodeArg) {
-    console.error("사용법: npm run seed:restaurants -- <companyCode> [--radius=1500]");
+    console.error(
+      '사용법: npm run seed:restaurants -- <companyCode> [--radius=1500] [--neighborhoods="동1,동2,..."]'
+    );
     process.exit(1);
   }
 
   const radiusArg = rest.find((arg) => arg.startsWith("--radius="));
   const radiusMeters = radiusArg ? Number(radiusArg.split("=")[1]) : DEFAULT_RADIUS_METERS;
+
+  const neighborhoodsArg = rest.find((arg) => arg.startsWith("--neighborhoods="));
+  const neighborhoodsOverride = neighborhoodsArg
+    ? neighborhoodsArg
+        .slice("--neighborhoods=".length)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : null;
 
   // dotenv.config()가 먼저 실행된 뒤에 firebase-admin을 초기화하는 lib/firebase.ts를 import해야
   // 서비스 계정 키를 정상적으로 읽는다. (정적 import는 파일 맨 위로 끌어올려지므로 동적 import 사용)
@@ -80,6 +100,7 @@ async function main() {
   );
 
   const anchor = company.districtCode ?? "";
+  const neighborhoods = neighborhoodsOverride ?? company.neighborhoods ?? [];
 
   // district 단위 카테고리 검색: "영등포구 중식"처럼 구 전체를 훑는 넓은 검색이라, 결과가
   // 회사에서 먼 곳일 수도 있어서 아래 radius 필터를 반드시 적용한다.
@@ -87,13 +108,6 @@ async function main() {
 
   // landmark(자주 가는 장소) 검색: landmark 자체가 이미 "회사 근처에서 자주 언급되는 곳"이라는
   // 신호라서 radius 필터를 적용하지 않는다.
-  // (2026-08-06 수정: 기존엔 landmark 검색 결과에도 중심좌표 기준 radius 필터를 걸었는데, 그러면
-  //  landmark 자체가 중심좌표에서 조금만 벗어나도 - 예: landmark로 등록해둔 "영등포동4가" 근처의
-  //  실제 단골집인 "송죽장" 같은 곳도 - 반경 밖으로 판정돼서 통째로 누락되는 문제가 있었다.
-  //  또한 landmark 검색어당 카테고리 키워드 조합("영등포동4가 중식" 등)도 추가해서, 예전엔
-  //  "landmark 맛집/카페/푸드코트"처럼 뭉뚱그린 키워드로만 찾던 걸 카테고리별로 더 정확하게 찾게 했다.
-  //  네이버 지역검색 API가 검색어당 최대 5건까지만 응답하는 제약이 있어서(페이지네이션 없음),
-  //  검색어 자체를 늘려서 커버리지를 넓히는 게 이 API 안에서 할 수 있는 사실상 유일한 방법이다.)
   const landmarkQueries: string[] = [];
   for (const landmark of company.landmarks ?? []) {
     landmarkQueries.push(landmark);
@@ -105,14 +119,36 @@ async function main() {
     }
   }
 
+  // neighborhood(행정동 이름) 검색: "영등포동1가"처럼 동 이름 자체가 이미 정확한 지역 범위라서,
+  // landmark와 마찬가지로 radius 필터를 적용하지 않는다. 동 이름 단독 + "맛집"/"음식점" +
+  // 카테고리별 조합까지 만들어서, district 검색 하나로는 안 걸리던(구 전체 대비 상위 5건 밖으로
+  // 밀려나던) 그 동네 안의 가게들을 최대한 넓게 잡아낸다.
+  const neighborhoodQueries: string[] = [];
+  for (const neighborhood of neighborhoods) {
+    neighborhoodQueries.push(neighborhood);
+    neighborhoodQueries.push(`${neighborhood} 맛집`);
+    neighborhoodQueries.push(`${neighborhood} 음식점`);
+    for (const keyword of CATEGORY_KEYWORDS) {
+      neighborhoodQueries.push(`${neighborhood} ${keyword}`);
+    }
+  }
+
   const queries: { text: string; applyRadiusFilter: boolean }[] = [
     ...districtQueries.map((text) => ({ text, applyRadiusFilter: true })),
     ...landmarkQueries.map((text) => ({ text, applyRadiusFilter: false })),
+    ...neighborhoodQueries.map((text) => ({ text, applyRadiusFilter: false })),
   ];
 
   console.log(
-    `[검색어 준비] district 검색 ${districtQueries.length}개 + landmark 검색 ${landmarkQueries.length}개 = 총 ${queries.length}개`
+    `[검색어 준비] district 검색 ${districtQueries.length}개 + landmark 검색 ${landmarkQueries.length}개 + ` +
+      `neighborhood 검색 ${neighborhoodQueries.length}개(${neighborhoods.length}개 동) = 총 ${queries.length}개`
   );
+  if (neighborhoods.length === 0) {
+    console.log(
+      '  [참고] neighborhoods가 비어있어서 동 단위 검색은 건너뜀. ' +
+        '--neighborhoods="동1,동2,..." 옵션이나 scripts/set-company-neighborhoods.ts로 동 목록을 지정해줘.'
+    );
+  }
 
   const collected = new Map<
     string,
@@ -177,8 +213,8 @@ async function main() {
 
   if (collected.size === 0) {
     console.log(
-      "결과가 0곳이야. districtCode/landmarks가 회사 근처를 잘 못 잡는 걸 수도 있어. " +
-        "company 문서의 districtCode를 더 좁은 동네 이름으로 바꾸거나 landmarks를 추가해서 다시 시도해봐."
+      "결과가 0곳이야. districtCode/landmarks/neighborhoods가 회사 근처를 잘 못 잡는 걸 수도 있어. " +
+        "company 문서의 districtCode를 더 좁은 동네 이름으로 바꾸거나 landmarks/neighborhoods를 추가해서 다시 시도해봐."
     );
     return;
   }

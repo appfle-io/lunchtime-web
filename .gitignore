@@ -4,3 +4,6 @@ node_modules
 .env.local
 .DS_Store
 *.log
+
+# 공공데이터포털 상가업소 CSV (수백 MB, 커밋하지 않음 - scripts/seed-restaurants-csv.ts용)
+/data/*.csv

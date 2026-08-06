@@ -22,5 +22,7 @@ export async function getCompanyByCode(
     centerLng: data.centerLng,
     districtCode: data.districtCode,
     landmarks: Array.isArray(data.landmarks) ? data.landmarks : undefined,
+    neighborhoods: Array.isArray(data.neighborhoods) ? data.neighborhoods : undefined,
+    signguCd: typeof data.signguCd === "string" ? data.signguCd : undefined,
   };
 }

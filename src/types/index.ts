@@ -6,6 +6,12 @@ export interface CompanySummary {
   centerLng: number;
   districtCode?: string;
   landmarks?: string[];
+  // 2026-08-06 신규: "영등포동1가"~"영등포동6가"처럼 동 단위로 촘촘하게 훑어야 하는 지역 목록.
+  // landmarks(특정 건물/장소)와 다르게 행정동 이름 자체를 검색어로 써서 그 동네 전체를 넓게 커버한다.
+  neighborhoods?: string[];
+  // 2026-08-06 신규: 공공데이터포털(소상공인시장진흥공단 상가정보) API에 넘길 5자리 시군구코드
+  // (예: 서울 영등포구 = "11560"). scripts/seed-restaurants-opendata.ts에서 사용.
+  signguCd?: string;
 }
 
 export interface RestaurantSummary {
