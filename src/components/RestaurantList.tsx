@@ -312,13 +312,13 @@ export default function RestaurantList({
           onClick={onOpenFriends}
           className="flex-1 rounded-xl2 border border-black/10 px-2 py-2 text-sm transition hover:border-primary hover:text-primary"
         >
-          👥 친구
+          친구
         </button>
         <button
           onClick={onOpenVote}
           className="flex-1 rounded-xl2 border border-black/10 px-2 py-2 text-sm transition hover:border-primary hover:text-primary"
         >
-          🍚 투표
+          투표
         </button>
       </div>
 
@@ -341,7 +341,7 @@ export default function RestaurantList({
             mobileTab === "calendar" ? "bg-surface text-ink shadow-soft" : "text-ink-soft",
           ].join(" ")}
         >
-          📅 캘린더
+          캘린더
         </button>
       </div>
 
@@ -349,7 +349,7 @@ export default function RestaurantList({
           숨긴다. 데스크톱은 탭 상태와 무관하게 항상 목록 카드이므로 md:block으로 다시 보이게 한다. */}
       <div className={mobileTab === "calendar" ? "hidden md:block" : ""}>
         <button className="mb-2 w-full rounded-xl2 bg-ink px-4 py-3 font-semibold text-white transition hover:bg-black">
-          🎲 오늘 뭐 먹지?
+          오늘 뭐 먹지?
         </button>
         <button
           onClick={() => setShowAddModal(true)}

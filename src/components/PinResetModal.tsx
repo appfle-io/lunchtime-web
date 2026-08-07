@@ -185,7 +185,7 @@ export default function PinResetModal({
       >
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-ink">
-            {mode === "forgot" ? "🔑 비밀번호 찾기" : "🔑 비밀번호(PIN) 변경"}
+            {mode === "forgot" ? "비밀번호 찾기" : "비밀번호(PIN) 변경"}
           </h3>
           <button
             onClick={onClose}

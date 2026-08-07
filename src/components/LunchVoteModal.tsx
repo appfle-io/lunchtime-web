@@ -292,7 +292,7 @@ export default function LunchVoteModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-ink">🍚 오늘 점심 투표</h3>
+          <h3 className="text-base font-bold text-ink">오늘 점심 투표</h3>
           <button
             onClick={onClose}
             aria-label="닫기"
@@ -395,7 +395,7 @@ export default function LunchVoteModal({
             {/* 참가자 섹션 - 카드로 묶어서 아래 메뉴 옵션 섹션과 시각적으로 분리한다. */}
             <div className="rounded-2xl border border-black/5 bg-surface-muted/50 p-3.5">
               <div className="mb-2.5 flex items-baseline justify-between">
-                <p className="text-sm font-semibold text-ink">👥 참가자</p>
+                <p className="text-sm font-semibold text-ink">참가자</p>
                 <p className="text-[11px] text-ink-soft">누구나 초대할 수 있어요</p>
               </div>
 
@@ -472,7 +472,7 @@ export default function LunchVoteModal({
 
             {/* 메뉴(식당) 옵션 섹션 - 참가자 섹션과 동일한 카드 스타일로 통일한다. */}
             <div className="rounded-2xl border border-black/5 bg-surface-muted/50 p-3.5">
-              <p className="mb-2.5 text-sm font-semibold text-ink">🍽️ 메뉴 옵션</p>
+              <p className="mb-2.5 text-sm font-semibold text-ink">메뉴 옵션</p>
 
               {selectedOptions.length > 0 && (
                 <ul className="mb-2 flex flex-wrap gap-1.5">

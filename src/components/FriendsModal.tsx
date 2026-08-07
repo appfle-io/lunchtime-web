@@ -240,7 +240,7 @@ export default function FriendsModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-ink">👥 친구목록</h3>
+          <h3 className="text-base font-bold text-ink">친구목록</h3>
           <button
             onClick={onClose}
             aria-label="닫기"

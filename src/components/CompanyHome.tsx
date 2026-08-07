@@ -393,62 +393,69 @@ export default function CompanyHome({
         isRefreshing={isRefreshingPopular}
       />
 
-      <RestaurantList
-        companyCode={companyCode}
-        restaurants={listRestaurants}
-        hasAnyRestaurants={restaurants.length > 0}
-        hasRestaurantsOutOfView={listRestaurants.length === 0 && mapAndListRestaurants.length > 0}
-        favoriteIds={favoriteIds}
-        onToggleFavorite={toggleFavorite}
-        onFocusRestaurant={focusRestaurant}
-        onSelectRestaurant={handleSelectRestaurant}
-        onNotify={setToastMessage}
-        unreadNotifCount={unreadNotifCount}
-        onOpenNotifications={openNotifications}
-        onOpenFriends={() => {
-          setFriendsPrefillNickname(null);
-          setShowFriends(true);
-        }}
-        onOpenVote={() => {
-          setVoteFocusId(null);
-          setShowVote(true);
-        }}
-        clusterFilterCount={clusterFilterIds ? clusterFilterIds.size : null}
-        onClearClusterFilter={handleGoHome}
-        userMenu={
-          <UserMenu
-            nickname={nickname}
-            onLogout={handleLogout}
-            onChangePassword={() => setShowPasswordChange(true)}
-          />
-        }
-        // 2026-08-06 심야 3번째 개편: 데스크톱에서는 MealLogCalendar를 아래 CalendarPanel(별도
-        // 카드)에서만 마운트하고, 여기는 null을 넘겨 모바일 탭 쪽에서 중복 마운트되지 않게 한다.
-        // 모바일(!isDesktop)일 때만 실제로 MealLogCalendar 인스턴스를 만들어 탭 콘텐츠로 넘긴다.
-        mealLogSection={
-          isDesktop ? null : (
+      {/* 2026-08-07: 주변식당 카드 + 캘린더 카드를 데스크톱에서 하나의 flex 컬럼으로 묶는 wrapper.
+          모바일에서는 display:contents로 아무 박스도 만들지 않아서(자식들이 각자의 절대좌표로
+          기존처럼 동작), 데스크톱(md:)에서만 실제 flex 컨테이너가 되어 두 카드의 세로 공간을
+          나눠 가진다 - 주변식당(BottomSheet, flex-1)이 남는 공간을 흡수하고 캘린더(CalendarPanel,
+          shrink-0)는 내용 높이만큼만 차지해서, 예전처럼 캘린더 카드 안에 빈 여백이 남지 않는다. */}
+      <div className="contents md:absolute md:inset-y-4 md:left-6 md:z-20 md:flex md:w-[400px] md:flex-col md:gap-4">
+        <RestaurantList
+          companyCode={companyCode}
+          restaurants={listRestaurants}
+          hasAnyRestaurants={restaurants.length > 0}
+          hasRestaurantsOutOfView={listRestaurants.length === 0 && mapAndListRestaurants.length > 0}
+          favoriteIds={favoriteIds}
+          onToggleFavorite={toggleFavorite}
+          onFocusRestaurant={focusRestaurant}
+          onSelectRestaurant={handleSelectRestaurant}
+          onNotify={setToastMessage}
+          unreadNotifCount={unreadNotifCount}
+          onOpenNotifications={openNotifications}
+          onOpenFriends={() => {
+            setFriendsPrefillNickname(null);
+            setShowFriends(true);
+          }}
+          onOpenVote={() => {
+            setVoteFocusId(null);
+            setShowVote(true);
+          }}
+          clusterFilterCount={clusterFilterIds ? clusterFilterIds.size : null}
+          onClearClusterFilter={handleGoHome}
+          userMenu={
+            <UserMenu
+              nickname={nickname}
+              onLogout={handleLogout}
+              onChangePassword={() => setShowPasswordChange(true)}
+            />
+          }
+          // 2026-08-06 심야 3번째 개편: 데스크톱에서는 MealLogCalendar를 아래 CalendarPanel(별도
+          // 카드)에서만 마운트하고, 여기는 null을 넘겨 모바일 탭 쪽에서 중복 마운트되지 않게 한다.
+          // 모바일(!isDesktop)일 때만 실제로 MealLogCalendar 인스턴스를 만들어 탭 콘텐츠로 넘긴다.
+          mealLogSection={
+            isDesktop ? null : (
+              <MealLogCalendar
+                companyCode={companyCode}
+                restaurants={restaurants}
+                onNotify={setToastMessage}
+                refreshSignal={mealLogVersion}
+              />
+            )
+          }
+        />
+
+        {/* 2026-08-06 심야 3번째 개편: "주변 식당" 카드 바로 아래 빈 공간에 캘린더를 별도 카드로
+            노출해달라는 요청 - 데스크톱 전용(모바일은 위 RestaurantList의 탭으로 대체). */}
+        {isDesktop && (
+          <CalendarPanel>
             <MealLogCalendar
               companyCode={companyCode}
               restaurants={restaurants}
               onNotify={setToastMessage}
               refreshSignal={mealLogVersion}
             />
-          )
-        }
-      />
-
-      {/* 2026-08-06 심야 3번째 개편: "주변 식당" 카드 바로 아래 빈 공간에 캘린더를 별도 카드로
-          노출해달라는 요청 - 데스크톱 전용(모바일은 위 RestaurantList의 탭으로 대체). */}
-      {isDesktop && (
-        <CalendarPanel>
-          <MealLogCalendar
-            companyCode={companyCode}
-            restaurants={restaurants}
-            onNotify={setToastMessage}
-            refreshSignal={mealLogVersion}
-          />
-        </CalendarPanel>
-      )}
+          </CalendarPanel>
+        )}
+      </div>
 
       <RestaurantDetail
         restaurant={selectedRestaurant}

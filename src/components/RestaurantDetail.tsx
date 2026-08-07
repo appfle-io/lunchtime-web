@@ -252,16 +252,14 @@ export default function RestaurantDetail({
               {restaurant.distanceMeters}m
             </span>
           )}
-          <span
-            className={[
-              "rounded-full px-2 py-0.5 text-xs",
-              effectiveIsZeroPay
-                ? "bg-primary-light text-primary-dark"
-                : "bg-surface-muted text-ink-soft",
-            ].join(" ")}
-          >
-            {effectiveIsZeroPay ? "제로페이 가능" : "제로페이 미확인"}
-          </span>
+          {/* 2026-08-07: "제로페이 미확인" 배지를 없앴다 - 확인이 안 된 상태를 미리 단정짓지 않고,
+              아래 엄지척/거꾸로엄지척 투표로 사용자들이 직접 판단하도록 열어둔다. 확인된(가능한)
+              경우에만 배지를 보여준다. */}
+          {effectiveIsZeroPay && (
+            <span className="rounded-full bg-primary-light px-2 py-0.5 text-xs text-primary-dark">
+              제로페이 가능
+            </span>
+          )}
           {needsReview && (
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
               ⚠️ 확인 필요 (최근 거꾸로엄지척 다수)
@@ -277,7 +275,7 @@ export default function RestaurantDetail({
           disabled={loggingMeal}
           className="mt-3 w-full rounded-xl2 bg-surface-muted px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-primary-light hover:text-primary-dark disabled:opacity-70"
         >
-          {loggingMeal ? "기록하는 중..." : "🍽️ 오늘 여기서 먹었어요"}
+          {loggingMeal ? "기록하는 중..." : "오늘 여기서 먹었어요"}
         </button>
 
         {todayLogs && todayLogs.length > 0 && (

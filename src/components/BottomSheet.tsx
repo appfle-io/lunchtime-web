@@ -44,8 +44,13 @@ export default function BottomSheet({ children, title, titleRight, header }: Bot
         // 모바일: 하단 고정
         "bottom-0 left-0 right-0",
         expanded ? "h-[80vh]" : "h-[40vh]",
-        // 데스크톱: 좌상단 플로팅 카드
-        "md:left-6 md:right-auto md:top-4 md:bottom-4 md:w-[400px] md:rounded-xl2",
+        // 데스크톱: CompanyHome의 좌측 패널 wrapper(md:flex md:flex-col) 안에서 flex 아이템으로 동작한다.
+        // 2026-08-07: 예전엔 이 카드도 top-4/bottom-4로 고정 높이를 강제해서, 그 아래 캘린더 카드가
+        // 남는 공간을 다 채우다 보니 캘린더 내용보다 카드가 훨씬 커져 빈 여백이 생겼다. 이제 캘린더
+        // 카드(CalendarPanel)는 shrink-0(내용만큼만 차지)이고, 이 카드가 flex-1로 남는 세로 공간을
+        // 전부 흡수한다 - 그만큼 주변식당 목록이 커진다. min-h-0은 내부 가상 스크롤(react-window)
+        // 높이 계산이 flex 자식에서도 정확히 되도록 필요하다.
+        "md:static md:h-auto md:w-full md:flex-1 md:min-h-0 md:rounded-xl2",
       ].join(" ")}
     >
       <button

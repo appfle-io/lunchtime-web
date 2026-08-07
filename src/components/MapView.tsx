@@ -205,17 +205,30 @@ const MARKER_HOVER_ZINDEX = "1000";
 // CSS opacity로만 숨겨온 방식) 지도 SDK가 드래그 중 매 프레임 그 마커들을 다시 배치할 때
 // 그만큼 더 많은 DOM/스타일 계산을 해야 한다. 툴팁 DOM을 "호버할 때만" 만들고 벗어나면 즉시
 // 지워서, 평소(드래그하는 동안 포함) 마커의 DOM은 항상 최소한만 유지되게 한다.
-function bindLazyTooltip(el: HTMLElement, buildTooltipHtml: () => string) {
+// 2026-08-07: 클러스터 툴팁 안의 가맹점 이름을 클릭할 수 있게 하려면, 툴팁 DOM이 실제로
+// 만들어진 뒤에 그 안의 개별 항목에 리스너를 달아야 한다. 그래서 buildTooltipHtml이 문자열
+// 하나만 반환하던 것을 { html, onMount? } 형태로 바꿔서, onMount에서 방금 붙인 tooltipEl을
+// 받아 내부 요소에 클릭 리스너를 걸 수 있게 한다(기존 호출부는 onMount 없이 html만 반환해도 그대로 동작).
+interface TooltipSpec {
+  html: string;
+  onMount?: (tooltipEl: HTMLElement) => void;
+}
+
+function bindLazyTooltip(el: HTMLElement, buildTooltip: () => TooltipSpec) {
   if (!el.style.position) el.style.position = "relative";
   let tooltipEl: HTMLElement | null = null;
 
   el.addEventListener("mouseenter", () => {
     el.style.zIndex = MARKER_HOVER_ZINDEX;
     if (!tooltipEl) {
+      const { html, onMount } = buildTooltip();
       const wrapper = document.createElement("div");
-      wrapper.innerHTML = buildTooltipHtml().trim();
+      wrapper.innerHTML = html.trim();
       tooltipEl = wrapper.firstElementChild as HTMLElement;
-      if (tooltipEl) el.appendChild(tooltipEl);
+      if (tooltipEl) {
+        el.appendChild(tooltipEl);
+        onMount?.(tooltipEl);
+      }
     }
   });
   el.addEventListener("mouseleave", () => {
@@ -225,14 +238,14 @@ function bindLazyTooltip(el: HTMLElement, buildTooltipHtml: () => string) {
   });
 }
 
-// 마커의 "항상 보이는 부분"(bodyHtml)만 실제 DOM으로 만들고, 툴팁(buildTooltipHtml)은
+// 마커의 "항상 보이는 부분"(bodyHtml)만 실제 DOM으로 만들고, 툴팁(buildTooltip)은
 // 호버할 때만 지연 생성해서 붙인다. naver.maps.Marker의 icon.content에 문자열 대신 이
 // 엘리먼트를 그대로 넘기면(NCP Maps v3는 HTMLElement도 허용) 우리가 붙인 리스너가 유지된다.
-function buildMarkerElement(bodyHtml: string, buildTooltipHtml: () => string): HTMLElement {
+function buildMarkerElement(bodyHtml: string, buildTooltip: () => TooltipSpec): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = bodyHtml.trim();
   const root = wrapper.firstElementChild as HTMLElement;
-  bindLazyTooltip(root, buildTooltipHtml);
+  bindLazyTooltip(root, buildTooltip);
   return root;
 }
 
@@ -435,10 +448,9 @@ export default function MapView({
           // but packed into this small tooltip it showed up as garbled/underline-looking glyphs
           // (screenshot). Force-normalizing to NFC here is a safe no-op for already-correct
           // names and fixes the decomposed ones.
-          icon: buildClusterMarkerIcon(
-            group.restaurants.length,
-            group.restaurants.map((r) => (r.name ?? "").normalize("NFC"))
-          ),
+          // 2026-08-07: 이름 목록만 넘기던 것을 group(실제 식당 객체 포함)으로 바꿔서, 툴팁 안의
+          // 각 이름을 클릭했을 때 그 가맹점 정보(상세모달)를 바로 열 수 있게 한다.
+          icon: buildClusterMarkerIcon(group, onMarkerClick),
         });
 
         // 2026-08-06 오후 수정: 클릭하면 "몇 단계 확대"가 아니라, 그 그룹 전체를 부모에게 넘겨서
@@ -507,7 +519,14 @@ export default function MapView({
         strategy="afterInteractive"
         onReady={() => setReady(true)}
       />
-      <div ref={mapElRef} className="absolute inset-0 z-0 h-full w-full" />
+      {/* 2026-08-07: 데스크톱에서는 좌측에 주변식당/캘린더 카드(md:left-6, 폭 400px)가 항상 떠
+          있어서, 그 뒤에 깔리는 지도 영역(왼쪽 0~424px)은 어차피 안 보이는 "죽은 부분"이었다.
+          지도 컨테이너 자체를 그 카드 폭만큼 오른쪽에서 시작하게 해서 실제로 보이는 영역만
+          그리도록 한다 - 모바일은 카드가 화면 하단에 뜨는 구조라 해당 없음(기존처럼 전체 화면).
+          2026-08-07 수정: 카드 왼쪽 여백(md:left-6 = 24px)과 똑같은 폭의 여백을 카드 오른쪽에도
+          둬서 카드가 화면 가장자리와 지도 사이에서 좌우 대칭으로 "떠 있는" 느낌이 나게 한다
+          (24px 여백 + 400px 카드 폭 + 24px 여백 = 448px 지점부터 지도 시작). */}
+      <div ref={mapElRef} className="absolute inset-0 z-0 h-full w-full md:left-[448px]" />
     </>
   );
 }
@@ -543,11 +562,13 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
         </div>
       </div>
     `,
-      () => `
+      () => ({
+        html: `
         <span class="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-ink px-2 py-1 text-[10px] font-medium text-white shadow-soft">
           ${displayName}
         </span>
-      `
+      `,
+      })
     ),
     anchor: new window.naver.maps.Point(16, 16),
   };
@@ -567,7 +588,15 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
 // 어디서 한 이름이 끝나고 다음 이름이 시작하는지 구분이 안 되고 뭉개져 보인다는 피드백을
 // 받아서, 폭을 200→240px로, 글자를 11→12px로 늘리고 이름 사이에 구분선(divide-y)을 넣어서
 // 줄 단위로 또렷하게 보이게 했다. "총 N곳" 헤더는 스크롤해도 항상 맨 위에 남는다.
-function buildClusterMarkerIcon(count: number, names: string[]) {
+//
+// 2026-08-07 신규: 툴팁에 뜬 이름을 클릭하면 그 가맹점의 상세 정보(RestaurantDetail 모달)가
+// 바로 열리게 한다 - 예전엔 목록만 보여주고 클릭해도 아무 반응이 없었다. onMount에서 각 이름
+// <div>에 클릭 리스너를 걸어 onSelectRestaurant(마커 클릭과 동일한 핸들러)를 호출한다.
+function buildClusterMarkerIcon(
+  group: ClusterGroup,
+  onSelectRestaurant?: (restaurant: RestaurantSummary) => void
+) {
+  const count = group.restaurants.length;
   // 식당 수가 많을수록 살짝 더 크게 - 한눈에 "여기 많이 모여있다"는 걸 알 수 있게.
   const size = count >= 50 ? 44 : count >= 10 ? 38 : 32;
 
@@ -585,13 +614,19 @@ function buildClusterMarkerIcon(count: number, names: string[]) {
     `,
       () => {
         const TOOLTIP_MAX_NAMES = 60;
-        const shown = names.slice(0, TOOLTIP_MAX_NAMES);
-        const remaining = names.length - shown.length;
+        const shown = group.restaurants.slice(0, TOOLTIP_MAX_NAMES);
+        const remaining = group.restaurants.length - shown.length;
         const namesHtml =
-          shown.map((name) => `<div class="py-1 break-words">${name}</div>`).join("") +
+          shown
+            .map(
+              (r, i) =>
+                `<div class="cursor-pointer py-1 break-words transition hover:text-primary-light" data-restaurant-idx="${i}">${(r.name ?? "").normalize("NFC")}</div>`
+            )
+            .join("") +
           (remaining > 0 ? `<div class="py-1 text-white/60">외 ${remaining}곳</div>` : "");
 
-        return `
+        return {
+          html: `
           <div
             class="pointer-events-auto absolute bottom-full left-1/2 mb-1.5 flex w-[240px] max-h-[260px] -translate-x-1/2 flex-col overflow-y-auto whitespace-normal divide-y divide-white/10 rounded-lg bg-ink px-3 py-1 text-left text-[12px] leading-snug text-white shadow-soft"
             onwheel="event.stopPropagation()"
@@ -600,7 +635,21 @@ function buildClusterMarkerIcon(count: number, names: string[]) {
             <div class="sticky top-0 bg-ink py-1.5 text-[10px] font-semibold text-white/60">총 ${count}곳</div>
             ${namesHtml}
           </div>
-        `;
+        `,
+          onMount: (tooltipEl) => {
+            if (!onSelectRestaurant) return;
+            tooltipEl.querySelectorAll<HTMLElement>("[data-restaurant-idx]").forEach((node) => {
+              const restaurant = shown[Number(node.dataset.restaurantIdx)];
+              if (!restaurant) return;
+              // mousedown도 막아야 지도 드래그가 시작되지 않는다(컨테이너의 onmousedown과 동일한 이유).
+              node.addEventListener("mousedown", (e) => e.stopPropagation());
+              node.addEventListener("click", (e) => {
+                e.stopPropagation();
+                onSelectRestaurant(restaurant);
+              });
+            });
+          },
+        };
       }
     ),
     anchor: new window.naver.maps.Point(size / 2, size / 2),
