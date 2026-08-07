@@ -348,6 +348,7 @@ export default function MapView({
     window.naver.maps.Event.addListener(mapRef.current, "idle", () => {
       setBoundsVersion((v) => v + 1);
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
   // 회사 좌표가 바뀌면(드문 경우) 지도를 다시 만들지 않고 중심/마커 위치만 옮긴다.

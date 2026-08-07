@@ -172,7 +172,7 @@ export default function RestaurantDetail({
 
   async function handleSubmitComment(e: React.FormEvent) {
     e.preventDefault();
-    if (!commentText.trim()) return;
+    if (!restaurant || !commentText.trim()) return;
 
     setSubmitting(true);
     setSubmitError(null);
