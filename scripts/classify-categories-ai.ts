@@ -37,7 +37,7 @@ dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 const BATCH_SIZE = 40;
 const SLEEP_MS_BETWEEN_BATCHES = 1200; // Gemini 분당 요청 제한에 여유를 두기 위한 슬리핑.
 
-const GEMINI_MODEL = "gemini-2.5-flash-lite"; // packinbag과 동일 - 단순 분류 작업엔 충분하고 저렴함.
+const GEMINI_MODEL = "gemini-3.5-flash-lite"; // 2.0/2.5는 신규 사용자에게 막혀있어 3.5-lite로 변경 (실제 테스트로 확인).
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const API_MAX_RETRIES = 2;
 const API_RETRY_DELAY_MS = 900;

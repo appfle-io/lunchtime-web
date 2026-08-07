@@ -36,7 +36,7 @@ function matchesSpecialFilter(
     case "favorite":
       return favoriteIds.has(restaurant.id);
     case "groupdining":
-      return isGroupDiningFriendly(restaurant.category, restaurant.name);
+      return isGroupDiningFriendly(restaurant.category, restaurant.name, restaurant.categoryLabel);
     case "recentlyPopular":
       return popularIds.has(restaurant.id);
     case "summer":
