@@ -56,7 +56,7 @@ export function filterRestaurants(
   popularIds: Set<string> = new Set()
 ): RestaurantSummary[] {
   return restaurants.filter((r) => {
-    if (activeCategory && getCategoryVisual(r.category).label !== activeCategory) return false;
+    if (activeCategory && getCategoryVisual(r.category, r.categoryLabel).label !== activeCategory) return false;
     for (const key of activeSpecialFilters) {
       if (!matchesSpecialFilter(key, r, favoriteIds, popularIds)) return false;
     }
@@ -69,7 +69,7 @@ export function filterRestaurants(
 export function getAvailableCategoryLabels(restaurants: RestaurantSummary[]): string[] {
   const labels = new Set<string>();
   for (const r of restaurants) {
-    labels.add(getCategoryVisual(r.category).label);
+    labels.add(getCategoryVisual(r.category, r.categoryLabel).label);
   }
   return Array.from(labels).sort();
 }

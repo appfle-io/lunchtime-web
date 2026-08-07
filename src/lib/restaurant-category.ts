@@ -1,6 +1,15 @@
 // 네이버 지역검색이 내려주는 category 문자열(예: "음식점>한식>백반,죽")을 보고
 // 마커에 쓸 이모지/색상/표시라벨을 결정한다. 정교한 분류가 아니라 키워드 매칭 수준이라
 // 애매한 카테고리는 기본값(기타)으로 빠진다.
+//
+// 2026-08-07 추가: 정부 공공데이터(소상공인시장진흥공단 상가정보)로 시딩한 식당은 업종 텍스트
+// 자체가 뭉뚱그려져 있는 경우가 많다(갈비집도 그냥 "한식음식점"으로만 등록되거나, "기타 간이
+// 음식점" 같은 진짜 뭉뚱그린 업종으로 등록된 곳도 많음) - 그래서 이 파일의 키워드 정규식만으로는
+// 한계가 있다. 이걸 보완하기 위해 scripts/classify-categories-ai.ts가 Gemini로 식당 이름+원본
+// 업종 텍스트를 보고 아래 CATEGORY_LABELS 중 하나로 재분류해서 Firestore의 categoryLabel
+// 필드에 저장해둔다. getCategoryVisual()은 categoryLabel이 있으면 그걸 최우선으로 신뢰하고,
+// 없을 때만 기존처럼 category 원본 텍스트를 정규식으로 추론한다 - 원본 category는 그대로 두고
+// "보강"만 하는 방식이라 안전하게 되돌릴 수 있다.
 export interface CategoryVisual {
   emoji: string;
   color: string;
@@ -8,21 +17,51 @@ export interface CategoryVisual {
 }
 
 const RULES: { test: RegExp; visual: CategoryVisual }[] = [
-  { test: /한식|백반|국밥|찌개|한정식/, visual: { emoji: "🍚", color: "#F59E0B", label: "한식" } },
-  { test: /중식|중국음식|짜장|짬뽕/, visual: { emoji: "🥡", color: "#EF4444", label: "중식" } },
-  { test: /일식|돈부리|라멘|스시|초밥|이자카야/, visual: { emoji: "🍣", color: "#3B82F6", label: "일식" } },
-  { test: /양식|이탈리아|스테이크|파스타|버거|피자/, visual: { emoji: "🍔", color: "#8B5CF6", label: "양식" } },
+  {
+    test: /한식|백반|국밥|찌개|한정식|해장국|감자탕|설렁탕|곰탕|매운탕|추어탕|순두부/,
+    visual: { emoji: "🍚", color: "#F59E0B", label: "한식" },
+  },
+  { test: /중식|중국음식|중화요리|짜장|짬뽕|딤섬|양꼬치/, visual: { emoji: "🥡", color: "#EF4444", label: "중식" } },
+  {
+    test: /일식|돈부리|라멘|스시|초밥|이자카야|돈까스|우동|사시미|덮밥|규동/,
+    visual: { emoji: "🍣", color: "#3B82F6", label: "일식" },
+  },
+  {
+    test: /양식|이탈리아|스테이크|파스타|버거|피자|리조또|브런치/,
+    visual: { emoji: "🍔", color: "#8B5CF6", label: "양식" },
+  },
   { test: /카페|디저트|베이커리|빵/, visual: { emoji: "☕", color: "#92400E", label: "카페" } },
   { test: /치킨/, visual: { emoji: "🍗", color: "#F97316", label: "치킨" } },
-  { test: /육류|고기|갈비|삼겹살/, visual: { emoji: "🥩", color: "#B91C1C", label: "고기" } },
-  { test: /분식|떡볶이|김밥/, visual: { emoji: "🍢", color: "#DB2777", label: "분식" } },
-  { test: /국수|칼국수|냉면/, visual: { emoji: "🍜", color: "#EA580C", label: "면류" } },
+  {
+    // "고기" 필터가 실제로 잡아야 하는 회식/구이류 - 보쌈/족발처럼 정육 위주 메뉴도 여기 포함.
+    test: /육류|고기|갈비|삼겹살|목살|항정살|곱창|막창|정육|숯불구이|보쌈|족발|우삼겹|한우/,
+    visual: { emoji: "🥩", color: "#B91C1C", label: "고기" },
+  },
+  { test: /분식|떡볶이|김밥|순대|어묵/, visual: { emoji: "🍢", color: "#DB2777", label: "분식" } },
+  { test: /국수|칼국수|냉면|쌀국수|메밀/, visual: { emoji: "🍜", color: "#EA580C", label: "면류" } },
   { test: /샐러드|도시락|다이어트/, visual: { emoji: "🥗", color: "#16A34A", label: "샐러드/도시락" } },
 ];
 
 const DEFAULT_VISUAL: CategoryVisual = { emoji: "🍽️", color: "#6B7280", label: "기타" };
 
-export function getCategoryVisual(category: string | null | undefined): CategoryVisual {
+// AI 재분류 스크립트 등에서 "이 라벨 중 하나로만 답하라"고 제약을 걸 때 쓰는 전체 라벨 목록.
+export const CATEGORY_LABELS: string[] = [...RULES.map((r) => r.visual.label), DEFAULT_VISUAL.label];
+
+const VISUAL_BY_LABEL = new Map<string, CategoryVisual>([
+  ...RULES.map((r): [string, CategoryVisual] => [r.visual.label, r.visual]),
+  [DEFAULT_VISUAL.label, DEFAULT_VISUAL],
+]);
+
+// categoryLabel: AI(Gemini)나 사람이 확정한 정확한 라벨이 있으면 최우선으로 신뢰한다.
+// category: 없거나 모르는 값이면, 기존처럼 네이버/정부 원본 업종 텍스트를 정규식으로 추론한다.
+export function getCategoryVisual(
+  category: string | null | undefined,
+  categoryLabel?: string | null
+): CategoryVisual {
+  if (categoryLabel) {
+    const known = VISUAL_BY_LABEL.get(categoryLabel);
+    if (known) return known;
+  }
   if (!category) return DEFAULT_VISUAL;
   const rule = RULES.find((r) => r.test.test(category));
   return rule ? rule.visual : DEFAULT_VISUAL;

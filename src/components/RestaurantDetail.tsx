@@ -94,7 +94,7 @@ export default function RestaurantDetail({
 
   if (!restaurant) return null;
 
-  const visual = getCategoryVisual(restaurant.category);
+  const visual = getCategoryVisual(restaurant.category, restaurant.categoryLabel);
 
   async function handleVote(vote: "up" | "down") {
     if (!restaurant || voting) return;

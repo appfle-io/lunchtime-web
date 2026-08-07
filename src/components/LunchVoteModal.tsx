@@ -517,14 +517,14 @@ export default function LunchVoteModal({
                               key: r.id,
                               label: r.name,
                               restaurantId: r.id,
-                              category: getCategoryVisual(r.category).label,
+                              category: getCategoryVisual(r.category, r.categoryLabel).label,
                             })
                           }
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-ink transition hover:bg-primary-light hover:text-primary-dark"
                         >
                           <span className="min-w-0 flex-1 truncate">{r.name}</span>
                           <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-ink-soft">
-                            {getCategoryVisual(r.category).label}
+                            {getCategoryVisual(r.category, r.categoryLabel).label}
                           </span>
                         </button>
                       </li>

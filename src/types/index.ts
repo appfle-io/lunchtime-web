@@ -21,6 +21,11 @@ export interface RestaurantSummary {
   lat: number;
   lng: number;
   category?: string | null;
+  // 2026-08-07 신규: Gemini로 재분류한 확정 카테고리 라벨(restaurant-category.ts의 CATEGORY_LABELS
+  // 중 하나). 정부 데이터로 시딩된 category 원본 텍스트가 뭉뚱그려져 있어서("고기"인데 "한식음식점"
+  // 으로만 찍힌 경우 등) 필터가 부정확했던 문제를 보완하기 위한 필드 - scripts/classify-categories-ai.ts
+  // 참고. 있으면 getCategoryVisual()이 이 값을 최우선으로 쓴다.
+  categoryLabel?: string | null;
   isZeroPay: boolean;
   // 2026-08-06 신규: 제로페이 엄지척/거꾸로엄지척 투표 결과로 계산되는 값. isZeroPay 자체가
   // (등록 당시 기본값 false로 시작해서) 투표로 true로 바뀔 수 있는 필드라서, 이 플래그는

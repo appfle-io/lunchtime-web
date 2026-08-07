@@ -538,7 +538,7 @@ export default function MapView({
 // shadow-soft(box-shadow)도 마커 자체에서는 빼서(항상 존재하는 요소라 누적 비용이 크다)
 // ring만으로 테두리를 표현한다.
 export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
-  const visual = getCategoryVisual(restaurant.category);
+  const visual = getCategoryVisual(restaurant.category, restaurant.categoryLabel);
   const displayName = (restaurant.name ?? "").normalize("NFC");
   const zeroPayBadge = restaurant.isZeroPay
     ? `<span class="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-[8px] text-white ring-1 ring-white">₩</span>`

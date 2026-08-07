@@ -27,6 +27,8 @@ export async function listRestaurants(companyCode: string): Promise<RestaurantSu
       lat: data.lat,
       lng: data.lng,
       category: data.category ?? null,
+      // 2026-08-07 신규: AI 재분류 결과 (scripts/classify-categories-ai.ts). 없으면 null.
+      categoryLabel: data.categoryLabel ?? null,
       isZeroPay: Boolean(data.isZeroPay),
       // 2026-08-06 신규: 제로페이 엄지척 투표에서 계산되어 캐시된 값 (lib/zeropay-server.ts 참고).
       isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
@@ -150,6 +152,7 @@ export async function addRestaurantFromCandidate(
         lat: data.lat,
         lng: data.lng,
         category: data.category ?? null,
+        categoryLabel: data.categoryLabel ?? null,
         isZeroPay: Boolean(data.isZeroPay),
         isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
         distanceMeters: data.distanceMeters,
@@ -185,6 +188,7 @@ export async function addRestaurantFromCandidate(
       lat: restaurant.lat,
       lng: restaurant.lng,
       category: restaurant.category,
+      categoryLabel: null,
       isZeroPay: restaurant.isZeroPay,
       isZeroPayNeedsReview: restaurant.isZeroPayNeedsReview,
       distanceMeters: restaurant.distanceMeters,

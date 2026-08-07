@@ -489,7 +489,7 @@ function MealLogDayModal({
                       >
                         <span className="min-w-0 flex-1 truncate">{r.name}</span>
                         <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-ink-soft">
-                          {getCategoryVisual(r.category).label}
+                          {getCategoryVisual(r.category, r.categoryLabel).label}
                         </span>
                       </button>
                     </li>

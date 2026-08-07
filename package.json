@@ -12,13 +12,13 @@
     "seed:opendata": "tsx scripts/seed-restaurants-opendata.ts",
     "seed:csv": "tsx scripts/seed-restaurants-csv.ts",
     "seed:security-question": "tsx scripts/seed-security-question.ts",
+    "classify:categories": "tsx scripts/classify-categories-ai.ts",
     "seed:dummy-users": "tsx scripts/seed-dummy-users.ts",
     "remove:dummy-users": "tsx scripts/remove-dummy-users.ts",
     "set:neighborhoods": "tsx scripts/set-company-neighborhoods.ts",
     "set:signgucd": "tsx scripts/set-company-signgucd.ts"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
     "dotenv": "^16.4.5",
     "firebase": "^10.13.0",
     "firebase-admin": "^12.5.0",
