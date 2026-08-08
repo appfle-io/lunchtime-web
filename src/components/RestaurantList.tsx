@@ -60,6 +60,12 @@ interface RestaurantListProps {
   onOpenNotifications?: () => void;
   onOpenFriends?: () => void;
   onOpenVote?: () => void;
+  // 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛 버튼 (실제 모달/추천 로직은 CompanyHome이 들고 있는
+  // LunchRouletteModal이 담당 - 다른 헤더 버튼들과 동일한 패턴).
+  onOpenRecommend?: () => void;
+  // 2026-08-08 신규: 돋보기(🔍) 검색 버튼 - 실제 검색 상태/모달은 CompanyHome이 들고 있는
+  // RestaurantSearchModal이 담당(마찬가지로 다른 헤더 버튼들과 동일한 패턴).
+  onOpenSearch?: () => void;
   // 2026-08-06 오후 신규: 지도에서 클러스터를 클릭해 구역 확대 상태로 들어왔을 때(null이 아니면 숫자)
   // 리스트도 그 구역 식당만 보고 있다는 걸 배너로 바로 알려주기 위해.
   clusterFilterCount?: number | null;
@@ -154,7 +160,9 @@ function RestaurantRow({ index, style, data }: ListChildComponentProps<Restauran
   );
 }
 
-// TODO: "오늘 뭐 먹지?" 버튼 클릭 시 룰렛/카드 스와이프 인터랙션 + /api/recommend(Gemini) 호출.
+// "오늘 뭐 먹지?" 버튼: 2026-08-08부터 실제로 동작함 - onOpenRecommend가 CompanyHome의
+// LunchRouletteModal을 연다(다른 헤더 버튼들과 동일 패턴). 추천 후보 범위/Gemini 호출/랜덤 폴백
+// 로직은 그 모달과 /api/recommend가 담당하고, 여기서는 버튼과 콜백 연결만 한다.
 // TODO: 지도 마커 클릭 시 이 리스트에서 해당 항목 하이라이트/스크롤 (지금은 리스트 -> 지도 방향만 연결됨)
 // 카테고리/제로페이/도보5분/즐겨찾기/회식/여름별미 필터 UI는 FilterBar(지도 위 상단 플로팅)로 옮겨졌다.
 // 여기서는 이미 필터링된 restaurants를 받아서 렌더링만 한다 (2026-08-06).
@@ -186,6 +194,8 @@ export default function RestaurantList({
   onOpenNotifications,
   onOpenFriends,
   onOpenVote,
+  onOpenRecommend,
+  onOpenSearch,
   clusterFilterCount = null,
   onClearClusterFilter,
   userMenu,
@@ -203,6 +213,12 @@ export default function RestaurantList({
   const [searchError, setSearchError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<RestaurantCandidate[] | null>(null);
   const [addingIndex, setAddingIndex] = useState<number | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    similarName: string;
+    similarAddress: string;
+    distanceMeters: number;
+    similarity: number;
+  } | null>(null);
   // 가상 스크롤(react-window)에 넘길 높이 - 이 목록이 실제로 차지하는 픽셀 높이를 측정해야 한다.
   const [listContainerRef, listHeight] = useElementHeight<HTMLDivElement>();
 
@@ -214,6 +230,7 @@ export default function RestaurantList({
     setSearchError(null);
     setCandidates(null);
     setAddingIndex(null);
+    setDuplicateWarning(null);
   }
 
   // 1단계: 이름(+위치 힌트)으로 후보 목록을 검색한다. 아직 아무것도 저장하지 않는다.
@@ -255,6 +272,7 @@ export default function RestaurantList({
   async function handlePickCandidate(candidate: RestaurantCandidate, index: number) {
     setAddingIndex(index);
     setSearchError(null);
+    setDuplicateWarning(null);
 
     try {
       const res = await fetch("/api/restaurants", {
@@ -270,21 +288,44 @@ export default function RestaurantList({
         return;
       }
 
-      const { restaurant, existing } = data as {
+      const { restaurant, existing, duplicateWarning: warn } = data as {
         restaurant: RestaurantSummary;
         existing: boolean;
+        duplicateWarning?: {
+          similarRestaurant: { name: string; address: string; distanceMeters: number };
+          similarity: number;
+        };
       };
 
-      resetAddFlow();
-
       if (existing) {
-        // 이미 있는 식당이면 새로 만들지 않고, 토스트로 알려준 다음 지도만 그 위치로 이동시킨다.
+        // 완전히 같은 식당(같은 id) - 모달 닫고 토스트
+        resetAddFlow();
         onNotify?.(`"${restaurant.name}"은 이미 목록에 있어요.`);
-      } else {
-        router.refresh(); // 서버 컴포넌트를 다시 실행해서 방금 추가한 식당을 목록에 반영
-        onNotify?.(`"${restaurant.name}"을 추가했어요.`);
+        onFocusRestaurant?.(restaurant);
+        return;
       }
-      onFocusRestaurant?.(restaurant);
+
+      // 신규 등록 성공
+      router.refresh();
+
+      if (warn) {
+        // 중복 경고: 모달은 닫지 않고 경고 배너만 표시 (사용자가 직접 확인 후 닫기)
+        setAddingIndex(null);
+        setCandidates(null);
+        setDuplicateWarning({
+          similarName: warn.similarRestaurant.name,
+          similarAddress: warn.similarRestaurant.address,
+          distanceMeters: warn.similarRestaurant.distanceMeters,
+          similarity: warn.similarity,
+        });
+        // 지도는 이미 추가된 곳으로 이동
+        onFocusRestaurant?.(restaurant);
+      } else {
+        // 깔끔한 신규 등록
+        resetAddFlow();
+        onNotify?.(`"${restaurant.name}"을 추가했어요. 제로페이 여부는 잠시 후 자동으로 확인돼요. ⏳`);
+        onFocusRestaurant?.(restaurant);
+      }
     } catch {
       setSearchError("네트워크 오류로 추가하지 못했어요. 다시 시도해줘.");
       setAddingIndex(null);
@@ -296,6 +337,13 @@ export default function RestaurantList({
       {/* 2026-08-06 신규: 알림/친구목록/투표 버튼. 다른 절대위치 버튼처럼 화면 좌표를 새로 잡지 않고,
           항상 안전한 이 header 슬롯에 같이 둔다(레이아웃 회귀를 또 만들지 않기 위함). */}
       <div className="mb-2 flex gap-1.5">
+        <button
+          onClick={onOpenSearch}
+          aria-label="가맹점 검색"
+          className="flex-1 rounded-xl2 border border-black/10 px-2 py-2 text-sm transition hover:border-primary hover:text-primary"
+        >
+          🔍
+        </button>
         <button
           onClick={onOpenNotifications}
           aria-label="알림"
@@ -348,8 +396,11 @@ export default function RestaurantList({
       {/* "오늘 뭐 먹지?"/"직접 추가"는 목록 전용 액션이라, 모바일에서 캘린더 탭을 보고 있을 때는
           숨긴다. 데스크톱은 탭 상태와 무관하게 항상 목록 카드이므로 md:block으로 다시 보이게 한다. */}
       <div className={mobileTab === "calendar" ? "hidden md:block" : ""}>
-        <button className="mb-2 w-full rounded-xl2 bg-ink px-4 py-3 font-semibold text-white transition hover:bg-black">
-          오늘 뭐 먹지?
+        <button
+          onClick={onOpenRecommend}
+          className="mb-2 w-full rounded-xl2 bg-ink px-4 py-3 font-semibold text-white transition hover:bg-black"
+        >
+          🎲 오늘 뭐 먹지?
         </button>
         <button
           onClick={() => setShowAddModal(true)}
@@ -453,6 +504,28 @@ export default function RestaurantList({
                 className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
               />
               {searchError && <p className="text-xs text-primary-dark">{searchError}</p>}
+
+              {/* 중복 경고 배너 - 등록은 완료됐지만 비슷한 가맹점이 이미 있을 때 표시 */}
+              {duplicateWarning && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="mb-1 text-xs font-semibold text-amber-700">⚠️ 비슷한 가맹점이 이미 있어요</p>
+                  <p className="text-xs text-amber-700">
+                    <span className="font-medium">{duplicateWarning.similarName}</span>
+                    {" — "}
+                    {duplicateWarning.distanceMeters}m 거리에 유사도 {Math.round(duplicateWarning.similarity * 100)}% 가맹점이 등록돼 있어요.
+                  </p>
+                  <p className="mt-1 text-[11px] text-amber-600">{duplicateWarning.similarAddress}</p>
+                  <p className="mt-1.5 text-[11px] text-amber-600">등록은 완료됐어요. 실제로 다른 곳이라면 그냥 닫아주세요.</p>
+                  <button
+                    type="button"
+                    onClick={resetAddFlow}
+                    className="mt-2 w-full rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-200"
+                  >
+                    확인했어요, 닫기
+                  </button>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <button
                   type="submit"

@@ -56,6 +56,37 @@ export async function listMealLogsForDate(
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+// 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛 기능이 Gemini에게 "최근에 다녀온 곳은 피해줘"라고
+// 알려주기 위해 최근 방문 식당 이름 목록이 필요하다. mealLogs 전체를 가져와(위 함수들과 동일
+// 패턴 - orderBy 없이 메모리에서 처리) 최근 daysBack일 이내 기록만 날짜 내림차순으로 훑어서
+// 중복 없이 최근 이름 순으로 최대 limit개를 뽑는다. 실패해도(권한/네트워크 등) 이 기능은 있으면
+// 좋은 부가정보일 뿐이라 호출부에서 try/catch로 조용히 빈 배열로 대체하면 된다.
+export async function getRecentRestaurantNames(
+  companyCode: string,
+  nicknameId: string,
+  daysBack = 14,
+  limit = 8
+): Promise<string[]> {
+  const snapshot = await mealLogsRef(companyCode, nicknameId).get();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - daysBack);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  const entries = snapshot.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() } as MealLogEntry))
+    .filter((entry) => entry.date >= cutoffStr)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+
+  const names: string[] = [];
+  for (const entry of entries) {
+    if (!entry.restaurantName) continue;
+    if (names.includes(entry.restaurantName)) continue;
+    names.push(entry.restaurantName);
+    if (names.length >= limit) break;
+  }
+  return names;
+}
+
 // 새 기록 추가(하루에 여러 번 호출해도 각각 별도 건으로 쌓인다 - 회식 등으로 하루 여러 끼 기록 가능).
 export async function addMealLog(
   companyCode: string,

@@ -16,7 +16,11 @@
     "seed:dummy-users": "tsx scripts/seed-dummy-users.ts",
     "remove:dummy-users": "tsx scripts/remove-dummy-users.ts",
     "set:neighborhoods": "tsx scripts/set-company-neighborhoods.ts",
-    "set:signgucd": "tsx scripts/set-company-signgucd.ts"
+    "set:signgucd": "tsx scripts/set-company-signgucd.ts",
+    "enrich:zeropay": "tsx scripts/enrich-zeropay-naver.ts",
+    "enrich:zeropay-official": "tsx scripts/enrich-zeropay-official.ts",
+    "dedupe:restaurants": "tsx scripts/deduplicate-restaurants.ts",
+    "verify:unmatched": "tsx scripts/verify-unmatched-restaurants.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -35,6 +39,7 @@
     "autoprefixer": "^10.4.19",
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.35",
+    "playwright": "^1.62.1",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.4",
     "tsx": "^4.19.0",

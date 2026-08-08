@@ -37,9 +37,18 @@ export async function listRestaurants(companyCode: string): Promise<RestaurantSu
   });
 }
 
+export interface DuplicateWarning {
+  /** 유사한 기존 가맹점 */
+  similarRestaurant: { id: string; name: string; address: string; distanceMeters: number };
+  /** 이름 유사도 (0~1) */
+  similarity: number;
+}
+
 export interface AddRestaurantResult {
   restaurant: RestaurantSummary;
   existing: boolean; // true면 이미 있던 식당이라 새로 만들지 않고 기존 항목을 그대로 반환한 것
+  /** 비슷한 가맹점이 이미 DB에 있을 때 설정 (등록은 그대로 진행되지만 프론트에서 경고 표시용) */
+  duplicateWarning?: DuplicateWarning;
 }
 
 export interface RestaurantCandidate {
@@ -128,6 +137,15 @@ export async function searchRestaurantCandidates(
 // "직접 추가" 2단계 플로우의 2단계: 사용자가 searchRestaurantCandidates 결과 중 직접 고른 후보를
 // 검증 없이 그대로 저장한다(사용자가 이미 상호명+주소를 보고 확인했으므로). 이미 같은 식당(같은 id)이
 // 있으면 새로 만들지 않고 existing:true로 기존 데이터를 돌려준다.
+// ── 내부 헬퍼: 이름 유사도 (자카드) ─────────────────────────────
+function nameSimilarity(a: string, b: string): number {
+  const sa = new Set(a.replace(/\s/g, "").split(""));
+  const sb = new Set(b.replace(/\s/g, "").split(""));
+  const intersection = [...sa].filter((c) => sb.has(c)).length;
+  const union = new Set([...sa, ...sb]).size;
+  return union === 0 ? 1 : intersection / union;
+}
+
 export async function addRestaurantFromCandidate(
   companyCode: string,
   candidate: { title: string; address: string; lat: number; lng: number; category: string | null }
@@ -164,6 +182,35 @@ export async function addRestaurantFromCandidate(
     haversineMeters(company.centerLat, company.centerLng, candidate.lat, candidate.lng)
   );
 
+  // ── 중복 체크: 이미 DB에 비슷한 가맹점이 있는지 확인 ──────────────
+  // 이름 유사도 75% 이상 + 직선거리 100m 이내인 기존 가맹점이 있으면 경고.
+  // 등록 자체는 계속 진행하되, 프론트에서 "혹시 이 가맹점이랑 같은 곳 아닌가요?" 경고 표시용.
+  let duplicateWarning: DuplicateWarning | undefined;
+  try {
+    const allSnap = await db.collection("companies").doc(companyCode).collection("restaurants").get();
+    for (const doc of allSnap.docs) {
+      if (doc.id === id) continue;
+      const d = doc.data();
+      const sim = nameSimilarity(candidate.title, (d.name as string) ?? "");
+      if (sim < 0.75) continue;
+      const dist = haversineMeters(candidate.lat, candidate.lng, d.lat as number, d.lng as number);
+      if (dist <= 100) {
+        duplicateWarning = {
+          similarRestaurant: {
+            id: doc.id,
+            name: d.name as string,
+            address: d.address as string,
+            distanceMeters: Math.round(dist),
+          },
+          similarity: Math.round(sim * 100) / 100,
+        };
+        break; // 첫 번째 발견된 유사 가맹점만 반환
+      }
+    }
+  } catch {
+    // 중복 체크 실패는 무시하고 등록 계속 진행
+  }
+
   const restaurant = {
     name: candidate.title,
     address: candidate.address,
@@ -181,6 +228,7 @@ export async function addRestaurantFromCandidate(
 
   return {
     existing: false,
+    duplicateWarning,
     restaurant: {
       id,
       name: restaurant.name,
@@ -195,3 +243,4 @@ export async function addRestaurantFromCandidate(
     },
   };
 }
+

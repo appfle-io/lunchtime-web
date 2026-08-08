@@ -79,19 +79,31 @@ async function callGemini(userText: string, opts: CallGeminiOptions = {}): Promi
 
 interface RecommendationContext {
   weather?: string; // 예: "32도, 맑음"
-  recentRestaurantNames: string[]; // 최근 방문 이력 (회피 추천용)
+  recentRestaurantNames: string[]; // 최근 방문 이력 (회피 추천용) - 나 혼자일 때도, 친구를 초대했을 때는
+  // 참가자 전원의 최근 방문 이력을 합친 것일 수도 있다 (아래 participantCount 참고).
   candidates: RestaurantSummary[];
+  // 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛에 친구를 초대해서 같이 돌릴 수 있게 되면서, 이 추천이
+  // 몇 명을 위한 것인지도 Gemini에게 알려준다 - recentRestaurantNames가 이제 나 혼자만의 이력이
+  // 아니라 초대된 사람들 전원의 최근 방문을 합친 것이라는 맥락을 주고, 인원이 많으면(3명 이상)
+  // 여러 명이 함께 가기 좋은 곳(자리가 넉넉한 곳 등)을 더 고려해달라고 넌지시 알려주기 위함.
+  participantCount?: number;
 }
 
 /**
  * "오늘의 추천" - 날씨/최근 이력을 고려해 후보 중 하나를 추천하고 이유를 짧게 설명.
- * TODO: 여러 명(팀) 취향 통합 추천은 candidates + 참여자별 최근 이력을 함께 넘기는 방식으로 확장.
  */
 export async function recommendLunch(ctx: RecommendationContext) {
+  const participantCount = ctx.participantCount ?? 1;
+  const participantLine =
+    participantCount <= 1
+      ? "오늘은 혼자 먹어요."
+      : `오늘은 총 ${participantCount}명이 함께 먹어요 - 최근 방문 이력은 이 사람들 전체를 합친 목록이니, 인원이 여럿이면 다 같이 가기 좋은 곳도 고려해주세요.`;
+
   const prompt = `
 당신은 회사 동료들의 점심 메뉴를 추천해주는 재치있는 도우미입니다.
 아래 후보 식당 중 오늘 점심으로 가장 적절한 곳 1곳을 추천하고, 한두 문장으로 캐주얼하게 이유를 설명하세요.
 
+${participantLine}
 오늘 날씨: ${ctx.weather ?? "정보 없음"}
 최근에 다녀온 식당(가능하면 피하기): ${ctx.recentRestaurantNames.join(", ") || "없음"}
 

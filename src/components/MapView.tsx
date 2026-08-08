@@ -34,6 +34,11 @@ interface MapViewProps {
   // null이면 "제한 없음"(전체를 그대로 보여줘도 됨) - 지도가 아직 준비 안 됐거나, 컬링을
   // 건너뛰는 상태(disableClustering, 클러스터 클릭 직후)일 때 그렇다.
   onVisibleRestaurantsChange?: (ids: Set<string> | null) => void;
+  // 2026-08-08 신규: 지도 중심/줌이 "홈" 위치(회사 중심, HOME_ZOOM)에서 조금이라도 벗어났는지를
+  // 보고한다. 클러스터 확대/포커스 이동과는 별개로, 사용자가 지도를 직접 드래그/줌해서 조금이라도
+  // 움직였을 때도 "전체 지도로 돌아가기" 버튼을 띄우기 위함 - idle마다(즉 boundsVersion이 바뀔
+  // 때마다) 재계산해서 보고한다.
+  onHomeStateChange?: (isAtHome: boolean) => void;
 }
 
 const FALLBACK_CENTER = { lat: 37.5665, lng: 126.978 };
@@ -77,6 +82,10 @@ const CLUSTER_ACTIVATION_COUNT = 12;
 // zoom이 1 늘어날 때마다(더 확대) 절반씩 작아진다 - 확대할수록 클러스터가 잘게 쪼개진다.
 const CLUSTER_GRID_DEGREES_AT_ZOOM16 = 0.0025;
 const CLUSTER_GRID_REFERENCE_ZOOM = 16;
+
+// "홈" 위치와의 일치 여부를 판단할 때 쓰는 위도/경도 허용 오차(도 단위, 약 5m 수준) - 부동소수점
+// 계산 오차만 흡수할 정도로 작게 잡아서, 사용자가 실제로 지도를 드래그했으면 거의 항상 감지되게 한다.
+const HOME_POSITION_EPSILON = 0.00005;
 
 // 지도 중심/줌이 바뀌는 동안(드래그 도중) 계속 재계산하면 오히려 그 자체가 부담이 되므로,
 // "idle" 이벤트(드래그/줌이 끝났을 때 딱 한 번 발생)에서만 다시 계산한다.
@@ -264,6 +273,7 @@ export default function MapView({
   disableClustering = false,
   homeSignal = 0,
   onVisibleRestaurantsChange,
+  onHomeStateChange,
 }: MapViewProps) {
   const mapElRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -383,6 +393,19 @@ export default function MapView({
   // CLUSTER_ACTIVATION_COUNT를 넘으면 가까이 모인 식당들을 클러스터 배지 하나로 합쳐서
   // 실제 DOM 마커 수 자체를 줄인다(아래 groupIntoClusters). disableClustering이 true면(클러스터를
   // 방금 클릭한 직후) 이 모든 걸 건너뛰고 restaurants를 그대로 전부 개별 마커로 그린다.
+  //
+  // 2026-08-08 신규: "포커스 이동" 요구사항 - 리스트/인기Top3/투표/룰렛/검색 등 어디서 포커스를
+  // 옮기든(전부 CompanyHome의 focusRestaurant -> focusTarget prop 이 경로 하나로 모인다) 그
+  // 대상 가맹점이 클러스터에 묶여있으면 "숫자 배지"만 보이고 정작 어떤 마커가 그건지 눈에
+  // 안 보이는 문제가 있었다. 그래서 focusTarget이 있으면 그 식당만 클러스터링 대상에서 항상
+  // 제외하고(clusterPool), 별도로 확대된(더 큰 원 + 진한 링 + 핑 애니메이션) 마커로 무조건
+  // 따로 그린다 - 클러스터 배지 숫자와 무관하게 "포커스된 곳은 항상 개별로, 항상 크게" 보이게.
+  //
+  // 2026-08-08 2차 신규: 확대된 포커스 마커를 되돌리는 자동 타이머 대신, 사용자가 "전체 지도로
+  // 돌아가기" 버튼을 직접 눌러서 되돌리는 방식을 택했다(요청사항). 그래서 이 effect가 idle마다
+  // 다시 돌 때 지도 중심/줌이 "홈" 위치에서 벗어나 있는지도 같이 계산해서 부모에게 보고한다 -
+  // 클러스터 확대/포커스 이동뿐 아니라 사용자가 지도를 손으로 조금이라도 드래그/줌해도 이 버튼이
+  // 뜨게 하기 위함.
   useEffect(() => {
     if (!mapRef.current || !window.naver?.maps) return;
 
@@ -419,8 +442,33 @@ export default function MapView({
       currentZoom = HOME_ZOOM;
     }
 
+    // 2026-08-08 2차 신규: 지도 중심이 "홈" 위치(회사 중심, HOME_ZOOM)와 사실상 같은지 확인해서
+    // 부모에게 보고한다 - 실패해도(구버전 API 시그니처 차이 등) 무시하고 "홈에 있다"로 간주한다
+    // (버튼이 잘못 사라지는 쪽이, 잘못 계속 떠 있는 쪽보다 덜 거슬린다고 판단).
+    try {
+      const center = mapRef.current.getCenter?.();
+      if (center && typeof center.lat === "function" && typeof center.lng === "function") {
+        const homeLat = centerLat ?? FALLBACK_CENTER.lat;
+        const homeLng = centerLng ?? FALLBACK_CENTER.lng;
+        const atHome =
+          Math.abs(center.lat() - homeLat) < HOME_POSITION_EPSILON &&
+          Math.abs(center.lng() - homeLng) < HOME_POSITION_EPSILON &&
+          currentZoom === HOME_ZOOM;
+        onHomeStateChange?.(atHome);
+      }
+    } catch {
+      onHomeStateChange?.(true);
+    }
+
+    // 2026-08-08 신규: focusTarget이 있으면 그 식당은 클러스터링 대상 풀에서 미리 빼둔다 -
+    // 그러면 그룹 내 나머지 멤버만으로 클러스터가 만들어지고(예: 3곳이던 클러스터가 2곳으로
+    // 줄거나, 아예 사라져서 그 하나만 남을 수도 있음), 아래에서 그 식당을 항상 확대된 개별
+    // 마커로 별도 그린다.
+    const focusedId = focusTarget?.id ?? null;
+    const clusterPool = focusedId ? visible.filter((r) => r.id !== focusedId) : visible;
+
     const shouldCluster = !disableClustering && visible.length > CLUSTER_ACTIVATION_COUNT;
-    const groups = shouldCluster ? groupIntoClusters(visible, currentZoom) : null;
+    const groups = shouldCluster ? groupIntoClusters(clusterPool, currentZoom) : null;
 
     if (groups) {
       for (const group of groups) {
@@ -465,7 +513,7 @@ export default function MapView({
         markersRef.current.set(`cluster_${group.key}`, marker);
       }
     } else {
-      for (const restaurant of visible) {
+      for (const restaurant of clusterPool) {
         const position = new window.naver.maps.LatLng(restaurant.lat, restaurant.lng);
         const marker = new window.naver.maps.Marker({
           position,
@@ -478,7 +526,30 @@ export default function MapView({
         markersRef.current.set(restaurant.id, marker);
       }
     }
+
+    // 2026-08-08 신규: 포커스된 식당은 (클러스터 여부와 무관하게) 항상 별도로, 항상 확대된
+    // 아이콘으로 그린다 - 위에서 clusterPool/groups 어느 쪽에도 이 식당은 포함되지 않았으므로
+    // 중복 렌더링 걱정 없이 여기서 한 번만 그리면 된다. visible에 없으면(아직 뷰포트가 그
+    // 위치로 안 옮겨진 상태) 이번 패스에서는 그리지 않고, 지도가 이동해서 boundsVersion이
+    // 갱신되면 이 effect가 다시 돌면서 그때 그려진다.
+    if (focusedId) {
+      const focusedRestaurant = visible.find((r) => r.id === focusedId);
+      if (focusedRestaurant) {
+        const marker = new window.naver.maps.Marker({
+          position: new window.naver.maps.LatLng(focusedRestaurant.lat, focusedRestaurant.lng),
+          map: mapRef.current,
+          icon: buildRestaurantMarkerIcon(focusedRestaurant, { focused: true }),
+          zIndex: 200,
+        });
+        if (onMarkerClick) {
+          window.naver.maps.Event.addListener(marker, "click", () => onMarkerClick(focusedRestaurant));
+        }
+        markersRef.current.set(focusedRestaurant.id, marker);
+      }
+    }
     // restaurants "배열 참조"가 아니라 markerSignature(내용 기반)를 의존성으로 쓴다 - 위 주석 참고.
+    // focusTarget?.id도 의존성에 넣어서, 포커스 대상이 바뀔 때마다 이 effect가 다시 돌아
+    // 이전 포커스 마커는 보통 크기로 되돌리고 새 포커스 마커만 확대되게 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     markerSignature,
@@ -488,9 +559,14 @@ export default function MapView({
     disableClustering,
     boundsVersion,
     onVisibleRestaurantsChange,
+    onHomeStateChange,
+    focusTarget?.id,
+    centerLat,
+    centerLng,
   ]);
 
-  // 리스트에서 "이미 있어요" / 방금 추가한 식당을 눌렀을 때 지도를 그 위치로 이동시키고 마커를 잠깐 튀게 한다.
+  // 리스트/인기Top3/투표/룰렛/검색 등에서 포커스를 옮겼을 때 지도를 그 위치로 이동시키고
+  // 마커를 잠깐 튀게 한다(확대 자체는 위 마커 effect가 담당 - 여기는 이동 + 바운스 애니메이션만).
   useEffect(() => {
     if (!mapRef.current || !focusTarget || !window.naver?.maps) return;
 
@@ -498,11 +574,11 @@ export default function MapView({
     mapRef.current.setCenter(target);
     mapRef.current.setZoom(18);
 
-    // focusTarget으로 이동한 곳이 방금까지의 뷰포트 컬링 범위 밖이었거나 클러스터로 묶여 있었을
-    // 수 있으므로(예: 리스트에서 멀리 있는 식당을 클릭), 해당 위치의 개별 마커가 아직 markersRef에
-    // 없을 수 있다. setCenter/setZoom은 "idle" 이벤트를 발생시키므로 boundsVersion이 곧 갱신되어
-    // 마커 effect가 다시 돌지만(줌이 늘어서 클러스터도 풀림), 이번 클릭에서 바로 애니메이션을
-    // 주려는 마커가 그 사이에 없을 수 있어 존재 여부를 확인 후 처리한다.
+    // focusTarget으로 이동한 곳이 방금까지의 뷰포트 컬링 범위 밖이었을 수 있으므로(예: 리스트에서
+    // 멀리 있는 식당을 클릭), 해당 위치의 마커가 아직 markersRef에 없을 수 있다. setCenter/setZoom은
+    // "idle" 이벤트를 발생시키므로 boundsVersion이 곧 갱신되어 마커 effect가 다시 돌고(이때
+    // focusTarget?.id도 그대로 의존성에 있으니 확대 마커도 함께 그려짐), 이번 클릭에서 바로
+    // 바운스 애니메이션을 주려는 마커가 그 사이에 없을 수 있어 존재 여부를 확인 후 처리한다.
     const marker = markersRef.current.get(focusTarget.id);
     if (marker && window.naver.maps.Animation) {
       marker.setAnimation(window.naver.maps.Animation.BOUNCE);
@@ -538,7 +614,15 @@ export default function MapView({
 // 붙이는 방식으로 바꿨다 - 평소 마커의 DOM을 가볍게 유지해서 드래그 중 재배치 비용을 줄인다.
 // shadow-soft(box-shadow)도 마커 자체에서는 빼서(항상 존재하는 요소라 누적 비용이 크다)
 // ring만으로 테두리를 표현한다.
-export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
+//
+// 2026-08-08 신규: options.focused가 true면(지금 포커스 이동 대상인 가맹점) 평소보다 훨씬
+// 크게(32px -> 44px), 링을 더 진하게(ring-2 ring-white -> ring-4 ring-primary), 뒤에 은은하게
+// 퍼지는 핑 애니메이션(animate-ping)까지 붙여서 클러스터에 섞여 있어도 "이게 그거다"가 한눈에
+// 보이게 한다.
+export function buildRestaurantMarkerIcon(
+  restaurant: RestaurantSummary,
+  options: { focused?: boolean } = {}
+) {
   const visual = getCategoryVisual(restaurant.category, restaurant.categoryLabel);
   const displayName = (restaurant.name ?? "").normalize("NFC");
   const zeroPayBadge = restaurant.isZeroPay
@@ -549,12 +633,21 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
     ? `<span class="absolute -left-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-[8px] ring-1 ring-white">⚠️</span>`
     : "";
 
+  const focused = options.focused ?? false;
+  const sizeClass = focused ? "h-11 w-11 text-xl" : "h-8 w-8 text-base";
+  const ringClass = focused ? "ring-4 ring-primary" : "ring-2 ring-white";
+  const pingHtml = focused
+    ? `<div class="absolute inset-0 -m-2 rounded-full bg-primary/40 animate-ping"></div>`
+    : "";
+  const anchorPoint = focused ? 22 : 16;
+
   return {
     content: buildMarkerElement(
       `
       <div class="group relative flex flex-col items-center" style="cursor:pointer;">
+        ${pingHtml}
         <div
-          class="relative flex h-8 w-8 items-center justify-center rounded-full text-base ring-2 ring-white transition-transform duration-150 group-hover:scale-125"
+          class="relative flex ${sizeClass} items-center justify-center rounded-full ${ringClass} transition-transform duration-150 group-hover:scale-125"
           style="background:${visual.color}"
         >
           ${visual.emoji}
@@ -571,7 +664,7 @@ export function buildRestaurantMarkerIcon(restaurant: RestaurantSummary) {
       `,
       })
     ),
-    anchor: new window.naver.maps.Point(16, 16),
+    anchor: new window.naver.maps.Point(anchorPoint, anchorPoint),
   };
 }
 

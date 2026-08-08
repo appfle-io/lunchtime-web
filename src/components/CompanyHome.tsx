@@ -10,6 +10,8 @@ import PopularWidget from "./PopularWidget";
 import FriendsModal from "./FriendsModal";
 import NotificationsModal, { type NotificationEntry } from "./NotificationsModal";
 import LunchVoteModal from "./LunchVoteModal";
+import LunchRouletteModal from "./LunchRouletteModal";
+import RestaurantSearchModal from "./RestaurantSearchModal";
 import UserMenu from "./UserMenu";
 import PinResetModal from "./PinResetModal";
 import MealLogCalendar from "./MealLogCalendar";
@@ -102,6 +104,10 @@ export default function CompanyHome({
   const [clusterFilterIds, setClusterFilterIds] = useState<Set<string> | null>(null);
   // MapView에게 "원래 중심/줌으로 돌아가라"고 신호를 보내는 카운터 - 값이 바뀔 때마다(0보다 크면) 실행됨.
   const [homeSignal, setHomeSignal] = useState(0);
+  // 2026-08-08 신규: 지도가 지금 "홈"(회사 중심/기본 줌) 위치인지 여부 - MapView가 idle마다
+  // 보고해준다. 필터바/클러스터 확대와 무관하게 사용자가 지도를 직접 조금만 움직여도 false로
+  // 바뀌어서 "전체 지도로 돌아가기" 버튼을 띄우는 데 쓰인다(아래 homeButtonVisible 참고).
+  const [isMapAtHome, setIsMapAtHome] = useState(true);
 
   // 2026-08-06 밤 신규: 직방/네이버부동산처럼 "지도에 보이는 것 = 리스트에 보이는 것"을 만들기
   // 위한 상태. MapView가 뷰포트 컬링을 계산할 때마다(지도를 드래그/줌해서 idle이 발생할 때마다)
@@ -141,6 +147,10 @@ export default function CompanyHome({
   const [friendsPrefillNickname, setFriendsPrefillNickname] = useState<string | null>(null);
   const [showVote, setShowVote] = useState(false);
   const [voteFocusId, setVoteFocusId] = useState<string | null>(null);
+  // 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛 모달 상태.
+  const [showRecommend, setShowRecommend] = useState(false);
+  // 2026-08-08 신규: 돋보기(🔍) 가맹점 검색 모달 상태.
+  const [showSearch, setShowSearch] = useState(false);
   // 2026-08-06 3차 신규: 닉네임 드롭다운의 "비밀번호 변경" 버튼을 눌렀을 때 띄우는 모달 상태.
   const [showPasswordChange, setShowPasswordChange] = useState(false);
 
@@ -262,9 +272,13 @@ export default function CompanyHome({
     setClusterFilterIds(new Set(clusterRestaurants.map((r) => r.id)));
   }, []);
 
-  // "홈으로" 버튼 - 클러스터 확대 상태를 풀고 지도도 원래 중심/줌으로 되돌린다.
+  // "홈으로" 버튼 - 클러스터 확대 상태를 풀고, 포커스된(확대 표시 중인) 가맹점도 해제하고,
+  // 지도도 원래 중심/줌으로 되돌린다. 2026-08-08: 포커스 확대 마커를 자동으로(타이머 등으로)
+  // 되돌리는 대신, 이 버튼을 눌러야만 원상태로 돌아가는 방식을 택함 - 사용자가 명시적으로
+  // "이제 다 보고 싶다"고 할 때만 초기화되는 게 더 직관적이라고 판단.
   function handleGoHome() {
     setClusterFilterIds(null);
+    setFocusTarget(null);
     setHomeSignal((v) => v + 1);
   }
 
@@ -370,6 +384,7 @@ export default function CompanyHome({
         disableClustering={clusterFilterIds !== null}
         homeSignal={homeSignal}
         onVisibleRestaurantsChange={setMapVisibleIds}
+        onHomeStateChange={setIsMapAtHome}
       />
 
       <FilterBar
@@ -378,7 +393,7 @@ export default function CompanyHome({
         activeSpecialFilters={activeSpecialFilters}
         onToggleCategory={toggleCategory}
         onToggleSpecialFilter={toggleSpecialFilter}
-        homeButtonVisible={clusterFilterIds !== null}
+        homeButtonVisible={clusterFilterIds !== null || focusTarget !== null || !isMapAtHome}
         onGoHome={handleGoHome}
       />
 
@@ -419,6 +434,8 @@ export default function CompanyHome({
             setVoteFocusId(null);
             setShowVote(true);
           }}
+          onOpenRecommend={() => setShowRecommend(true)}
+          onOpenSearch={() => setShowSearch(true)}
           clusterFilterCount={clusterFilterIds ? clusterFilterIds.size : null}
           onClearClusterFilter={handleGoHome}
           userMenu={
@@ -494,6 +511,32 @@ export default function CompanyHome({
         onClose={() => setShowVote(false)}
         onNotify={setToastMessage}
         focusVoteId={voteFocusId}
+      />
+
+      {/* 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛. 2026-08-08 개편으로 이 모달이 반경/카테고리/
+          제로페이 조건을 자체적으로 갖게 돼서, 메인 필터바 결과(visibleRestaurants)가 아니라
+          회사 식당 전체(restaurants, 제로페이 실시간 갱신 포함)를 그대로 넘긴다 - 두 필터가
+          겹쳐서 헷갈리는 걸 피하기 위함(자세한 이유는 LunchRouletteModal.tsx 주석 참고). */}
+      <LunchRouletteModal
+        open={showRecommend}
+        companyCode={companyCode}
+        allRestaurants={restaurants}
+        onClose={() => setShowRecommend(false)}
+        onFocusRestaurant={focusRestaurant}
+        onSelectRestaurant={handleSelectRestaurant}
+      />
+
+      {/* 2026-08-08 신규: 돋보기(🔍) 가맹점 검색. 다른 모달들과 마찬가지로 회사 식당 전체(restaurants,
+          필터바/클러스터/뷰포트가 적용되기 전 전체)를 대상으로 한다 - 지금 화면에 뭐가
+          보이는지와 무관하게 회사에 등록된 모든 가맹점을 바로바로 찾을 수 있어야 한다. 결과를
+          고르면 focusRestaurant/handleSelectRestaurant를 그대로 재사용해서(다른 포커스 이동
+          경로와 동일) 상세모달 + MapView의 포커스 확대 로직까지 그대로 같이 적용된다. */}
+      <RestaurantSearchModal
+        open={showSearch}
+        allRestaurants={restaurants}
+        onClose={() => setShowSearch(false)}
+        onFocusRestaurant={focusRestaurant}
+        onSelectRestaurant={handleSelectRestaurant}
       />
 
       <PinResetModal
