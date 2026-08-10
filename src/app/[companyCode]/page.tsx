@@ -23,7 +23,11 @@ export default async function CompanyHomePage({ params }: { params: { companyCod
   }
 
   const company = await getCompanyByCode(companyCode);
-  const restaurants = await listRestaurants(companyCode);
+  // 2026-08-10 신규: 관리자 페이지 "사용여부"에서 N 처리(isActive: false)한 가맹점은 메인
+  // 화면(지도/리스트)에 안 보이게 여기서 걸러낸다 - 관리자 페이지는 listRestaurants()를
+  // 그대로(필터 없이) 써서 사용여부와 무관하게 전체를 보여줘야 하니, 필터는 이 화면에서만 적용.
+  const allRestaurants = await listRestaurants(companyCode);
+  const restaurants = allRestaurants.filter((r) => r.isActive !== false);
   const favoriteIds = await listFavoriteIds(companyCode, session.nicknameId);
   // 2026-08-09 신규: 닉네임 드롭다운에 "관리자 페이지" 링크를 관리자에게만 보여주기 위한 조회.
   // 세션 토큰에 굽지 않고 매 페이지 로드마다 Firestore에서 최신 상태를 확인한다 (admin-server.ts 참고).

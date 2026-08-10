@@ -5,9 +5,39 @@ import { searchNaverLocal, stripHtmlTags, parseNaverCoords } from "@/lib/naver-l
 import { haversineMeters } from "@/lib/geo";
 import type { RestaurantSummary } from "@/types";
 
-// 이름+도로명주소 기준으로 안정적인(재실행해도 같은) 문서 ID를 만든다 - 중복 생성 방지.
+export function normalizeName(name: string): string {
+  return name.replace(/\s+/g, "").toLowerCase();
+}
+
+export function normalizeAddress(addr: string): string {
+  if (!addr) return "";
+  return addr
+    .replace(/서울특별시|서울시|경기도|인천광역시|특별시|광역시/g, "")
+    .replace(/[\(\)（）]/g, " ")
+    .replace(/[0-9]+층|[0-9]+호|지하[0-9]+층|B[0-9]+층|B[0-9]+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * 기본 도로명(길/로 + 건물번호)까지만 추출하여 데이터 소스별 층/건물상세 표기 차이를 무시하는 핵심 주소를 반환.
+ * 예: "서울특별시 영등포구 문래로 83 아라비즈타워 2층" -> "영등포구 문래로 83"
+ */
+export function getCoreRoadAddress(addr: string): string {
+  const norm = normalizeAddress(addr);
+  const match = norm.match(/^(.+?[가-힗]+[구|시|군]\s+[가-힗0-9]+[로|길]\s+[0-9]+(?:-[0-9]+)?)/);
+  if (match) {
+    return match[1].trim();
+  }
+  return norm;
+}
+
+// 이름+도로명주소 핵심부 기준으로 안정적인(재실행해도 같은) 문서 ID를 만든다 - 중복 생성 방지.
 export function makeRestaurantId(name: string, address: string): string {
-  return crypto.createHash("sha1").update(`${name}|${address}`).digest("hex").slice(0, 16);
+  const cleanName = normalizeName(name);
+  const coreAddr = getCoreRoadAddress(address);
+  return crypto.createHash("sha1").update(`${cleanName}|${coreAddr}`).digest("hex").slice(0, 16);
 }
 
 // 2026-08-09 신규: scripts/enrich-naver-details.ts(및 최종 버전 enrich-official-final.ts)가
@@ -59,6 +89,9 @@ function toRestaurantSummary(id: string, data: Record<string, unknown>): Restaur
     distanceMeters: data.distanceMeters,
     // 2026-08-09 신규: scripts/enrich-naver-details.ts 수집분(전화/영업시간/메뉴 등) 노출.
     ...pickEnrichedFields(data),
+    // 2026-08-10 신규: 관리자 페이지 "사용여부". 필드가 없는(기존) 문서는 true로 취급 -
+    // 그래야 지금까지 등록된 1000+건이 마이그레이션 없이 전부 "사용중"으로 보인다.
+    isActive: data.isActive !== false,
   } as RestaurantSummary;
 }
 
@@ -203,24 +236,9 @@ export async function addRestaurantFromCandidate(
 
   const existingSnapshot = await docRef.get();
   if (existingSnapshot.exists) {
-    const data = existingSnapshot.data()!;
-    return {
-      existing: true,
-      restaurant: {
-        id,
-        name: data.name,
-        address: data.address,
-        lat: data.lat,
-        lng: data.lng,
-        category: data.category ?? null,
-        categoryLabel: data.categoryLabel ?? null,
-        isZeroPay: Boolean(data.isZeroPay),
-        isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
-        distanceMeters: data.distanceMeters,
-        // 2026-08-09 신규: 이미 있던 식당이면 enrich 스크립트가 채워둔 값이 있을 수 있으니 같이 반환.
-        ...pickEnrichedFields(data),
-      },
-    };
+    // 2026-08-10: toRestaurantSummary()로 통일 - 이미 있던 식당이면 enrich 스크립트가 채워둔 값과
+    // isActive 기본값(true)까지 listRestaurants()와 동일한 규칙으로 같이 반환된다.
+    return { existing: true, restaurant: toRestaurantSummary(id, existingSnapshot.data()!) };
   }
 
   const distanceMeters = Math.round(
@@ -274,30 +292,10 @@ export async function addRestaurantFromCandidate(
   await docRef.set(restaurant);
   invalidateRestaurantsCache(companyCode); // 새로 추가된 식당이 지도/리스트에 바로 보이도록 캐시 무효화
 
-  return {
-    existing: false,
-    duplicateWarning,
-    restaurant: {
-      id,
-      name: restaurant.name,
-      address: restaurant.address,
-      lat: restaurant.lat,
-      lng: restaurant.lng,
-      category: restaurant.category,
-      categoryLabel: null,
-      isZeroPay: restaurant.isZeroPay,
-      isZeroPayNeedsReview: restaurant.isZeroPayNeedsReview,
-      distanceMeters: restaurant.distanceMeters,
-      // 2026-08-09 신규: 방금 새로 만든 식당은 아직 enrich 스크립트를 안 거쳤으니 빈 값으로 시작.
-      phone: null,
-      businessHours: null,
-      facilities: [],
-      paymentMethods: [],
-      aiBriefing: null,
-      menus: [],
-      naverPlaceUrl: null,
-    },
-  };
+  // 2026-08-10: toRestaurantSummary()로 통일 - 방금 만든 restaurant 객체엔 phone/menus 등 enrich
+  // 필드가 아직 없는데, pickEnrichedFields()가 그대로 null/[] 기본값을 채워주고 isActive도
+  // 자동으로 true가 된다 (listRestaurants()/기존 식당 조회와 동일한 로직).
+  return { existing: false, duplicateWarning, restaurant: toRestaurantSummary(id, restaurant) };
 }
 
 // 2026-08-09 신규: 관리자 페이지에서 가맹점 정보를 직접 수정할 때 쓰는 범용 업데이트 함수.
@@ -318,6 +316,8 @@ export interface RestaurantAdminUpdate {
   menus?: RestaurantSummary["menus"];
   naverPlaceUrl?: string | null;
   isZeroPay?: boolean;
+  // 2026-08-10 신규: 관리자 페이지 "사용여부" 토글 저장용. false를 보내면 N 처리(메인 화면 제외).
+  isActive?: boolean;
 }
 
 export async function updateRestaurantAdminFields(
@@ -329,18 +329,5 @@ export async function updateRestaurantAdminFields(
   await docRef.set(update, { merge: true });
   invalidateRestaurantsCache(companyCode); // 수정된 내용이 지도/리스트에 바로 보이도록 캐시 무효화
   const snapshot = await docRef.get();
-  const data = snapshot.data()!;
-  return {
-    id: restaurantId,
-    name: data.name,
-    address: data.address,
-    lat: data.lat,
-    lng: data.lng,
-    category: data.category ?? null,
-    categoryLabel: data.categoryLabel ?? null,
-    isZeroPay: Boolean(data.isZeroPay),
-    isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
-    distanceMeters: data.distanceMeters,
-    ...pickEnrichedFields(data),
-  };
+  return toRestaurantSummary(restaurantId, snapshot.data()!);
 }

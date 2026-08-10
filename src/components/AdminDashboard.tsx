@@ -24,6 +24,28 @@ const PAGE_SIZE = 50;
 
 type Tab = "restaurants" | "requests";
 
+// 2026-08-10 신규: 표 헤더 클릭 정렬. 정렬 대상 컬럼("이름"/"카테고리"/"전화"/"제로페이"/"사용여부")만
+// 여기 나열한다 - "메뉴"/"상세"/"저장"은 동작/표시용 칸이라 정렬 의미가 없어서 제외.
+// 상태는 (컬럼, 방향) 두 개만 두고, null(컬럼 없음) = "기본(가나다순)"으로 취급해서 클릭 3번째에
+// 다시 null로 돌아가면 "원래대로"가 자연스럽게 재현된다.
+type SortColumn = "name" | "category" | "phone" | "isZeroPay" | "isActive";
+type SortDirection = "asc" | "desc";
+
+function getSortValue(r: RestaurantSummary, column: SortColumn): string | number {
+  switch (column) {
+    case "name":
+      return r.name ?? "";
+    case "category":
+      return r.categoryLabel ?? r.category ?? "";
+    case "phone":
+      return r.phone ?? "";
+    case "isZeroPay":
+      return r.isZeroPay ? 1 : 0;
+    case "isActive":
+      return r.isActive === false ? 0 : 1;
+  }
+}
+
 export default function AdminDashboard({
   companyCode,
   nickname,
@@ -40,6 +62,26 @@ export default function AdminDashboard({
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(0);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
+
+  // 2026-08-10 신규: 표 정렬 상태. sortColumn===null이면 "기본(가나다순)" - 아래 sortedRows에서
+  // 항상 이름 오름차순으로 fallback한다.
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  function handleSortClick(column: SortColumn) {
+    setPage(0); // 정렬이 바뀌면 페이지 번호가 안 맞을 수 있으니 첫 페이지로.
+    if (sortColumn !== column) {
+      setSortColumn(column);
+      setSortDirection("asc");
+      return;
+    }
+    if (sortDirection === "asc") {
+      setSortDirection("desc");
+      return;
+    }
+    // 오름차순 -> 내림차순 다음, 같은 헤더를 세 번째 누르면 "원래대로"(기본 가나다순)로 리셋.
+    setSortColumn(null);
+  }
 
   // 상세편집 모달 상태 - 주소/영업시간/편의시설/결제수단/네이버링크/메뉴처럼 표 칸에 넣기엔
   // 긴 필드들을 여기서 한꺼번에 다룬다. 이름/카테고리/전화/제로페이도 여기 다시 포함해서,
@@ -69,8 +111,24 @@ export default function AdminDashboard({
     );
   }, [rows, searchQuery]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
-  const pagedRows = filteredRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  // 2026-08-10 신규: sortColumn이 없으면(기본 상태) 항상 이름 가나다순으로 보여준다 - 컬럼
+  // 헤더를 클릭해서 명시적으로 정렬을 걸었을 때만 그 컬럼/방향을 따른다.
+  const sortedRows = useMemo(() => {
+    const base = [...filteredRows];
+    if (!sortColumn) {
+      return base.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    }
+    const dir = sortDirection === "asc" ? 1 : -1;
+    return base.sort((a, b) => {
+      const av = getSortValue(a, sortColumn);
+      const bv = getSortValue(b, sortColumn);
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv), "ko") * dir;
+    });
+  }, [filteredRows, sortColumn, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const pagedRows = sortedRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   function handleSearchChange(value: string) {
     setSearchQuery(value);
@@ -144,6 +202,7 @@ export default function AdminDashboard({
             categoryLabel: restaurant.categoryLabel || null,
             phone: restaurant.phone || null,
             isZeroPay: restaurant.isZeroPay,
+            isActive: restaurant.isActive !== false,
           },
         }),
       });
@@ -306,13 +365,38 @@ export default function AdminDashboard({
             </p>
 
             <div className="mt-3 overflow-x-auto rounded-xl border border-black/10">
-              <table className="w-full min-w-[720px] text-sm">
+              <table className="w-full min-w-[820px] text-sm">
                 <thead>
                   <tr className="border-b border-black/10 bg-surface-muted text-left text-xs text-ink-soft">
-                    <th className="px-2 py-2 font-medium">이름</th>
-                    <th className="px-2 py-2 font-medium">카테고리</th>
-                    <th className="px-2 py-2 font-medium">전화</th>
-                    <th className="px-2 py-2 text-center font-medium">제로페이</th>
+                    {(
+                      [
+                        { column: "name" as const, label: "이름", className: "px-2 py-2 font-medium" },
+                        { column: "category" as const, label: "카테고리", className: "px-2 py-2 font-medium" },
+                        { column: "phone" as const, label: "전화", className: "px-2 py-2 font-medium" },
+                        {
+                          column: "isZeroPay" as const,
+                          label: "제로페이",
+                          className: "px-2 py-2 text-center font-medium",
+                        },
+                        {
+                          column: "isActive" as const,
+                          label: "사용여부",
+                          className: "px-2 py-2 text-center font-medium",
+                        },
+                      ] satisfies { column: SortColumn; label: string; className: string }[]
+                    ).map(({ column, label, className }) => (
+                      <th
+                        key={column}
+                        onClick={() => handleSortClick(column)}
+                        className={`${className} cursor-pointer select-none transition hover:text-ink`}
+                        title="클릭해서 정렬 (오름차순 → 내림차순 → 원래대로)"
+                      >
+                        {label}
+                        <span className="ml-0.5 inline-block w-2.5 text-primary">
+                          {sortColumn === column ? (sortDirection === "asc" ? "▲" : "▼") : ""}
+                        </span>
+                      </th>
+                    ))}
                     <th className="px-2 py-2 text-center font-medium">메뉴</th>
                     <th className="px-2 py-2 text-center font-medium">상세</th>
                     <th className="px-2 py-2 text-center font-medium">저장</th>
@@ -321,8 +405,15 @@ export default function AdminDashboard({
                 <tbody>
                   {pagedRows.map((r) => {
                     const visual = getCategoryVisual(r.category, r.categoryLabel);
+                    const isActive = r.isActive !== false;
                     return (
-                      <tr key={r.id} className="border-b border-black/5 last:border-0">
+                      <tr
+                        key={r.id}
+                        className={[
+                          "border-b border-black/5 last:border-0",
+                          isActive ? "" : "bg-black/[0.03] opacity-60",
+                        ].join(" ")}
+                      >
                         <td className="px-2 py-1.5">
                           <input
                             value={r.name}
@@ -359,6 +450,16 @@ export default function AdminDashboard({
                             onChange={(e) => updateRow(r.id, { isZeroPay: e.target.checked })}
                           />
                         </td>
+                        <td className="px-2 py-1.5 text-center">
+                          {/* 2026-08-10 신규: 기본 true(=사용). 체크 해제(N 처리) 후 "저장"을 눌러야
+                              반영되고, 반영되면 메인 화면(지도/리스트)에서 이 가맹점이 제외된다. */}
+                          <input
+                            type="checkbox"
+                            checked={isActive}
+                            onChange={(e) => updateRow(r.id, { isActive: e.target.checked })}
+                            title={isActive ? "사용중 (체크 해제 시 메인 화면에서 숨김)" : "미사용(N) - 메인 화면에서 숨겨짐"}
+                          />
+                        </td>
                         <td className="px-2 py-1.5 text-center text-xs text-ink-soft">
                           {(r.menus ?? []).length}개
                         </td>
@@ -384,7 +485,7 @@ export default function AdminDashboard({
                   })}
                   {pagedRows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-2 py-6 text-center text-sm text-ink-soft">
+                      <td colSpan={8} className="px-2 py-6 text-center text-sm text-ink-soft">
                         조건에 맞는 가맹점이 없어요.
                       </td>
                     </tr>

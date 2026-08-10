@@ -66,6 +66,12 @@ export interface RestaurantSummary {
   menus?: RestaurantMenuItem[];
   // 네이버지도 상세 페이지 링크 - "네이버지도에서 보기" 외부링크용.
   naverPlaceUrl?: string | null;
+
+  // 2026-08-10 신규: 관리자 페이지 "사용여부" 컬럼. 기존 문서엔 이 필드가 아예 없는데,
+  // restaurant-server.ts의 toRestaurantSummary()가 값이 없으면(undefined) true로 취급하므로
+  // "모든 기존 가맹점은 기본 TRUE"가 별도 마이그레이션 없이 자동으로 보장된다. 관리자가 이 값을
+  // false(=N)로 바꾸면 메인 화면(지도/리스트)에서 제외된다(app/[companyCode]/page.tsx에서 필터).
+  isActive?: boolean;
 }
 
 export interface ReviewSummary {
