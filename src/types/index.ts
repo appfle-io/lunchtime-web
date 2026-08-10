@@ -14,6 +14,21 @@ export interface CompanySummary {
   signguCd?: string;
 }
 
+// 2026-08-09 신규: scripts/enrich-official-final.ts가 네이버 지도 [매장] 스마트주문 탭(실패 시
+// 모바일 메뉴탭 → DOM 텍스트 파싱까지 3단 폴백)에서 수집해서 restaurants 문서에 저장해두는 메뉴
+// 정보. 상위 10개까지만 저장된다. 사진(image)은 이 스크립트부터 의도적으로 완전히 제거됨 -
+// 필드 자체를 안 둔다(과거 enrich 스크립트가 남겨둔 image/mainImage 필드가 문서에 남아있어도
+// 이 타입에서 아예 안 읽으니 화면에 노출되지 않는다).
+export interface RestaurantMenuItem {
+  name: string;
+  price?: string | null;
+  description?: string | null;
+  // "대표"/"인기" 등 네이버가 표시해둔 태그 원본 목록.
+  tags?: string[];
+  isRepresentative?: boolean;
+  isPopular?: boolean;
+}
+
 export interface RestaurantSummary {
   id: string;
   name: string;
@@ -33,6 +48,24 @@ export interface RestaurantSummary {
   // 필요하다"는 별도 신호로 둔다 (lib/zeropay-server.ts 참고).
   isZeroPayNeedsReview?: boolean;
   distanceMeters?: number;
+
+  // 2026-08-09 신규: scripts/enrich-naver-details.ts(및 최종 버전 enrich-official-final.ts)가
+  // 네이버 지도 상세페이지(Playwright)에서 수집해 restaurants 문서에 update()해두고 있던 필드들.
+  // 지금까지는 DB에만 저장되고 listRestaurants()가 안 읽어와서 화면에 전혀 노출되지 않았던 것을
+  // 이번에 연결함. 리뷰 원문(recentReviews)은 저작권/개인정보 이슈로 일단 제외 - 노출 안 함.
+  // 대표이미지/메뉴사진(mainImage, menus[].image)은 2026-08-09 최종 수집 단계에서 의도적으로
+  // 완전히 제거됐으므로 이 타입에 필드 자체를 두지 않는다.
+  phone?: string | null;
+  // 영업시간 원본 구조. 네이버 내부(Apollo 캐시) 응답 그대로라 스키마가 일정하지 않아서
+  // unknown으로 두고, 화면에서 방어적으로(형태를 가려가며) 렌더링한다.
+  businessHours?: unknown;
+  facilities?: string[];
+  paymentMethods?: string[];
+  // 네이버 AI 한줄 요약(스마트콜/스마트요약). 없으면 null.
+  aiBriefing?: string | null;
+  menus?: RestaurantMenuItem[];
+  // 네이버지도 상세 페이지 링크 - "네이버지도에서 보기" 외부링크용.
+  naverPlaceUrl?: string | null;
 }
 
 export interface ReviewSummary {

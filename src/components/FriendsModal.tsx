@@ -38,6 +38,10 @@ const ALL_USERS_PAGE_SIZE = 20;
 // 2026-08-06 추가2: 이미 친구인 사람은 "이미 친구" 배지로 남겨두는 대신, 검색 결과와 전체 목록
 // 둘 다에서 처음부터 제외한다(사용자 요청). 두 탭이 보는 대상 풀 자체를 nonFriendUsers로
 // 미리 걸러두고, 검색/정렬/페이징은 전부 그 풀 위에서만 이뤄진다.
+//
+// 2026-08-10 신규: "내 친구" 목록에 검색창 추가 - 닉네임뿐 아니라 메모(예: "마케팅팀 김OO")로도
+// 필터링된다. 친구 추가/전체목록 탭의 검색(회사 전체 사용자 대상)과는 별개의, 이미 추가한 내
+// 친구들만 대상으로 하는 검색이라 상태를 분리했다(myFriendsSearch).
 export default function FriendsModal({
   companyCode,
   open,
@@ -62,12 +66,16 @@ export default function FriendsModal({
   const [visibleAllUsersCount, setVisibleAllUsersCount] = useState(ALL_USERS_PAGE_SIZE);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
+  // 2026-08-10 신규: "내 친구" 목록 검색 (닉네임 + 메모).
+  const [myFriendsSearch, setMyFriendsSearch] = useState("");
+
   useEffect(() => {
     if (!open) return;
     setSearch(prefillNickname ?? "");
     setActiveTab("search");
     setSelectedIds(new Set());
     setVisibleAllUsersCount(ALL_USERS_PAGE_SIZE);
+    setMyFriendsSearch("");
     setLoading(true);
     Promise.all([
       fetch(`/api/friends?companyCode=${encodeURIComponent(companyCode)}`).then((r) => r.json()),
@@ -102,6 +110,17 @@ export default function FriendsModal({
   );
   const visibleAllUsers = allUsersSorted.slice(0, visibleAllUsersCount);
   const hasMoreAllUsers = visibleAllUsersCount < allUsersSorted.length;
+
+  // 2026-08-10 신규: "내 친구" 목록 필터링 - 닉네임 또는 메모 중 하나라도 검색어를 포함하면 노출.
+  // addedAt 최신순은 friends 배열 자체가 이미 그 순서로 들어오니(listFriends 참고) 필터만 걸어도
+  // 순서가 유지된다.
+  const filteredFriends = useMemo(() => {
+    const q = myFriendsSearch.trim().toLowerCase();
+    if (!q) return friends;
+    return friends.filter(
+      (f) => f.nickname.toLowerCase().includes(q) || f.memo.toLowerCase().includes(q)
+    );
+  }, [friends, myFriendsSearch]);
 
   if (!open) return null;
 
@@ -382,12 +401,27 @@ export default function FriendsModal({
           <p className="mb-2 text-xs font-semibold text-ink-soft">
             내 친구 {friends.length > 0 ? `(${friends.length}명)` : ""}
           </p>
+
+          {/* 2026-08-10 신규: 닉네임/메모 통합 검색. 친구가 없거나 로딩 중이면 검색창 자체를
+              숨겨서 빈 화면에 검색창만 덜렁 떠 있는 걸 피한다. */}
+          {!loading && friends.length > 0 && (
+            <input
+              value={myFriendsSearch}
+              onChange={(e) => setMyFriendsSearch(e.target.value)}
+              placeholder="닉네임 또는 메모로 검색 (예: 마케팅팀)"
+              className="mb-2 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          )}
+
           {loading && <p className="text-sm text-ink-soft">불러오는 중...</p>}
           {!loading && friends.length === 0 && (
             <p className="text-sm text-ink-soft">아직 추가한 친구가 없어요. 위에서 검색해서 추가해보세요.</p>
           )}
+          {!loading && friends.length > 0 && filteredFriends.length === 0 && (
+            <p className="text-sm text-ink-soft">검색 결과가 없어요.</p>
+          )}
           <ul className="flex flex-col gap-1.5">
-            {friends.map((friend) => (
+            {filteredFriends.map((friend) => (
               <li key={friend.nicknameId} className="rounded-xl border border-black/5 p-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium text-ink">{friend.nickname}</span>

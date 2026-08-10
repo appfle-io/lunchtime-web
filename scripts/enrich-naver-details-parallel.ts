@@ -29,13 +29,27 @@ function isStrictAddressMatched(dbAddr: string, targetAddr: string): boolean {
   return dbNum === targetNum;
 }
 
+interface NaverEnrichedMenuItem {
+  name: string;
+  price: string;
+  description?: string;
+  image?: string | null;
+  // 2026-08-09 신규 (scripts/test-4-stores-images.ts에서 검증한 로직을 실제 수집 파이프라인에 연결):
+  // 배민 실물 음식사진 메뉴("naver_map_baemin")로 잡혔는지, 네이버가 자체적으로 "대표" 표시한
+  // 메뉴인지("recommend") 여부. 화면에서 "대표" 배지 표시용.
+  isRepresentative?: boolean;
+  source?: string;
+}
+
 interface NaverEnrichedData {
   phone: string | null;
   businessHours: any | null;
   facilities: string[];
   paymentMethods: string[];
   aiBriefing: string | null;
-  menus: Array<{ name: string; price: string; description?: string; image?: string }>;
+  menus: NaverEnrichedMenuItem[];
+  // 2026-08-09 신규: 식당 대표 이미지(메인 썸네일). 메뉴 사진(menus[].image)과는 별개 필드로 구분해서 저장.
+  mainImage: string | null;
   recentReviews: Array<{ body: string; created?: string; nickname?: string }>;
   naverPlaceId: string;
   naverPlaceUrl: string;
@@ -46,7 +60,9 @@ interface NaverEnrichedData {
 async function fetchNaverPlaceDetails(page: any, placeId: string): Promise<NaverEnrichedData | null> {
   try {
     const homeUrl = `https://pcmap.place.naver.com/restaurant/${placeId}/home`;
-    const placeDirectUrl = `https://m.map.naver.com/place.naver?id=${placeId}`;
+    // 2026-08-09: scripts/update-naver-urls.ts로 기존 문서를 이미 이 최신 공식 규격으로 일괄
+    // 마이그레이션해둔 상태라, 앞으로 새로 수집하는 것도 같은 형식으로 통일한다.
+    const placeDirectUrl = `https://map.naver.com/p/entry/place/${placeId}`;
 
     await page.goto(homeUrl, { waitUntil: 'load', timeout: 15000 });
     await page.waitForTimeout(1200);
@@ -88,6 +104,97 @@ async function fetchNaverPlaceDetails(page: any, placeId: string): Promise<Naver
       };
     });
 
+    // 2026-08-09 신규: 대표이미지/메뉴사진 구분 수집 (enrich-naver-details.ts와 동일 로직).
+    let mainImage: string | null = null;
+    let enrichedMenus: NaverEnrichedMenuItem[] = homeData.menus;
+
+    try {
+      await page.goto(`https://m.place.naver.com/restaurant/${placeId}/menu/list`, {
+        waitUntil: 'load',
+        timeout: 15000,
+      });
+      await page.waitForTimeout(1200);
+
+      const imageData = await page.evaluate(() => {
+        const win = window as any;
+        const apollo = win.__APOLLO_STATE__ || {};
+
+        let imageUrl: string | null = null;
+        const baseKey = Object.keys(apollo).find(
+          (k) => k.startsWith('PlaceDetailBase:') || k.startsWith('Restaurant:')
+        );
+        const base = baseKey ? apollo[baseKey] : {};
+
+        if (Array.isArray(base.headerImages) && base.headerImages.length > 0) {
+          imageUrl = base.headerImages[0].url || base.headerImages[0];
+        } else if (Array.isArray(base.images) && base.images.length > 0) {
+          imageUrl = base.images[0].url || base.images[0];
+        }
+        if (!imageUrl) {
+          const photoKeys = Object.keys(apollo).filter((k) => k.startsWith('Photo:'));
+          if (photoKeys.length > 0) {
+            imageUrl = apollo[photoKeys[0]].url || apollo[photoKeys[0]].imageUrl || null;
+          }
+        }
+
+        const menus: Array<{
+          name: string;
+          price: string;
+          description?: string;
+          image: string | null;
+          isRepresentative?: boolean;
+          source?: string;
+        }> = [];
+
+        const baeminMenuKeys = Object.keys(apollo).filter((k) => k.startsWith('PlaceDetail_BaeminMenu:'));
+        const regularMenuKeys = Object.keys(apollo).filter((k) => k.startsWith('Menu:'));
+
+        baeminMenuKeys.forEach((k) => {
+          const item = apollo[k];
+          if (item && item.name) {
+            const imgList = Array.isArray(item.images) ? item.images : [];
+            const validImg = imgList.find((img: string) => img && img.trim().length > 0) || null;
+            menus.push({
+              name: item.name,
+              price: item.price ?? '',
+              description: item.desc ?? item.description ?? '',
+              image: validImg,
+              isRepresentative: item.isRepresentative ?? false,
+              source: 'naver_map_baemin',
+            });
+          }
+        });
+
+        regularMenuKeys.forEach((k) => {
+          const item = apollo[k];
+          if (item && item.name) {
+            const exists = menus.some((m) => m.name.replace(/\s+/g, '') === item.name.replace(/\s+/g, ''));
+            if (!exists) {
+              const imgList = Array.isArray(item.images) ? item.images : [];
+              const validImg = imgList.find((img: string) => img && img.trim().length > 0) || null;
+              menus.push({
+                name: item.name,
+                price: item.price ?? '',
+                description: item.description ?? '',
+                image: validImg,
+                isRepresentative: item.recommend ?? false,
+                source: 'naver_map_regular',
+              });
+            }
+          }
+        });
+
+        return { imageUrl, menus: menus.slice(0, 10) };
+      });
+
+      mainImage = imageData.imageUrl;
+      if (imageData.menus.length > 0) {
+        enrichedMenus = imageData.menus;
+      }
+    } catch (_) {
+      // 모바일 메뉴탭 수집이 실패해도 홈 페이지 menus로 계속 진행.
+    }
+
     let recentReviews: Array<{ body: string; created?: string; nickname?: string }> = [];
     try {
       await page.goto(`https://pcmap.place.naver.com/restaurant/${placeId}/review/visitor`, { waitUntil: 'load', timeout: 10000 });
@@ -114,7 +221,8 @@ async function fetchNaverPlaceDetails(page: any, placeId: string): Promise<Naver
       facilities: homeData.facilities,
       paymentMethods: homeData.paymentMethods,
       aiBriefing: homeData.aiBriefing,
-      menus: homeData.menus,
+      menus: enrichedMenus,
+      mainImage,
       recentReviews,
       naverPlaceId: placeId,
       naverPlaceUrl: placeDirectUrl,
@@ -132,7 +240,7 @@ async function main() {
   const docs = snap.docs;
   const PARALLEL = 5;
 
-  console.log(`\n🚀 [네이버 맵 5병렬 초고속 정밀 수집] 총 ${docs.length}개 매장 시작\n`);
+  console.log(`\n🚀 [네이버 맵 5병렬 초고속 정밀 수집 - 대표이미지/메뉴사진 구분 수집] 총 ${docs.length}개 매장 시작\n`);
 
   const browser = await chromium.launch({ headless: true });
   const restaurantsRef = db.collection('companies').doc('ssg').collection('restaurants');
@@ -209,7 +317,7 @@ async function main() {
 
       const details = await fetchNaverPlaceDetails(page, placeId);
 
-      if (details && (details.menus.length > 0 || details.phone || details.facilities.length > 0 || details.recentReviews.length > 0)) {
+      if (details && (details.menus.length > 0 || details.phone || details.facilities.length > 0 || details.recentReviews.length > 0 || details.mainImage)) {
         successCount++;
         await restaurantsRef.doc(docId).update({
           phone: details.phone || data.phone || null,
@@ -218,6 +326,7 @@ async function main() {
           paymentMethods: details.paymentMethods,
           aiBriefing: details.aiBriefing || null,
           menus: details.menus,
+          mainImage: details.mainImage || null,
           recentReviews: details.recentReviews,
           naverPlaceId: details.naverPlaceId,
           naverPlaceUrl: details.naverPlaceUrl,
@@ -226,7 +335,7 @@ async function main() {
           naverEnrichedAt: new Date().toISOString(),
           isNaverEnriched: true,
         });
-        console.log(`  [W${workerId}] [${doneCount}/${total}] 🟢 ${name} [URL: ${details.naverPlaceUrl}]`);
+        console.log(`  [W${workerId}] [${doneCount}/${total}] 🟢 ${name} [URL: ${details.naverPlaceUrl}]${details.mainImage ? ' [대표이미지 O]' : ''}`);
       }
 
       await page.waitForTimeout(100);

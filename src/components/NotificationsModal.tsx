@@ -2,7 +2,7 @@
 
 export interface NotificationEntry {
   id: string;
-  type: "friendAdded" | "voteCreated";
+  type: "friendAdded" | "voteCreated" | "editRequestCreated" | "editRequestResolved";
   read: boolean;
   createdAt: string;
   fromNicknameId?: string;
@@ -10,6 +10,12 @@ export interface NotificationEntry {
   voteId?: string;
   voteTitle?: string;
   creatorNickname?: string;
+  // 2026-08-09 신규: 가맹점 정보 수정요청 관련 알림 필드.
+  restaurantId?: string;
+  restaurantName?: string;
+  requestSummary?: string;
+  requesterNickname?: string;
+  requestStatus?: "resolved" | "rejected";
 }
 
 interface NotificationsModalProps {
@@ -24,6 +30,9 @@ interface NotificationsModalProps {
 // 2026-08-06 신규: 알림함(종 아이콘) 모달. 읽지 않은 알림은 진하게, 읽은 알림은 회색으로 표시한다
 // (사용자 요청: "알림은 한번 읽으면 회색 글씨체로 변경"). 알림 행을 누르면 읽음 처리되고, friendAdded
 // 타입은 "나도 추가하기" 버튼으로 바로 맞추어 추가할 수 있게 한다.
+// 2026-08-09 추가: editRequestCreated(관리자에게: 새 수정요청이 들어왔다) / editRequestResolved
+// (요청자에게: 내 요청이 처리됐다) 두 타입을 새로 처리한다. 이동 액션은 아직 안 붙였다 - 관리자
+// 페이지가 만들어지면 그때 "확인하러 가기" 버튼을 여기 추가할 예정.
 export default function NotificationsModal({
   open,
   notifications,
@@ -109,6 +118,22 @@ export default function NotificationsModal({
                       투표하러 가기
                     </button>
                   </>
+                )}
+                {n.type === "editRequestCreated" && (
+                  <p className={`text-sm ${textClass}`}>
+                    <span className="font-semibold">{n.requesterNickname}</span>님이{" "}
+                    <span className="font-semibold">{n.restaurantName}</span>에 정보 수정을
+                    요청했어요.
+                    {n.requestSummary && (
+                      <span className="mt-0.5 block text-xs text-ink-soft">{n.requestSummary}</span>
+                    )}
+                  </p>
+                )}
+                {n.type === "editRequestResolved" && (
+                  <p className={`text-sm ${textClass}`}>
+                    <span className="font-semibold">{n.restaurantName}</span> 수정 요청이{" "}
+                    {n.requestStatus === "rejected" ? "거절됐어요." : "처리됐어요."}
+                  </p>
                 )}
                 <p className="mt-1 text-[11px] text-ink-soft">{formatRelativeTime(n.createdAt)}</p>
               </li>

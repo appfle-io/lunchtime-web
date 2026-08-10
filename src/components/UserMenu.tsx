@@ -6,6 +6,9 @@ interface UserMenuProps {
   nickname: string;
   onLogout: () => void;
   onChangePassword: () => void;
+  // 2026-08-09 신규: 관리자(isAdmin)에게만 "관리자 페이지" 항목을 보여주기 위한 값/핸들러.
+  isAdmin?: boolean;
+  onOpenAdmin?: () => void;
 }
 
 // 2026-08-06 3차 신규: 예전엔 "{닉네임}님 · 로그아웃" 버튼 하나가 지도 좌상단에 절대좌표로
@@ -13,7 +16,14 @@ interface UserMenuProps {
 // 옮겨달라는 요청을 받음 - 새 절대좌표를 또 만드는 대신 BottomSheet의 title 줄(titleRight 슬롯)에
 // 얹는다(RestaurantList -> BottomSheet). 이 컴포넌트는 그 슬롯 안에서만 동작하는 작은 드롭다운
 // (로그아웃/비밀번호 변경)이라 독립된 좌표를 새로 잡을 필요가 없고, 레이아웃 회귀 위험도 없다.
-export default function UserMenu({ nickname, onLogout, onChangePassword }: UserMenuProps) {
+// 2026-08-09 추가: isAdmin이면 "관리자 페이지" 항목을 맨 위에 하나 더 보여준다.
+export default function UserMenu({
+  nickname,
+  onLogout,
+  onChangePassword,
+  isAdmin,
+  onOpenAdmin,
+}: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -35,7 +45,18 @@ export default function UserMenu({ nickname, onLogout, onChangePassword }: UserM
         {nickname}님 ▾
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-10 mt-1 w-32 overflow-hidden rounded-xl border border-black/10 bg-surface shadow-soft">
+        <div className="absolute right-0 top-full z-10 mt-1 w-36 overflow-hidden rounded-xl border border-black/10 bg-surface shadow-soft">
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                onOpenAdmin?.();
+              }}
+              className="block w-full px-3 py-2 text-left text-xs font-medium text-primary-dark transition hover:bg-surface-muted"
+            >
+              🛠️ 관리자 페이지
+            </button>
+          )}
           <button
             onClick={() => {
               setOpen(false);

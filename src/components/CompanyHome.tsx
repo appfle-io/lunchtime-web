@@ -63,6 +63,8 @@ interface CompanyHomeProps {
   restaurants: RestaurantSummary[];
   nickname: string;
   initialFavoriteIds: string[];
+  // 2026-08-09 신규: 관리자면 닉네임 드롭다운에 "관리자 페이지" 링크를 보여준다.
+  isAdmin: boolean;
 }
 
 export interface FocusTarget {
@@ -84,6 +86,7 @@ export default function CompanyHome({
   restaurants: initialRestaurants,
   nickname,
   initialFavoriteIds,
+  isAdmin,
 }: CompanyHomeProps) {
   const router = useRouter();
   const isDesktop = useIsDesktop();
@@ -443,6 +446,8 @@ export default function CompanyHome({
               nickname={nickname}
               onLogout={handleLogout}
               onChangePassword={() => setShowPasswordChange(true)}
+              isAdmin={isAdmin}
+              onOpenAdmin={() => router.push(`/${companyCode}/admin`)}
             />
           }
           // 2026-08-06 심야 3번째 개편: 데스크톱에서는 MealLogCalendar를 아래 CalendarPanel(별도

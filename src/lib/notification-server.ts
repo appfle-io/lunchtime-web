@@ -2,7 +2,13 @@ import { db } from "@/lib/firebase";
 
 // 2026-08-06 신규: 알림함(종 아이콘). 친구 추가 알림 + 점심투표 생성 알림이 같은 서브컬렉션을 쓴다.
 // companies/{code}/users/{nicknameId}/notifications/{notificationId}
-export type NotificationType = "friendAdded" | "voteCreated";
+// 2026-08-09 추가: 가맹점 정보 수정요청 관련 알림 2종 - editRequestCreated(관리자에게: 새 요청이
+// 들어왔다), editRequestResolved(요청자에게: 내 요청이 처리됐다).
+export type NotificationType =
+  | "friendAdded"
+  | "voteCreated"
+  | "editRequestCreated"
+  | "editRequestResolved";
 
 export interface NotificationEntry {
   id: string;
@@ -16,6 +22,12 @@ export interface NotificationEntry {
   voteId?: string;
   voteTitle?: string;
   creatorNickname?: string;
+  // type === "editRequestCreated" | "editRequestResolved"
+  restaurantId?: string;
+  restaurantName?: string;
+  requestSummary?: string; // 요청 유형/내용 한 줄 요약 (restaurant-edit-request.ts의 summarizeEditRequest 결과)
+  requesterNickname?: string; // editRequestCreated에서 "누가 요청했는지" 표시용
+  requestStatus?: "resolved" | "rejected"; // editRequestResolved에서 처리 결과
 }
 
 function notificationsRef(companyCode: string, nicknameId: string) {

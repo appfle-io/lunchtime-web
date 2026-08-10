@@ -10,6 +10,24 @@ export function makeRestaurantId(name: string, address: string): string {
   return crypto.createHash("sha1").update(`${name}|${address}`).digest("hex").slice(0, 16);
 }
 
+// 2026-08-09 신규: scripts/enrich-naver-details.ts(및 최종 버전 enrich-official-final.ts)가
+// 이미 Firestore에 저장해두고 있던 phone/businessHours/facilities/paymentMethods/aiBriefing/
+// menus/naverPlaceUrl 필드를 listRestaurants()/addRestaurantFromCandidate()가 공통으로
+// 읽어오도록 이 헬퍼로 뽑아둔다. (recentReviews는 저작권/개인정보 이슈로 일단 노출 안 함 - 기획
+// 문서 참고. mainImage/메뉴사진은 2026-08-09 최종 수집 단계에서 의도적으로 완전히 제거됐으므로
+// 이 헬퍼도 더 이상 읽지 않는다 - 옛 enrich 스크립트가 문서에 남겨둔 값이 있어도 무시된다.)
+function pickEnrichedFields(data: Record<string, unknown>) {
+  return {
+    phone: (data.phone as string | null | undefined) ?? null,
+    businessHours: data.businessHours ?? null,
+    facilities: Array.isArray(data.facilities) ? (data.facilities as string[]) : [],
+    paymentMethods: Array.isArray(data.paymentMethods) ? (data.paymentMethods as string[]) : [],
+    aiBriefing: (data.aiBriefing as string | null | undefined) ?? null,
+    menus: Array.isArray(data.menus) ? (data.menus as RestaurantSummary["menus"]) : [],
+    naverPlaceUrl: (data.naverPlaceUrl as string | null | undefined) ?? null,
+  };
+}
+
 // companies/{code}/restaurants 서브컬렉션 전체를 읽어온다. 서버(Server Component / API route)에서만 사용.
 export async function listRestaurants(companyCode: string): Promise<RestaurantSummary[]> {
   const snapshot = await db
@@ -33,6 +51,8 @@ export async function listRestaurants(companyCode: string): Promise<RestaurantSu
       // 2026-08-06 신규: 제로페이 엄지척 투표에서 계산되어 캐시된 값 (lib/zeropay-server.ts 참고).
       isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
       distanceMeters: data.distanceMeters,
+      // 2026-08-09 신규: scripts/enrich-naver-details.ts 수집분(전화/영업시간/메뉴 등) 노출.
+      ...pickEnrichedFields(data),
     };
   });
 }
@@ -174,6 +194,8 @@ export async function addRestaurantFromCandidate(
         isZeroPay: Boolean(data.isZeroPay),
         isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
         distanceMeters: data.distanceMeters,
+        // 2026-08-09 신규: 이미 있던 식당이면 enrich 스크립트가 채워둔 값이 있을 수 있으니 같이 반환.
+        ...pickEnrichedFields(data),
       },
     };
   }
@@ -240,7 +262,58 @@ export async function addRestaurantFromCandidate(
       isZeroPay: restaurant.isZeroPay,
       isZeroPayNeedsReview: restaurant.isZeroPayNeedsReview,
       distanceMeters: restaurant.distanceMeters,
+      // 2026-08-09 신규: 방금 새로 만든 식당은 아직 enrich 스크립트를 안 거쳤으니 빈 값으로 시작.
+      phone: null,
+      businessHours: null,
+      facilities: [],
+      paymentMethods: [],
+      aiBriefing: null,
+      menus: [],
+      naverPlaceUrl: null,
     },
   };
 }
 
+// 2026-08-09 신규: 관리자 페이지에서 가맹점 정보를 직접 수정할 때 쓰는 범용 업데이트 함수.
+// 전부 선택 필드라 바뀐 값만 보내면 되고(전체를 다 보내지 않아도 됨), Firestore의 set(merge:true)를
+// 써서 안 보낸 필드는 건드리지 않는다. businessHours는 원본이 복잡한 구조라 관리자 페이지에서는
+// 그냥 사람이 읽을 수 있는 문자열 하나로 단순화해서 덮어쓴다 - 다음 자동 enrich가 다시 돌면
+// 원래(복잡한) 구조로 되돌아갈 수 있다는 점은 감안해야 한다.
+export interface RestaurantAdminUpdate {
+  name?: string;
+  address?: string;
+  category?: string | null;
+  categoryLabel?: string | null;
+  phone?: string | null;
+  businessHours?: string | null;
+  facilities?: string[];
+  paymentMethods?: string[];
+  aiBriefing?: string | null;
+  menus?: RestaurantSummary["menus"];
+  naverPlaceUrl?: string | null;
+  isZeroPay?: boolean;
+}
+
+export async function updateRestaurantAdminFields(
+  companyCode: string,
+  restaurantId: string,
+  update: RestaurantAdminUpdate
+): Promise<RestaurantSummary> {
+  const docRef = db.collection("companies").doc(companyCode).collection("restaurants").doc(restaurantId);
+  await docRef.set(update, { merge: true });
+  const snapshot = await docRef.get();
+  const data = snapshot.data()!;
+  return {
+    id: restaurantId,
+    name: data.name,
+    address: data.address,
+    lat: data.lat,
+    lng: data.lng,
+    category: data.category ?? null,
+    categoryLabel: data.categoryLabel ?? null,
+    isZeroPay: Boolean(data.isZeroPay),
+    isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
+    distanceMeters: data.distanceMeters,
+    ...pickEnrichedFields(data),
+  };
+}
