@@ -28,33 +28,56 @@ function pickEnrichedFields(data: Record<string, unknown>) {
   };
 }
 
+// 2026-08-10 신규: listRestaurants()는 지도/리스트가 필터링을 위해 매번 "회사의 식당 전체"를
+// 필요로 해서(마커를 다 그려야 하니 페이징이 안 맞음) 페이지네이션 대신, 짧은 TTL의 인메모리
+// 캐시를 뒀다 - 이 회사 식당 목록은 회사당 1000~1500건 규모라 사람이 새로고침/방문할 때마다
+// 매번 전체를 다시 읍으면 사용자수 × 방문횟수만큼 읍기 비용이 그대로 늘어난다. 같은 서버
+// 인스턴스가 짧은 시간 안에 여러 요청을 처리하는 동안은 이 캐시로 재사용하고, 식당이 추가/수정
+// 되는 시점(addRestaurantFromCandidate, updateRestaurantAdminFields, zeropay-server의
+// setZeroPayVote)에 invalidateRestaurantsCache()로 즉시 무효화해서 최신 데이터가 바로 반영되게
+// 한다. TTL은 그 사이(다른 서버 인스턴스에서의 쓰기 등)를 대비한 안전망일 뿐이다.
+const RESTAURANTS_CACHE_TTL_MS = 30_000;
+const restaurantsCache = new Map<string, { data: RestaurantSummary[]; expiresAt: number }>();
+
+export function invalidateRestaurantsCache(companyCode: string): void {
+  restaurantsCache.delete(companyCode);
+}
+
+function toRestaurantSummary(id: string, data: Record<string, unknown>): RestaurantSummary {
+  return {
+    id,
+    name: data.name,
+    address: data.address,
+    lat: data.lat,
+    lng: data.lng,
+    category: data.category ?? null,
+    // 2026-08-07 신규: AI 재분류 결과 (scripts/classify-categories-ai.ts). 없으면 null.
+    categoryLabel: data.categoryLabel ?? null,
+    isZeroPay: Boolean(data.isZeroPay),
+    // 2026-08-06 신규: 제로페이 엄지척 투표에서 계산되어 캐시된 값 (lib/zeropay-server.ts 참고).
+    isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
+    distanceMeters: data.distanceMeters,
+    // 2026-08-09 신규: scripts/enrich-naver-details.ts 수집분(전화/영업시간/메뉴 등) 노출.
+    ...pickEnrichedFields(data),
+  } as RestaurantSummary;
+}
+
 // companies/{code}/restaurants 서브컬렉션 전체를 읽어온다. 서버(Server Component / API route)에서만 사용.
 export async function listRestaurants(companyCode: string): Promise<RestaurantSummary[]> {
+  const cached = restaurantsCache.get(companyCode);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
   const snapshot = await db
     .collection("companies")
     .doc(companyCode)
     .collection("restaurants")
     .get();
 
-  return snapshot.docs.map((doc) => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      name: data.name,
-      address: data.address,
-      lat: data.lat,
-      lng: data.lng,
-      category: data.category ?? null,
-      // 2026-08-07 신규: AI 재분류 결과 (scripts/classify-categories-ai.ts). 없으면 null.
-      categoryLabel: data.categoryLabel ?? null,
-      isZeroPay: Boolean(data.isZeroPay),
-      // 2026-08-06 신규: 제로페이 엄지척 투표에서 계산되어 캐시된 값 (lib/zeropay-server.ts 참고).
-      isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
-      distanceMeters: data.distanceMeters,
-      // 2026-08-09 신규: scripts/enrich-naver-details.ts 수집분(전화/영업시간/메뉴 등) 노출.
-      ...pickEnrichedFields(data),
-    };
-  });
+  const restaurants = snapshot.docs.map((doc) => toRestaurantSummary(doc.id, doc.data()));
+  restaurantsCache.set(companyCode, { data: restaurants, expiresAt: Date.now() + RESTAURANTS_CACHE_TTL_MS });
+  return restaurants;
 }
 
 export interface DuplicateWarning {
@@ -209,19 +232,21 @@ export async function addRestaurantFromCandidate(
   // 등록 자체는 계속 진행하되, 프론트에서 "혹시 이 가맹점이랑 같은 곳 아닌가요?" 경고 표시용.
   let duplicateWarning: DuplicateWarning | undefined;
   try {
-    const allSnap = await db.collection("companies").doc(companyCode).collection("restaurants").get();
-    for (const doc of allSnap.docs) {
-      if (doc.id === id) continue;
-      const d = doc.data();
-      const sim = nameSimilarity(candidate.title, (d.name as string) ?? "");
+    // 2026-08-10 수정: 별도로 컬렉션 전체를 다시 읍지 않고 listRestaurants()(캐시 적용)를 재사용한다 -
+    // 어차피 같은 회사의 식당 전체가 필요하므로, 캐시가 살아있으면 등록 1건당 추가 Firestore 읍기가
+    // 0이 된다.
+    const allRestaurants = await listRestaurants(companyCode);
+    for (const r of allRestaurants) {
+      if (r.id === id) continue;
+      const sim = nameSimilarity(candidate.title, r.name ?? "");
       if (sim < 0.75) continue;
-      const dist = haversineMeters(candidate.lat, candidate.lng, d.lat as number, d.lng as number);
+      const dist = haversineMeters(candidate.lat, candidate.lng, r.lat as number, r.lng as number);
       if (dist <= 100) {
         duplicateWarning = {
           similarRestaurant: {
-            id: doc.id,
-            name: d.name as string,
-            address: d.address as string,
+            id: r.id,
+            name: r.name,
+            address: r.address,
             distanceMeters: Math.round(dist),
           },
           similarity: Math.round(sim * 100) / 100,
@@ -247,6 +272,7 @@ export async function addRestaurantFromCandidate(
   };
 
   await docRef.set(restaurant);
+  invalidateRestaurantsCache(companyCode); // 새로 추가된 식당이 지도/리스트에 바로 보이도록 캐시 무효화
 
   return {
     existing: false,
@@ -301,6 +327,7 @@ export async function updateRestaurantAdminFields(
 ): Promise<RestaurantSummary> {
   const docRef = db.collection("companies").doc(companyCode).collection("restaurants").doc(restaurantId);
   await docRef.set(update, { merge: true });
+  invalidateRestaurantsCache(companyCode); // 수정된 내용이 지도/리스트에 바로 보이도록 캐시 무효화
   const snapshot = await docRef.get();
   const data = snapshot.data()!;
   return {

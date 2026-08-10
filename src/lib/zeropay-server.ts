@@ -1,4 +1,5 @@
 import { db } from "@/lib/firebase";
+import { invalidateRestaurantsCache } from "@/lib/restaurant-server";
 
 // 2026-08-06 신규: "제로페이 되나요?" 사내 투표 기능 - 사용자 제안으로, 공공데이터/크롤링 대신
 // 엄지척(👍 됨)/거꾸로엄지척(👎 재확인 필요)으로 실사용자들이 직접 확정해가는 방식을 채택.
@@ -98,6 +99,7 @@ export async function setZeroPayVote(
     { isZeroPay: status.effectiveIsZeroPay, isZeroPayNeedsReview: status.needsReview },
     { merge: true }
   );
+  invalidateRestaurantsCache(companyCode); // 제로페이 상태가 지도/리스트에 바로 반영되도록 캐시 무효화
 
   return status;
 }

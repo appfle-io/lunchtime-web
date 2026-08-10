@@ -1,4 +1,5 @@
 import { db } from "@/lib/firebase";
+import type { DocumentSnapshot } from "firebase-admin/firestore";
 
 // 2026-08-06 신규: "오늘 점심 뭐 먹지?" 투표 - 친구목록에서 참가자를 골라 만드는 투표.
 // companies/{code}/votes/{voteId}
@@ -97,15 +98,16 @@ export async function createVote(
   };
 }
 
-export async function getVote(companyCode: string, voteId: string): Promise<VoteSummary | null> {
-  const voteRef = votesRef(companyCode).doc(voteId);
-  const [voteSnap, responsesSnap, commentsSnap] = await Promise.all([
-    voteRef.get(),
+// 2026-08-10 리팩터: 투표 문서 자체는 이미 읽어둔 스냅샷을 그대로 받아 재사용하고(같은 문서를
+// 두 번 읽는 낭비 제거), responses/comments 서브컬렉션만 추가로 읽어서 VoteSummary로 조립한다.
+// getVote()(단건 조회)와 listVotesForUser()(목록 조회) 양쪽에서 공유해서 쓴다.
+async function hydrateVote(companyCode: string, voteSnap: DocumentSnapshot): Promise<VoteSummary> {
+  const voteRef = votesRef(companyCode).doc(voteSnap.id);
+  const [responsesSnap, commentsSnap] = await Promise.all([
     voteRef.collection("responses").get(),
     voteRef.collection("comments").get(),
   ]);
 
-  if (!voteSnap.exists) return null;
   const data = voteSnap.data()!;
 
   return {
@@ -135,9 +137,20 @@ export async function getVote(companyCode: string, voteId: string): Promise<Vote
   };
 }
 
+export async function getVote(companyCode: string, voteId: string): Promise<VoteSummary | null> {
+  const voteSnap = await votesRef(companyCode).doc(voteId).get();
+  if (!voteSnap.exists) return null;
+  return hydrateVote(companyCode, voteSnap);
+}
+
 // 참가자로 등록된 투표만(히스토리 포함) 조회한다. array-contains + orderBy를 같이 쓰면 Firestore가
 // 복합 인덱스를 요구하게 되므로(popular-server.ts에서와 같은 이유로 피함), orderBy 없이 조회해서
 // 메모리에서 최신순 정렬한다.
+//
+// 2026-08-10 수정: 예전엔 이 목록 쿼리로 얻은 투표 문서를 무시하고 getVote()가 voteId마다 같은
+// 투표 문서를 한 번 더 읽었다 (투표당 3읍기: 문서 중복 1 + responses 1 + comments 1). 이미 위
+// where() 쿼리에서 문서 내용을 전부 들고 있으므로 그 스냅샷을 hydrateVote()에 그대로 넘겨서
+// 투표당 2읍기(responses+comments)로 줄였다 - 참가 투표가 많은 사용자일수록(최대 200개) 절감폭이 크다.
 export async function listVotesForUser(companyCode: string, nicknameId: string): Promise<VoteSummary[]> {
   const snapshot = await votesRef(companyCode)
     .where("participantNicknameIds", "array-contains", nicknameId)
@@ -145,14 +158,11 @@ export async function listVotesForUser(companyCode: string, nicknameId: string):
 
   // 2026-08-06 3차: 목록 탭에 검색/페이징 기능이 추가된 걸 감안해 50 -> 200개로 늘렸다
   // (토이 프로젝트 규모라 충분한 상한선).
-  const voteIds = snapshot.docs
-    .map((doc) => ({ id: doc.id, createdAt: doc.data().createdAt as string }))
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-    .slice(0, 200)
-    .map((v) => v.id);
+  const topVoteDocs = snapshot.docs
+    .sort((a, b) => (a.data().createdAt < b.data().createdAt ? 1 : -1))
+    .slice(0, 200);
 
-  const votes = await Promise.all(voteIds.map((id) => getVote(companyCode, id)));
-  return votes.filter((v): v is VoteSummary => v !== null);
+  return Promise.all(topVoteDocs.map((doc) => hydrateVote(companyCode, doc)));
 }
 
 // 2026-08-06 추가: 같은 옵션을 다시 누르는 경우(이미 그 옵션에 응답해둔 상태에서 같은 옵션을
