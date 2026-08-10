@@ -236,7 +236,7 @@ export default function RestaurantDetail({
 
   if (!restaurant) return null;
 
-  const visual = getCategoryVisual(restaurant.category, restaurant.categoryLabel);
+  const visual = getCategoryVisual(restaurant.category, restaurant.categoryLabel, restaurant.name);
 
   // 2026-08-09 신규: scripts/enrich-naver-details.ts가 수집해둔 부가정보. 없으면 각 섹션은
   // 조건부로 아예 렌더링하지 않는다(엔리치먼트 전 식당은 여전히 예전 모습 그대로 보임).

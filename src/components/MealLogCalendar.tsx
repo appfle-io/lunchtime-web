@@ -188,7 +188,7 @@ export default function MealLogCalendar({
           if (!cell) return <div key={`blank-${i}`} />;
           const entries = logsByDate.get(cell.dateKey) ?? [];
           const first = entries[0];
-          const visual = first ? getCategoryVisual(first.category) : null;
+          const visual = first ? getCategoryVisual(first.category, undefined, first.restaurantName) : null;
           const isToday = cell.dateKey === todayKey;
           return (
             <button
@@ -423,7 +423,7 @@ function MealLogDayModal({
         {localEntries.length > 0 && (
           <ul className="flex flex-col gap-1.5">
             {localEntries.map((entry) => {
-              const visual = getCategoryVisual(entry.category);
+              const visual = getCategoryVisual(entry.category, undefined, entry.restaurantName);
               return (
                 <li
                   key={entry.id}
@@ -489,7 +489,7 @@ function MealLogDayModal({
                       >
                         <span className="min-w-0 flex-1 truncate">{r.name}</span>
                         <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-ink-soft">
-                          {getCategoryVisual(r.category, r.categoryLabel).label}
+                          {getCategoryVisual(r.category, r.categoryLabel, r.name).label}
                         </span>
                       </button>
                     </li>

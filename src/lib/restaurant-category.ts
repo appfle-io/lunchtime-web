@@ -69,7 +69,8 @@ const RULES: { test: RegExp; visual: CategoryVisual }[] = [
     visual: { emoji: "🍜", color: "#EA580C", label: "면류" },
   },
   {
-    test: /샐러드|도시락|다이어트/,
+    // 이름 기반 매칭 포함: 유어보울/포케/비빔보울 등 브랜드명이 category 코드에 안 잡히는 경우 대비
+    test: /샐러드|도시락|다이어트|보울|포케|비빔밥/,
     visual: { emoji: "🥗", color: "#16A34A", label: "샐러드/도시락" },
   },
   {
@@ -97,17 +98,29 @@ const VISUAL_BY_LABEL = new Map<string, CategoryVisual>([
 
 // categoryLabel: AI(Gemini)나 사람이 확정한 정확한 라벨이 있으면 최우선으로 신뢰한다.
 // category: 없거나 모르는 값이면, 기존처럼 네이버/정부 원본 업종 텍스트를 정규식으로 추론한다.
+// name: category만으로 분류가 안 될 때(기타간이음식점 등 뭉뚱그린 업종코드) 식당 이름도
+//   함께 검사해서 "유어보울 영드포점"처럼 지점명에 브랜드 키워드가 있는 경우도 올바른 카테고리로 분류.
 export function getCategoryVisual(
   category: string | null | undefined,
-  categoryLabel?: string | null
+  categoryLabel?: string | null,
+  name?: string | null
 ): CategoryVisual {
   if (categoryLabel) {
     const known = VISUAL_BY_LABEL.get(categoryLabel);
     if (known) return known;
   }
-  if (!category) return DEFAULT_VISUAL;
-  const rule = RULES.find((r) => r.test.test(category));
-  return rule ? rule.visual : DEFAULT_VISUAL;
+  // category 단독으로 먼저 시도
+  if (category) {
+    const ruleByCategory = RULES.find((r) => r.test.test(category));
+    if (ruleByCategory) return ruleByCategory.visual;
+  }
+  // category로 못 잡으면 name도 포함해서 재시도 (지점명 브랜드 키워드 매칭)
+  if (name) {
+    const combined = `${category ?? ""} ${name}`;
+    const ruleByName = RULES.find((r) => r.test.test(combined));
+    if (ruleByName) return ruleByName.visual;
+  }
+  return DEFAULT_VISUAL;
 }
 
 // 자전거 대여소, 병원, 관공서, 마트 같은 음식점이 아닌 결과를 걸러내는 데 쓴다.

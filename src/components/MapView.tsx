@@ -623,7 +623,7 @@ export function buildRestaurantMarkerIcon(
   restaurant: RestaurantSummary,
   options: { focused?: boolean } = {}
 ) {
-  const visual = getCategoryVisual(restaurant.category, restaurant.categoryLabel);
+  const visual = getCategoryVisual(restaurant.category, restaurant.categoryLabel, restaurant.name);
   const displayName = (restaurant.name ?? "").normalize("NFC");
   const zeroPayBadge = restaurant.isZeroPay
     ? `<span class="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-[8px] text-white ring-1 ring-white">₩</span>`
