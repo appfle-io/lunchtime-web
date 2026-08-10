@@ -19,6 +19,7 @@
 
 import dotenv from 'dotenv';
 import path from 'node:path';
+import type { RestaurantMenuItem } from '../src/types';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
@@ -81,6 +82,9 @@ interface RestaurantDoc {
   lng: number;
   source: string;
   naverPlaceUrl?: string;
+  // 2026-08-10 신규: 보존 우선순위 판단에 "메뉴 있는 문서 우선"이 추가되면서 필요해진 필드.
+  // 원본 문서에 없으면 undefined - 아래 aHasMenus/bHasMenus가 Array.isArray로 방어하므로 안전.
+  menus?: RestaurantMenuItem[];
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -112,6 +116,7 @@ async function main() {
     lng: (d.data().lng as number) ?? 0,
     source: (d.data().source as string) ?? 'opendata',
     naverPlaceUrl: (d.data().naverPlaceUrl as string) ?? undefined,
+    menus: Array.isArray(d.data().menus) ? (d.data().menus as RestaurantMenuItem[]) : undefined,
   }));
 
   console.log(`[로드] ${docs.length}개 가맹점`);
