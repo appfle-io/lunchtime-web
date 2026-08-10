@@ -109,7 +109,7 @@ async function scrapeBizHoursForStore(storeName: string, placeId: string, page: 
   const formattedText = rawLines.length > 0 ? rawLines.join('\n') : null;
   console.log(`  🍱 파싱된 라인 수: ${rawLines.length}개`);
   if (formattedText) {
-    console.log(`  📝 파싱된 결과:\n${formattedText.split('\n').map(l => '     ' + l).join('\n')}`);
+    console.log(`  📝 파싱된 결과:\n${formattedText.split('\n').map((l: string) => '     ' + l).join('\n')}`);
   } else {
     console.log(`  ⚪ 영업시간 정보 없음`);
   }
