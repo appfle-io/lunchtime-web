@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { SPECIAL_FILTERS, getAvailableCategoryLabels, type SpecialFilterKey } from "@/lib/restaurant-filters";
 
@@ -36,6 +36,22 @@ interface FilterBarProps {
 // "flex flex-col items-center gap-2"(세로 스택, 가로는 계속 가운데)로 바꿨다. 이렇게 하면
 // 홈 버튼이 있든 없든 필터 알약의 위치 자체는 항상 그대로이고(같은 앵커를 공유), 홈 버튼은
 // 그 위에 자연스럽게 얹힌다 - 별도의 절대위치 좌표를 새로 추측할 필요가 없다.
+//
+// 2026-08-10 신규: 모바일은 화면이 좁아서 카테고리 태그(동적, 개수 많음) + 특수 태그 5개가 다
+// 펼쳐지면 필터 알약이 2~3줄까지 늘어나 지도를 많이 가렸다. "제로페이"만 항상 보이는 필수
+// 태그로 남기고 나머지(카테고리 전체 + 제로페이 외 특수 태그)는 "더보기"로 접어서, 기본 상태는
+// 한 줄로 가볍게 유지한다. 데스크톱은 화면이 넓어서 그대로 다 펼쳐서 보여준다(expanded 상태와
+// 무관하게 md: 브레이크포인트에서 항상 보이도록 처리).
+//
+// 2026-08-10 2차 수정: 데스크톱에서 "필터 위치가 항상 지도의 중심으로 오게 해달라"는 요청.
+// 이전엔 md:left-1/2 + -translate-x-1/2로 "화면 전체 폭 기준" 가운데였는데, MapView.tsx가
+// 지도 컨테이너를 md:left-[448px]부터 시작하게 만들어둔 뒤로는(좌측 사이드바 카드가 그 앞을
+// 절대좌표로 덮고 있음) 화면 전체 기준 가운데 ≠ 실제 눈에 보이는 지도 영역의 가운데였다.
+// "보이는 지도 영역"은 [448px, 100vw] 구간이므로, 그 구간의 가운데는 448px + (100vw-448px)/2
+// = 50vw + 224px (224 = 448/2). left-1/2(=50%, 부모가 전체 뷰포트 폭이라 50vw와 동일)을
+// calc(50%+224px)로 바꾸면 창 폭이 바뀌어도(리사이즈) 순수 CSS 계산이라 항상 다시 맞다 -
+// 별도의 리사이즈 이벤트 리스너가 필요 없다. 448px 값은 MapView.tsx의 지도 컨테이너 오프셋과
+// 반드시 같이 바뀌어야 하는 매직넘버 - 그쪽을 바꾸면 이 224px(=448/2)도 같이 바꿔야 한다.
 export default function FilterBar({
   restaurants,
   activeCategory,
@@ -49,6 +65,14 @@ export default function FilterBar({
   // 훑는 게 누적되면 부담이 되므로, restaurants가 실제로 바뀔 때만 다시 계산한다.
   const categoryLabels = useMemo(() => getAvailableCategoryLabels(restaurants), [restaurants]);
 
+  // 2026-08-10 신규: 모바일 "더보기" 접힘 상태. 데스크톱에서는 이 값과 무관하게 항상 펼쳐서 보여준다.
+  const [expanded, setExpanded] = useState(false);
+  const zeroPayFilter = SPECIAL_FILTERS.find((f) => f.key === "zeropay")!;
+  const restSpecialFilters = SPECIAL_FILTERS.filter((f) => f.key !== "zeropay");
+  // 접힌 상태에서도 "숨겨진 필터 중 뭔가 켜져 있다"는 걸 알 수 있도록 "더보기" 배지에 개수를 표시.
+  const hiddenActiveCount =
+    (activeCategory ? 1 : 0) + restSpecialFilters.filter((f) => activeSpecialFilters.has(f.key)).length;
+
   if (restaurants.length === 0) return null;
 
   return (
@@ -60,8 +84,10 @@ export default function FilterBar({
         "pointer-events-none absolute z-30 flex flex-col items-center gap-2 px-4",
         // 모바일: 상단 중앙, 화면 전체 폭 기준
         "left-0 right-0 top-14",
-        // 데스크톱: 지도 하단, 화면 전체 폭 기준 진짜 가운데 정렬
-        "md:left-1/2 md:right-auto md:top-auto md:bottom-6 md:-translate-x-1/2 md:px-0",
+        // 데스크톱: 지도 하단, "보이는 지도 영역"([448px, 100vw]) 기준 가운데 정렬.
+        // 448 = MapView.tsx 지도 컨테이너의 md:left-[448px]과 반드시 같은 값 - 그쪽이 바뀌면
+        // 224(=448/2)도 같이 바꿔야 한다.
+        "md:left-[calc(50%+224px)] md:right-auto md:top-auto md:bottom-6 md:-translate-x-1/2 md:px-0",
       ].join(" ")}
     >
       {homeButtonVisible && (
@@ -73,38 +99,70 @@ export default function FilterBar({
         </button>
       )}
 
-      <div className="pointer-events-auto flex max-w-[92vw] flex-wrap justify-center gap-1.5 rounded-full bg-surface/95 px-3 py-2 shadow-soft backdrop-blur md:max-w-none">
-        {categoryLabels.map((label) => (
-          <button
-            key={label}
-            onClick={() => onToggleCategory(label)}
-            className={[
-              "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition",
-              activeCategory === label
-                ? "bg-primary text-white"
-                : "bg-surface-muted text-ink-soft hover:bg-primary-light",
-            ].join(" ")}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="pointer-events-auto flex max-w-[92vw] flex-wrap items-center justify-center gap-1.5 rounded-full bg-surface/95 px-3 py-2 shadow-soft backdrop-blur md:max-w-none">
+        {/* 제로페이는 모바일에서도 항상 보이는 필수 태그 - 나머지(카테고리/다른 특수태그)와 분리해서
+            "더보기"로 접었을 때도 이것만은 계속 눌러서 켤 수 있게 한다. */}
+        <button
+          onClick={() => onToggleSpecialFilter(zeroPayFilter.key)}
+          className={[
+            "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition",
+            activeSpecialFilters.has(zeroPayFilter.key)
+              ? "bg-primary text-white"
+              : "bg-surface-muted text-ink-soft hover:bg-primary-light",
+          ].join(" ")}
+        >
+          {zeroPayFilter.label}
+        </button>
 
-        {categoryLabels.length > 0 && <span className="mx-0.5 w-px self-stretch bg-black/10" />}
+        {/* 2026-08-10 신규: "더보기"는 모바일에서만 보이는 토글 - 데스크톱은 항상 전부 펼쳐진
+            상태라 접었다 펼 필요가 없다. */}
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1 whitespace-nowrap rounded-full bg-surface-muted px-3 py-1.5 text-xs font-medium text-ink-soft transition hover:bg-primary-light md:hidden"
+        >
+          {expanded ? "접기" : "더보기"}
+          {!expanded && hiddenActiveCount > 0 && (
+            <span className="flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-white">
+              {hiddenActiveCount}
+            </span>
+          )}
+          <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
+        </button>
 
-        {SPECIAL_FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => onToggleSpecialFilter(f.key)}
-            className={[
-              "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition",
-              activeSpecialFilters.has(f.key)
-                ? "bg-primary text-white"
-                : "bg-surface-muted text-ink-soft hover:bg-primary-light",
-            ].join(" ")}
-          >
-            {f.label}
-          </button>
-        ))}
+        {/* 카테고리 + 제로페이 외 특수태그 - 모바일은 expanded일 때만, 데스크톱은 항상 보임. */}
+        <div className={["flex-wrap items-center gap-1.5", expanded ? "flex" : "hidden", "md:flex"].join(" ")}>
+          {categoryLabels.map((label) => (
+            <button
+              key={label}
+              onClick={() => onToggleCategory(label)}
+              className={[
+                "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition",
+                activeCategory === label
+                  ? "bg-primary text-white"
+                  : "bg-surface-muted text-ink-soft hover:bg-primary-light",
+              ].join(" ")}
+            >
+              {label}
+            </button>
+          ))}
+
+          {categoryLabels.length > 0 && <span className="mx-0.5 w-px self-stretch bg-black/10" />}
+
+          {restSpecialFilters.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => onToggleSpecialFilter(f.key)}
+              className={[
+                "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition",
+                activeSpecialFilters.has(f.key)
+                  ? "bg-primary text-white"
+                  : "bg-surface-muted text-ink-soft hover:bg-primary-light",
+              ].join(" ")}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

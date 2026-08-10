@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { RestaurantSummary, RestaurantMenuItem } from "@/types";
 import { getCategoryVisual, CATEGORY_LABELS } from "@/lib/restaurant-category";
 import { EDIT_REQUEST_TYPE_LABELS, summarizeEditRequest } from "@/lib/restaurant-edit-request";
 import type { RestaurantEditRequest } from "@/lib/restaurant-edit-request-server";
 import Toast from "./Toast";
+import LoadingOverlay from "./LoadingOverlay";
 
 interface AdminDashboardProps {
   companyCode: string;
@@ -53,6 +54,9 @@ export default function AdminDashboard({
   initialPendingRequests,
 }: AdminDashboardProps) {
   const router = useRouter();
+  // 2026-08-10 신규: "← 메인으로" 클릭 시 다음 화면(메인 페이지)이 데이터를 다 불러올 때까지
+  // 반응이 없어 보이던 문제 - useTransition으로 감싸서 클릭 즉시 로딩 오버레이를 띄운다.
+  const [isNavigatingHome, startHomeTransition] = useTransition();
   const [tab, setTab] = useState<Tab>("restaurants");
   const [rows, setRows] = useState<RestaurantSummary[]>(initialRestaurants);
   const [pendingRequests, setPendingRequests] = useState<RestaurantEditRequest[]>(initialPendingRequests);
@@ -323,7 +327,7 @@ export default function AdminDashboard({
             </p>
           </div>
           <button
-            onClick={() => router.push(`/${companyCode}`)}
+            onClick={() => startHomeTransition(() => router.push(`/${companyCode}`))}
             className="rounded-full bg-surface px-3 py-1.5 text-sm font-medium text-ink-soft transition hover:text-primary-dark"
           >
             ← 메인으로
@@ -734,6 +738,7 @@ export default function AdminDashboard({
       )}
 
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
+      {isNavigatingHome && <LoadingOverlay message="메인으로 이동하는 중..." />}
     </main>
   );
 }

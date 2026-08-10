@@ -25,9 +25,11 @@ interface BottomSheetProps {
 // 2026-08-06: 데스크톱 폭을 360px -> 400px로 살짝 넓힘(사용자가 "너무 좁아서 스크롤 압박이
 // 심하다"고 피드백 - 식당 이름/주소가 잘 안 잘리게).
 // 2026-08-06 추가 키우기: "주변식당 영역이 너무 좁다"는 요청으로 모바일 접힘/펼침 높이(32vh->40vh,
-// 70vh->80vh)와 데스크톱 상하 여백(24px->16px)을 줄여서 카드 자체를 키움. 모바일 접힘 높이는
-// PopularWidget.tsx가 그대로 참조하는 값이라(바텀시트 접힌 높이 바로 위에 배치), 여기서 바꾸면
-// PopularWidget.tsx의 오프셋도 같이 맞춰야 한다 - 안 그러면 또 겹침 회귀가 난다.
+// 70vh->80vh)와 데스크톱 상하 여백(24px->16px)을 줄여서 카드 자체를 키움.
+// 2026-08-10 되돌림: "지도가 너무 가려진다"는 반대 피드백으로 모바일 접힘 높이를 40vh->28vh로
+// 다시 줄였다(펼친 상태 80vh는 그대로 - 리스트를 일부러 펼쳤을 땐 크게 보는 게 맞음). PopularWidget이
+// 이 접힌 높이 바로 위에 배치되던 값을 참조했었는데, 이제 PopularWidget 자체를 모바일에서 안 보여주기로
+// 해서(PopularWidget.tsx 참고) 그 커플링은 없어졌다 - 이 값은 이제 자유롭게 바꿔도 된다.
 // 2026-08-06 저녁: "주변식당 아래에 캘린더뷰(밥 먹은 기록)를 추가해달라"는 요청으로 한 번
 // 위/아래 절반 분할 모드를 만들었었는데, 사용자 피드백은 "주변식당은 그대로 두고 그 아래
 // 공간에 캘린더를 추가하라는 것 - 반으로 쪼개는 게 아니다"였다. 그래서 분할 모드를 되돌리고,
@@ -43,7 +45,7 @@ export default function BottomSheet({ children, title, titleRight, header }: Bot
         "absolute z-20 flex flex-col overflow-hidden rounded-t-xl2 bg-surface shadow-soft transition-all",
         // 모바일: 하단 고정
         "bottom-0 left-0 right-0",
-        expanded ? "h-[80vh]" : "h-[40vh]",
+        expanded ? "h-[80vh]" : "h-[28vh]",
         // 데스크톱: CompanyHome의 좌측 패널 wrapper(md:flex md:flex-col) 안에서 flex 아이템으로 동작한다.
         // 2026-08-07: 예전엔 이 카드도 top-4/bottom-4로 고정 높이를 강제해서, 그 아래 캘린더 카드가
         // 남는 공간을 다 채우다 보니 캘린더 내용보다 카드가 훨씬 커져 빈 여백이 생겼다. 이제 캘린더

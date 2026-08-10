@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { generateNicknameCandidates } from "@/lib/nickname";
 import { SECURITY_QUESTIONS, CUSTOM_QUESTION_OPTION } from "@/lib/security-questions";
 import PinResetModal from "./PinResetModal";
+import LoadingOverlay from "./LoadingOverlay";
 
 interface AuthGateProps {
   companyCode: string;
@@ -32,6 +33,10 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [step, setStep] = useState<"login" | "setup-question">("login");
   const [showForgot, setShowForgot] = useState(false);
+  // 2026-08-10 신규: 로그인/가입 성공 후 router.refresh()가 CompanyHome을 다시 그리는 동안(닉네임+PIN
+  // 확인은 이미 끝났는데 정작 화면은 restaurants/favorites 등을 다시 불러올 때까지 안 넘어가서
+  // "버튼 눌러도 반응 없다가 화면이 넘어가는" 것처럼 보이던 구간) 로딩 오버레이를 보여준다.
+  const [isPending, startTransition] = useTransition();
 
   // 저장된 닉네임이 있으면 불러온다. SSR과의 초기 렌더 불일치를 피하려고 useState 초기값이 아니라
   // 마운트 후 effect에서 채운다.
@@ -105,7 +110,9 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
         return;
       }
 
-      router.refresh();
+      startTransition(() => {
+        router.refresh();
+      });
     } catch {
       setStatus("error");
       setError("네트워크 오류가 발생했습니다. 다시 시도해주세요.");
@@ -129,7 +136,9 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
       // 가입 자체는 이미 끝났으니 실패해도 그냥 진행 - 나중에 "비밀번호 변경"에서 다시 등록할 수 있다.
     } finally {
       setSecSubmitting(false);
-      router.refresh();
+      startTransition(() => {
+        router.refresh();
+      });
     }
   }
 
@@ -187,13 +196,14 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
             </button>
             <button
               type="button"
-              onClick={() => router.refresh()}
+              onClick={() => startTransition(() => router.refresh())}
               className="text-center text-xs text-ink-soft underline-offset-2 hover:text-primary-dark hover:underline"
             >
               나중에 설정할게요
             </button>
           </form>
         </div>
+        {isPending && <LoadingOverlay message="불러오는 중..." />}
       </main>
     );
   }
@@ -276,10 +286,10 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
 
           <button
             type="submit"
-            disabled={status === "loading" || pin.length !== 4 || !nickname.trim()}
+            disabled={status === "loading" || isPending || pin.length !== 4 || !nickname.trim()}
             className="mt-1 rounded-xl2 bg-primary px-4 py-3 font-semibold text-white transition hover:bg-primary-dark disabled:opacity-60"
           >
-            {status === "loading" ? "확인 중..." : "시작하기"}
+            {status === "loading" || isPending ? "확인 중..." : "시작하기"}
           </button>
         </form>
       </div>
@@ -291,6 +301,7 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
         onClose={() => setShowForgot(false)}
         onSuccess={() => setShowForgot(false)}
       />
+      {isPending && <LoadingOverlay message="불러오는 중..." />}
     </main>
   );
 }

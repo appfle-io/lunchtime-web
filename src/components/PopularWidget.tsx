@@ -22,13 +22,12 @@ interface PopularWidgetProps {
 //   카테고리/특수필터가 2줄로 접히는 상황에서 Top3 위젯이 FilterBar 둘째 줄 버튼을 가리는 문제가
 //   스크린샷으로 확인됨(2026-08-06). FilterBar가 몇 줄이 될지는 카테고리 개수에 따라 계속
 //   달라질 수 있는 값이라 애초에 고정 숫자로 예측하려던 접근 자체가 잘못이었음.
-// 3차(현재): 모바일에서는 FilterBar와 아예 다른 영역(화면 하단)으로 옮겨서 카테고리가 몇 줄로
-//   접히든 절대 겹치지 않게 함 - BottomSheet의 접힌 높이(2026-08-06 오후 40vh로 확대, BottomSheet.tsx와
-//   공유하는 값이라 그쪽 값이 바뀌면 여기도 같이 바뀌어야 함) 바로 위, 여유 12px(0.75rem)을 두고 배치. 바텀시트를
-//   펼치면(80vh) 위젯이 그 밑에 가려지지만, 그건 사용자가 리스트를 보려고 일부러 펼친 상태라
-//   지도/위젯이 잠깐 안 보이는 건 자연스러운 트레이드오프로 봄. 데스크톱은 FilterBar가 지도 하단
-//   중앙으로 옮겨가서(FilterBar.tsx 참고) 상단이 비게 되므로 그대로 우상단(로그아웃 배지와 대칭,
-//   md:top-6 md:right-6) 유지.
+// 3차: 모바일에서는 FilterBar와 아예 다른 영역(화면 하단)으로 옮겨서 카테고리가 몇 줄로
+//   접히든 절대 겹치지 않게 함 - BottomSheet의 접힌 높이 바로 위에 배치했었음.
+// 4차(현재): "모바일에서는 실시간현황 안 보여줘도 된다"는 요청으로 모바일에서는 아예 렌더링하지
+//   않는다(hidden md:block) - 화면이 좁아서 지도/필터/주변식당만으로도 이미 빽빽했다. 데스크톱은
+//   FilterBar가 지도 하단 중앙으로 옮겨가서(FilterBar.tsx 참고) 상단이 비므로 그대로 우상단
+//   (로그아웃 배지와 대칭, md:top-6 md:right-6) 유지.
 export default function PopularWidget({
   entries,
   restaurants,
@@ -43,7 +42,7 @@ export default function PopularWidget({
   if (entries.length === 0) return null;
 
   return (
-    <div className="absolute right-4 bottom-[calc(40vh+0.75rem)] z-20 w-56 rounded-xl2 bg-surface/95 p-3 shadow-soft backdrop-blur md:bottom-auto md:right-6 md:top-6">
+    <div className="hidden z-20 w-56 rounded-xl2 bg-surface/95 p-3 shadow-soft backdrop-blur md:absolute md:block md:bottom-auto md:right-6 md:top-6">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-ink-soft">🔥 실시간 인기 Top3</p>
         {onRefresh && (

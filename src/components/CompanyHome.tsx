@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import MapView from "./MapView";
 import RestaurantList from "./RestaurantList";
@@ -17,6 +17,7 @@ import PinResetModal from "./PinResetModal";
 import MealLogCalendar from "./MealLogCalendar";
 import CalendarPanel from "./CalendarPanel";
 import Toast from "./Toast";
+import LoadingOverlay from "./LoadingOverlay";
 import type { RestaurantSummary } from "@/types";
 import { filterRestaurants, type SpecialFilterKey } from "@/lib/restaurant-filters";
 import { logRestaurantClick } from "@/lib/analytics-client";
@@ -90,6 +91,9 @@ export default function CompanyHome({
 }: CompanyHomeProps) {
   const router = useRouter();
   const isDesktop = useIsDesktop();
+  // 2026-08-10 신규: "관리자 페이지" 클릭 시 router.push가 새 화면을 다 불러올 때까지 아무 반응이
+  // 없어 보이던 문제 - useTransition으로 감싸서 클릭 즉시 로딩 오버레이를 띄운다.
+  const [isNavigatingToAdmin, startAdminTransition] = useTransition();
   const [focusTarget, setFocusTarget] = useState<FocusTarget | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedRestaurant, setSelectedRestaurant] = useState<RestaurantSummary | null>(null);
@@ -447,7 +451,7 @@ export default function CompanyHome({
               onLogout={handleLogout}
               onChangePassword={() => setShowPasswordChange(true)}
               isAdmin={isAdmin}
-              onOpenAdmin={() => router.push(`/${companyCode}/admin`)}
+              onOpenAdmin={() => startAdminTransition(() => router.push(`/${companyCode}/admin`))}
             />
           }
           // 2026-08-06 심야 3번째 개편: 데스크톱에서는 MealLogCalendar를 아래 CalendarPanel(별도
@@ -555,6 +559,7 @@ export default function CompanyHome({
       />
 
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
+      {isNavigatingToAdmin && <LoadingOverlay message="관리자 페이지로 이동하는 중..." />}
     </main>
   );
 }

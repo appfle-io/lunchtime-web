@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { normalizeCompanyCode } from "@/lib/company";
+import LoadingOverlay from "@/components/LoadingOverlay";
 
 // 진입점: 회사코드 입력 화면.
 // 로그인 없이 회사코드만으로 해당 회사 스코프(company_id)로 라우팅한다.
@@ -13,6 +14,10 @@ export default function CompanyEntryPage() {
   const router = useRouter();
   const [companyCode, setCompanyCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // 2026-08-10 신규: "시작하기"를 누르면 router.push가 끝날 때까지(다음 화면이 준비될 때까지)
+  // 버튼을 눌러도 아무 반응이 없는 것처럼 보이던 문제 - useTransition으로 감싸서 isPending을
+  // 클릭한 즉시 true로 만들고, 로딩 오버레이를 보여준다.
+  const [isPending, startTransition] = useTransition();
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -21,7 +26,9 @@ export default function CompanyEntryPage() {
       setError("회사코드를 입력해주세요.");
       return;
     }
-    router.push(`/${encodeURIComponent(code)}`);
+    startTransition(() => {
+      router.push(`/${encodeURIComponent(code)}`);
+    });
   }
 
   return (
@@ -40,12 +47,14 @@ export default function CompanyEntryPage() {
           {error && <p className="text-sm text-primary-dark">{error}</p>}
           <button
             type="submit"
-            className="rounded-xl2 bg-primary px-4 py-3 font-semibold text-white transition hover:bg-primary-dark"
+            disabled={isPending}
+            className="rounded-xl2 bg-primary px-4 py-3 font-semibold text-white transition hover:bg-primary-dark disabled:opacity-60"
           >
-            시작하기
+            {isPending ? "이동하는 중..." : "시작하기"}
           </button>
         </form>
       </div>
+      {isPending && <LoadingOverlay message="불러오는 중..." />}
     </main>
   );
 }

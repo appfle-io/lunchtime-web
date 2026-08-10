@@ -279,6 +279,9 @@ export default function MapView({
   const mapRef = useRef<any>(null);
   const companyMarkerRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
+  // 2026-08-10 신규: 창 크기 변경(resize)에 반응해 지도를 재조정할 때 쓰는 디바운스 타이머.
+  // 아래 resize 이벤트 effect 참고.
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ready, setReady] = useState(false);
   // idle(드래그/줌 종료) 이벤트가 발생할 때마다 1씩 증가 - 아래 마커 effect가 이 값을 의존성으로
   // 갖고 있어서, 지도를 움직인 "직후"에만 화면에 보이는 마커를 다시 계산한다.
@@ -358,8 +361,46 @@ export default function MapView({
     window.naver.maps.Event.addListener(mapRef.current, "idle", () => {
       setBoundsVersion((v) => v + 1);
     });
+
+    // 2026-08-10 신규: 지도는 생성 시점에 컨테이너의 CSS 크기를 한 번 측정해서 내부 렌더링
+    // 크기를 잡는데, 그 시점에 레이아웃이 아직 완전히 자리잡지 않았을 수 있다(스크롤바 유무,
+    // 사이드바 폭 계산 등). 다음 프레임에서 한 번 더 실제 크기를 재확인시켜서, "회사 기본
+    // 위치가 지도 중심에서 살짝 오른쪽으로 쏠려 보인다"는 초기 렌더링 오차를 줄인다.
+    requestAnimationFrame(() => {
+      mapRef.current?.autoResize?.();
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  // 2026-08-10 신규: "데스크톱에서 브라우저 창 크기가 바뀔 때도 필터/기본위치가 항상 지도의
+  // 중심으로 오게 해달라"는 요청 중 지도 쪽 절반 - 지도 컨테이너는 CSS로 반응형(md:left-[448px]
+  // 기준 나머지 폭)이라 창을 늘리거나 줄이면 실제로 "보이는 지도 영역"의 픽셀 크기가 계속
+  // 바뀌는데, NCP Maps는 그 변화를 스스로 감지하지 못하고 생성 시점에 측정한 크기를 계속
+  // 내부적으로 쓴다(공식 문서: autoResize()는 "지도 DOM 요소의 CSS 크기 변화에 따라 지도
+  // 크기를 재설정"하는 API - 자동으로 매번 호출되는 게 아니라 필요할 때 명시적으로 불러줘야
+  // 한다). 그래서 window resize마다 autoResize()로 최신 컨테이너 크기를 다시 읽게 하고, 그 뒤
+  // 같은 중심 좌표로 setCenter를 한 번 더 불러서(autoResize만으로는 재조정된 화면 안에서 중심점이
+  // 시각적으로 정확히 한가운데로 안 맞는 경우가 있어 안전하게 재확정) 창 크기가 바뀌어도 항상
+  // 지금 보고 있던 지점이 보이는 지도 영역의 정가운데를 유지하게 한다. resize 이벤트는 드래그
+  // 중 매 프레임 발생하므로 디바운스해서 과도한 재계산을 막는다.
+  useEffect(() => {
+    function handleResize() {
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+      resizeTimerRef.current = setTimeout(() => {
+        const map = mapRef.current;
+        if (!map || typeof map.autoResize !== "function") return;
+        map.autoResize();
+        const center = map.getCenter?.();
+        if (center) map.setCenter(center);
+      }, 150);
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+    };
+  }, []);
 
   // 회사 좌표가 바뀌면(드문 경우) 지도를 다시 만들지 않고 중심/마커 위치만 옮긴다.
   useEffect(() => {

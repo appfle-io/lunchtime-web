@@ -154,8 +154,24 @@ async function main() {
         (sameNaverUrl && nameSim >= 0.80);
 
       if (isDefiniteDuplicate) {
-        const keep = sourcePriority(a.source) >= sourcePriority(b.source) ? a : b;
-        const remove = keep._id === a._id ? b : a;
+        // 보존 우선순위: 1순위 메뉴가 있는 문서 -> 2순위 manual > seed > opendata
+        const aHasMenus = Array.isArray(a.menus) && a.menus.length > 0;
+        const bHasMenus = Array.isArray(b.menus) && b.menus.length > 0;
+        let keep = a;
+        let remove = b;
+
+        if (aHasMenus && !bHasMenus) {
+          keep = a; remove = b;
+        } else if (bHasMenus && !aHasMenus) {
+          keep = b; remove = a;
+        } else if (aHasMenus && bHasMenus && a.menus!.length !== b.menus!.length) {
+          keep = a.menus!.length > b.menus!.length ? a : b;
+          remove = keep._id === a._id ? b : a;
+        } else {
+          keep = sourcePriority(a.source) >= sourcePriority(b.source) ? a : b;
+          remove = keep._id === a._id ? b : a;
+        }
+
         if (!toDeleteMap.has(keep._id)) {
           toDeleteMap.set(remove._id, keep);
           processed.add(remove._id);
@@ -221,6 +237,27 @@ async function main() {
   for (const [removeId, keep] of toDeleteMap.entries()) {
     const removeRef = restaurantsRef.doc(removeId);
     const keepRef = restaurantsRef.doc(keep._id);
+
+    const removeSnap = await removeRef.get();
+    const removeData = removeSnap.data() || {};
+    const keepSnap = await keepRef.get();
+    const keepData = keepSnap.data() || {};
+
+    const mergedData: Record<string, any> = {};
+    if ((!keepData.menus || keepData.menus.length === 0) && removeData.menus && removeData.menus.length > 0) {
+      mergedData.menus = removeData.menus;
+    }
+    if (!keepData.phone && removeData.phone) mergedData.phone = removeData.phone;
+    if (!keepData.businessHours && removeData.businessHours) mergedData.businessHours = removeData.businessHours;
+    if (!keepData.facilities && removeData.facilities) mergedData.facilities = removeData.facilities;
+    if (!keepData.paymentMethods && removeData.paymentMethods) mergedData.paymentMethods = removeData.paymentMethods;
+    if (!keepData.aiBriefing && removeData.aiBriefing) mergedData.aiBriefing = removeData.aiBriefing;
+    if (!keepData.naverPlaceUrl && removeData.naverPlaceUrl) mergedData.naverPlaceUrl = removeData.naverPlaceUrl;
+    if (!keepData.naverPlaceId && removeData.naverPlaceId) mergedData.naverPlaceId = removeData.naverPlaceId;
+
+    if (Object.keys(mergedData).length > 0) {
+      await keepRef.set(mergedData, { merge: true });
+    }
 
     // reviews 서브컬렉션 마이그레이션
     const reviewsSnap = await removeRef.collection('reviews').get();
