@@ -31,7 +31,11 @@ export interface RestaurantMenuItem {
 
 export interface RestaurantSummary {
   id: string;
-  name: string;
+  name: string; // 기본/호환용 상호명
+  displayName?: string; // 메인 화면 최종 표출명 (네이버맵 상호명 naverMatchedName 최우선)
+  zeroPayOfficialName?: string | null; // 제로페이 공식 가맹점 등록 상호명
+  businessName?: string | null; // 사업자등록상 명칭 (최초 CSV/시딩명)
+  naverMatchedName?: string | null; // 네이버맵 매칭 상호명
   address: string;
   lat: number;
   lng: number;
@@ -66,6 +70,12 @@ export interface RestaurantSummary {
   menus?: RestaurantMenuItem[];
   // 네이버지도 상세 페이지 링크 - "네이버지도에서 보기" 외부링크용.
   naverPlaceUrl?: string | null;
+
+  // 사내 제휴 혜택 정보 (benefit: 혜택 내용, note: 비고 조건)
+  discountInfo?: {
+    benefit?: string | null;
+    note?: string | null;
+  } | null;
 
   // 2026-08-10 신규: 관리자 페이지 "사용여부" 컬럼. 기존 문서엔 이 필드가 아예 없는데,
   // restaurant-server.ts의 toRestaurantSummary()가 값이 없으면(undefined) true로 취급하므로

@@ -55,6 +55,9 @@ function pickEnrichedFields(data: Record<string, unknown>) {
     aiBriefing: (data.aiBriefing as string | null | undefined) ?? null,
     menus: Array.isArray(data.menus) ? (data.menus as RestaurantSummary["menus"]) : [],
     naverPlaceUrl: (data.naverPlaceUrl as string | null | undefined) ?? null,
+    discountInfo: data.discountInfo
+      ? (data.discountInfo as RestaurantSummary["discountInfo"])
+      : null,
   };
 }
 
@@ -74,9 +77,21 @@ export function invalidateRestaurantsCache(companyCode: string): void {
 }
 
 export function toRestaurantSummary(id: string, data: Record<string, unknown>): RestaurantSummary {
+  const rawName = (data.name as string) ?? "";
+  const naverMatchedName = (data.naverMatchedName as string | null | undefined) ?? null;
+  const zeroPayOfficialName = (data.zeroPayOfficialName as string | null | undefined) ?? null;
+  const businessName = (data.businessName as string | null | undefined) ?? (data.originalName as string | null | undefined) ?? rawName;
+
+  // 메인 화면 표시 상호명: naverMatchedName이 존재하면 최우선 사용, 없으면 원본 상호명
+  const displayName = naverMatchedName || rawName;
+
   return {
     id,
-    name: data.name,
+    name: displayName, // 기존 UI 호환성 보장
+    displayName,
+    zeroPayOfficialName,
+    businessName,
+    naverMatchedName,
     address: data.address,
     lat: data.lat,
     lng: data.lng,
@@ -305,6 +320,9 @@ export async function addRestaurantFromCandidate(
 // 원래(복잡한) 구조로 되돌아갈 수 있다는 점은 감안해야 한다.
 export interface RestaurantAdminUpdate {
   name?: string;
+  businessName?: string | null;
+  zeroPayOfficialName?: string | null;
+  naverMatchedName?: string | null;
   address?: string;
   category?: string | null;
   categoryLabel?: string | null;
@@ -315,6 +333,7 @@ export interface RestaurantAdminUpdate {
   aiBriefing?: string | null;
   menus?: RestaurantSummary["menus"];
   naverPlaceUrl?: string | null;
+  discountInfo?: RestaurantSummary["discountInfo"];
   isZeroPay?: boolean;
   // 2026-08-10 신규: 관리자 페이지 "사용여부" 토글 저장용. false를 보내면 N 처리(메인 화면 제외).
   isActive?: boolean;

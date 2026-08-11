@@ -102,6 +102,11 @@ export default function AdminDashboard({
   const [formPaymentMethods, setFormPaymentMethods] = useState("");
   const [formIsZeroPay, setFormIsZeroPay] = useState(false);
   const [formNaverPlaceUrl, setFormNaverPlaceUrl] = useState("");
+  const [formNaverMatchedName, setFormNaverMatchedName] = useState("");
+  const [formZeroPayOfficialName, setFormZeroPayOfficialName] = useState("");
+  const [formBusinessName, setFormBusinessName] = useState("");
+  const [formDiscountBenefit, setFormDiscountBenefit] = useState("");
+  const [formDiscountNote, setFormDiscountNote] = useState("");
   const [formMenus, setFormMenus] = useState<RestaurantMenuItem[]>([]);
 
   const detailRestaurant = useMemo(() => rows.find((r) => r.id === detailId) ?? null, [rows, detailId]);
@@ -189,6 +194,11 @@ export default function AdminDashboard({
     setFormPaymentMethods((restaurant.paymentMethods ?? []).join(", "));
     setFormIsZeroPay(restaurant.isZeroPay);
     setFormNaverPlaceUrl(restaurant.naverPlaceUrl ?? "");
+    setFormNaverMatchedName(restaurant.naverMatchedName ?? restaurant.displayName ?? restaurant.name);
+    setFormZeroPayOfficialName(restaurant.zeroPayOfficialName ?? "");
+    setFormBusinessName(restaurant.businessName ?? "");
+    setFormDiscountBenefit(restaurant.discountInfo?.benefit ?? "");
+    setFormDiscountNote(restaurant.discountInfo?.note ?? "");
     setFormMenus(restaurant.menus ?? []);
   }
 
@@ -273,7 +283,10 @@ export default function AdminDashboard({
           companyCode,
           restaurantId: detailId,
           update: {
-            name: formName.trim(),
+            name: formNaverMatchedName.trim() || formName.trim(),
+            naverMatchedName: formNaverMatchedName.trim() || null,
+            zeroPayOfficialName: formZeroPayOfficialName.trim() || null,
+            businessName: formBusinessName.trim() || null,
             address: formAddress.trim(),
             categoryLabel: formCategoryLabel || null,
             phone: formPhone.trim() || null,
@@ -288,6 +301,13 @@ export default function AdminDashboard({
               .filter(Boolean),
             isZeroPay: formIsZeroPay,
             naverPlaceUrl: formNaverPlaceUrl.trim() || null,
+            discountInfo:
+              formDiscountBenefit.trim() || formDiscountNote.trim()
+                ? {
+                    benefit: formDiscountBenefit.trim() || null,
+                    note: formDiscountNote.trim() || null,
+                  }
+                : null,
             menus: formMenus.filter((m) => m.name.trim().length > 0),
           },
         }),
@@ -343,8 +363,8 @@ export default function AdminDashboard({
   }
 
   return (
-    <main className="min-h-screen bg-surface-muted px-4 py-6">
-      <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <main className="min-h-screen bg-surface-muted px-3 py-6 sm:px-6">
+      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-ink">🛠️ 관리자 페이지</h1>
@@ -615,7 +635,7 @@ export default function AdminDashboard({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-xl2 bg-surface p-5 shadow-soft"
+            className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-surface p-6 shadow-soft"
           >
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-ink">✏️ {detailRestaurant.name} 상세편집</h2>
@@ -642,14 +662,33 @@ export default function AdminDashboard({
             </div>
 
             <div className="mt-3 flex flex-col gap-2.5">
-              <label className="flex flex-col gap-1 text-xs font-medium text-ink-soft">
-                이름
+              <label className="flex flex-col gap-1 text-xs font-semibold text-emerald-800">
+                네이버맵 상호명 (메인 화면 표출명)
                 <input
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary"
+                  value={formNaverMatchedName}
+                  onChange={(e) => setFormNaverMatchedName(e.target.value)}
+                  className="rounded-xl border border-emerald-500/30 bg-emerald-50/50 px-3 py-2 text-sm text-ink outline-none focus:border-emerald-600"
                 />
               </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1 text-xs font-medium text-ink-soft">
+                  제로페이 공식 등록 상호명
+                  <input
+                    value={formZeroPayOfficialName}
+                    onChange={(e) => setFormZeroPayOfficialName(e.target.value)}
+                    className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-medium text-ink-soft">
+                  사업자등록상 명칭 (최초 CSV명)
+                  <input
+                    value={formBusinessName}
+                    onChange={(e) => setFormBusinessName(e.target.value)}
+                    className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary"
+                  />
+                </label>
+              </div>
 
               <label className="flex flex-col gap-1 text-xs font-medium text-ink-soft">
                 주소
@@ -732,6 +771,25 @@ export default function AdminDashboard({
                   className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary"
                 />
               </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1 text-xs font-medium text-ink-soft">
+                  제휴 혜택 (예: 10%, 탄산 S 무료)
+                  <input
+                    value={formDiscountBenefit}
+                    onChange={(e) => setFormDiscountBenefit(e.target.value)}
+                    className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-medium text-ink-soft">
+                  제휴 비고 조건 (예: 세트 제외)
+                  <input
+                    value={formDiscountNote}
+                    onChange={(e) => setFormDiscountNote(e.target.value)}
+                    className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary"
+                  />
+                </label>
+              </div>
 
               <div className="flex flex-col gap-1.5">
                 <p className="text-xs font-medium text-ink-soft">메뉴</p>

@@ -149,6 +149,11 @@ function RestaurantRow({ index, style, data }: ListChildComponentProps<Restauran
               {r.category}
             </span>
           )}
+          {r.discountInfo?.benefit && (
+            <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+              🏷️ 제휴할인
+            </span>
+          )}
           {r.isZeroPay && (
             <span className="shrink-0 whitespace-nowrap rounded-full bg-primary-light px-2 py-0.5 text-xs text-primary-dark">
               제로페이

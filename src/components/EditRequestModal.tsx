@@ -42,6 +42,8 @@ export default function EditRequestModal({
   const [isClosed, setIsClosed] = useState(true);
   const [newAddress, setNewAddress] = useState("");
   const [isZeroPay, setIsZeroPay] = useState(true);
+  const [discountBenefit, setDiscountBenefit] = useState("");
+  const [discountNote, setDiscountNote] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +61,8 @@ export default function EditRequestModal({
     setIsClosed(true);
     setNewAddress("");
     setIsZeroPay(true);
+    setDiscountBenefit("");
+    setDiscountNote("");
     setNote("");
     setError(null);
   }
@@ -83,6 +87,12 @@ export default function EditRequestModal({
         return { ...base, isClosed, newAddress: isClosed ? null : newAddress.trim() || null };
       case "zeroPay":
         return { ...base, isZeroPay };
+      case "discount":
+        return {
+          ...base,
+          discountBenefit: discountBenefit.trim() || null,
+          discountNote: discountNote.trim() || null,
+        };
       case "other":
         return base;
     }
@@ -101,6 +111,8 @@ export default function EditRequestModal({
         return menuName.trim().length > 0;
       case "zeroPay":
         return true; // 라디오라 항상 값이 있음
+      case "discount":
+        return discountBenefit.trim().length > 0;
       default:
         return true;
     }
@@ -287,6 +299,23 @@ export default function EditRequestModal({
                 <input type="radio" checked={!isZeroPay} onChange={() => setIsZeroPay(false)} />
                 제로페이 안 돼요
               </label>
+            </div>
+          )}
+
+          {type === "discount" && (
+            <div className="flex flex-col gap-2">
+              <input
+                value={discountBenefit}
+                onChange={(e) => setDiscountBenefit(e.target.value)}
+                placeholder="올바른 할인 혜택 (예: 10%, 탄산 S 1잔 무료)"
+                className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+              <input
+                value={discountNote}
+                onChange={(e) => setDiscountNote(e.target.value)}
+                placeholder="비고 조건 (예: 11시~15시 세트 제외, 사원증 제시)"
+                className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
+              />
             </div>
           )}
 

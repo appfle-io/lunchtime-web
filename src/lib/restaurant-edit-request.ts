@@ -13,6 +13,7 @@ export type EditRequestType =
   | "menu"
   | "closedOrMoved"
   | "zeroPay"
+  | "discount"
   | "other";
 
 export const EDIT_REQUEST_TYPES: EditRequestType[] = [
@@ -22,6 +23,7 @@ export const EDIT_REQUEST_TYPES: EditRequestType[] = [
   "menu",
   "closedOrMoved",
   "zeroPay",
+  "discount",
   "other",
 ];
 
@@ -32,6 +34,7 @@ export const EDIT_REQUEST_TYPE_LABELS: Record<EditRequestType, string> = {
   menu: "메뉴/가격이 달라요",
   closedOrMoved: "폐업했어요 / 이전했어요",
   zeroPay: "제로페이(비플식권) 여부가 달라요",
+  discount: "제휴 할인 내용이 달라요",
   other: "기타",
 };
 
@@ -44,6 +47,7 @@ export const EDIT_REQUEST_REQUIRES_VALUE: Record<EditRequestType, boolean> = {
   menu: true,
   closedOrMoved: false, // 체크만 하면 되고, 이전한 경우에만 새 주소를 추가로 입력
   zeroPay: true,
+  discount: true,
   other: false, // note만으로 충분
 };
 
@@ -63,6 +67,9 @@ export interface EditRequestPayload {
   newAddress?: string | null;
   // type === "zeroPay"
   isZeroPay?: boolean;
+  // type === "discount"
+  discountBenefit?: string | null;
+  discountNote?: string | null;
   // 모든 유형에 공통으로 붙일 수 있는 선택적 부가설명.
   note?: string | null;
 }
@@ -86,6 +93,8 @@ export function summarizeEditRequest(type: EditRequestType, payload: EditRequest
         : `이전했어요${payload.newAddress ? ` → ${payload.newAddress}` : ""}`;
     case "zeroPay":
       return `제로페이 → ${payload.isZeroPay ? "가능" : "불가능"}`;
+    case "discount":
+      return `제휴 할인 → ${payload.discountBenefit ?? "-"}${payload.discountNote ? ` (${payload.discountNote})` : ""}`;
     case "other":
       return payload.note ?? "기타 문의";
   }

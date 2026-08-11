@@ -23,7 +23,8 @@ export interface EnrichResult {
  */
 export async function enrichRestaurantById(
   companyCode: string,
-  restaurantId: string
+  restaurantId: string,
+  options: { skipZeroPay?: boolean } = {}
 ): Promise<EnrichResult> {
   const companyDocRef = db.collection("companies").doc(companyCode);
   const companySnap = await companyDocRef.get();
@@ -70,21 +71,23 @@ export async function enrichRestaurantById(
     console.warn(`[enrich-server] "${name}" 네이버 검색 예외:`, naverErr);
   }
 
-  // 2. 제로페이 공식 DB (zeropay.or.kr) 다변화 조회
-  try {
-    const officialZeroPay = await checkZeroPayOfficial(name, address);
-    if (officialZeroPay.isZeroPay) {
-      update.isZeroPay = true;
-      update.zeroPaySource = "zeropay_official";
-      update.zeroPayEnrichedAt = new Date().toISOString();
-      if (officialZeroPay.officialName) update.zeroPayOfficialName = officialZeroPay.officialName;
-      if (officialZeroPay.officialAddress) update.zeroPayOfficialAddress = officialZeroPay.officialAddress;
+  // 2. 제로페이 공식 DB (zeropay.or.kr) 다변화 조회 (skipZeroPay가 아닐 때만 실행)
+  if (!options.skipZeroPay) {
+    try {
+      const officialZeroPay = await checkZeroPayOfficial(name, address);
+      if (officialZeroPay.isZeroPay) {
+        update.isZeroPay = true;
+        update.zeroPaySource = "zeropay_official";
+        update.zeroPayEnrichedAt = new Date().toISOString();
+        if (officialZeroPay.officialName) update.zeroPayOfficialName = officialZeroPay.officialName;
+        if (officialZeroPay.officialAddress) update.zeroPayOfficialAddress = officialZeroPay.officialAddress;
 
-      enrichedSummary.isZeroPay = true;
-      enrichedSummary.zeroPaySource = "zeropay_official";
+        enrichedSummary.isZeroPay = true;
+        enrichedSummary.zeroPaySource = "zeropay_official";
+      }
+    } catch (zpErr) {
+      console.warn(`[enrich-server] "${name}" 제로페이 공식 조회 예외:`, zpErr);
     }
-  } catch (zpErr) {
-    console.warn(`[enrich-server] "${name}" 제로페이 공식 조회 예외:`, zpErr);
   }
 
   // 3. Gemini 카테고리 AI 자동 분류

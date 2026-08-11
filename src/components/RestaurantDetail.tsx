@@ -373,13 +373,20 @@ export default function RestaurantDetail({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-xl2 bg-surface p-6 shadow-soft"
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-surface p-6 sm:p-7 shadow-soft"
       >
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xl">{visual.emoji}</span>
-              <h2 className="text-lg font-bold text-ink">{restaurant.name}</h2>
+              <div>
+                <h2 className="text-lg font-bold text-ink">{restaurant.displayName || restaurant.name}</h2>
+                {restaurant.businessName && restaurant.businessName !== (restaurant.displayName || restaurant.name) && (
+                  <p className="text-[11px] text-ink-soft/80">
+                    (등록 상호: {restaurant.businessName})
+                  </p>
+                )}
+              </div>
             </div>
             <p className="mt-1 text-sm text-ink-soft">{restaurant.address}</p>
           </div>
@@ -419,6 +426,11 @@ export default function RestaurantDetail({
           {/* 2026-08-07: "제로페이 미확인" 배지를 없앴다 - 확인이 안 된 상태를 미리 단정짓지 않고,
               아래 엄지척/거꾸로엄지척 투표로 사용자들이 직접 판단하도록 열어둔다. 확인된(가능한)
               경우에만 배지를 보여준다. */}
+          {restaurant.discountInfo?.benefit && (
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+              🏷️ 제휴할인
+            </span>
+          )}
           {effectiveIsZeroPay && (
             <span className="rounded-full bg-primary-light px-2 py-0.5 text-xs text-primary-dark">
               제로페이 가능
@@ -430,6 +442,26 @@ export default function RestaurantDetail({
             </span>
           )}
         </div>
+
+        {/* 사내 제휴 혜택 정보 박스 */}
+        {(restaurant.discountInfo?.benefit || restaurant.discountInfo?.note) && (
+          <div className="mt-3 rounded-xl2 border border-emerald-500/20 bg-emerald-50/70 p-3 text-sm text-emerald-950">
+            <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+              <span>🎁</span>
+              <span>제휴 혜택</span>
+              {restaurant.discountInfo?.benefit && (
+                <span className="rounded-md bg-emerald-600 px-1.5 py-0.5 text-xs text-white">
+                  {restaurant.discountInfo.benefit}
+                </span>
+              )}
+            </div>
+            {restaurant.discountInfo?.note && (
+              <p className="mt-1.5 text-xs leading-relaxed text-emerald-800/90">
+                📌 {restaurant.discountInfo.note}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* 2026-08-09 신규: 전화/영업시간/편의시설/결제수단/네이버지도 링크 - 지금까지 DB에는
             있었지만 화면엔 안 보이던 정보들을 한 블록에 모아서 노출. 데이터가 하나도 없는
