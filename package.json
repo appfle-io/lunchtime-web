@@ -20,6 +20,7 @@
     "set:signgucd": "tsx scripts/set-company-signgucd.ts",
     "enrich:zeropay": "tsx scripts/enrich-zeropay-naver.ts",
     "enrich:zeropay-official": "tsx scripts/enrich-zeropay-official.ts",
+    "enrich:zeropay-convenience": "tsx scripts/enrich-zeropay-convenience.ts",
     "seed:convenience": "tsx scripts/seed-convenience-stores.ts",
     "dedupe:restaurants": "tsx scripts/deduplicate-restaurants.ts",
     "verify:unmatched": "tsx scripts/verify-unmatched-restaurants.ts"

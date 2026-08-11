@@ -23,6 +23,7 @@ import { filterRestaurants, type SpecialFilterKey } from "@/lib/restaurant-filte
 import { logRestaurantClick } from "@/lib/analytics-client";
 import type { PopularEntry } from "@/lib/popular-server";
 import type { ZeroPayStatus } from "@/lib/zeropay-server";
+import type { CompanyUserEntry } from "@/lib/user-server";
 
 // 인기 Top3(위젯)과 "최근많이찾는" 필터 태그가 같은 데이터를 쓰므로, top10 정도를 한 번만 받아와서
 // 위젯은 앞 3개만 자르고 필터 태그는 id Set으로 전체를 쓴다.
@@ -153,6 +154,12 @@ export default function CompanyHome({
     setRestaurants(initialRestaurants);
   }, [initialRestaurants]);
 
+  // 2026-08-11 신규(firestore 과잉사용 분석 반영): 회사 전체 사용자 목록(/api/users)을 예전엔
+  // FriendsModal/LunchVoteModal/LunchRouletteModal 세 모달이 각각 열릴 때마다 따로따로
+  // 재조회했다 - 세 모달을 순서대로 열면 같은 목록을 3번 반복 조회하는 낭비였다. 이제
+  // CompanyHome이 페이지 진입 시 1회만 불러와서 props로 세 모달에 공유한다.
+  const [companyUsers, setCompanyUsers] = useState<CompanyUserEntry[]>([]);
+
   // 2026-08-06 신규: 알림/친구목록/투표 모달 상태.
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -185,6 +192,20 @@ export default function CompanyHome({
   // 알림은 처음 진입 시 한 번 불러온다 (배지 카운트를 바로 보여주기 위함).
   useEffect(() => {
     refreshNotifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyCode]);
+
+  // 2026-08-11 신규: 회사 전체 사용자 목록도 페이지 진입 시 1회만 불러온다 - 이 값을
+  // FriendsModal/LunchVoteModal/LunchRouletteModal이 props로 그대로 물려받는다(세 모달이 각자
+  // 열 때마다 재조회하던 것을 없앰).
+  useEffect(() => {
+    fetch(`/api/users?companyCode=${encodeURIComponent(companyCode)}`)
+      .then((res) => res.json())
+      .then((data) => setCompanyUsers(data.users ?? []))
+      .catch(() => {
+        // 회사 사용자 목록은 보조 정보라 실패해도 조용히 무시한다 - 이 값을 쓰는
+        // 모달들은 빈 목록이라면 검색/빠른선택이 비어 보일 뿐이다.
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyCode]);
 
@@ -507,6 +528,7 @@ export default function CompanyHome({
         onClose={() => setShowFriends(false)}
         onNotify={setToastMessage}
         prefillNickname={friendsPrefillNickname}
+        companyUsers={companyUsers}
       />
 
       <NotificationsModal
@@ -526,6 +548,7 @@ export default function CompanyHome({
         onClose={() => setShowVote(false)}
         onNotify={setToastMessage}
         focusVoteId={voteFocusId}
+        companyUsers={companyUsers}
       />
 
       {/* 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛. 2026-08-08 개편으로 이 모달이 반경/카테고리/
@@ -539,6 +562,7 @@ export default function CompanyHome({
         onClose={() => setShowRecommend(false)}
         onFocusRestaurant={focusRestaurant}
         onSelectRestaurant={handleSelectRestaurant}
+        companyUsers={companyUsers}
       />
 
       {/* 2026-08-08 신규: 돋보기(🔍) 가맹점 검색. 다른 모달들과 마찬가지로 회사 식당 전체(restaurants,

@@ -26,6 +26,12 @@ export interface ZeroPayStatus {
   needsReview: boolean;
   myVote: ZeroPayVoteValue | null;
   effectiveIsZeroPay: boolean;
+  // 2026-08-11 신규(RestaurantDetail 재오픈 캐시 개선): 이 식당에 리뷰/제로페이 투표 중 뭐든
+  // 마지막으로 활동이 있었던 시각. review-server.ts의 addReview와 이 파일의 setZeroPayVote가
+  // 같은 식당 문서의 lastActivityAt 필드를 갱신하므로, 값이 없으면(아직 아무 활동도 없던 식당)
+  // null. RestaurantDetail.tsx가 재오픈 시 이 값만 가볍게 비교해서 reviews/제로페이 상태를
+  // 다시 불러와야 하는지 판단한다.
+  lastActivityAt: string | null;
 }
 
 function restaurantRef(companyCode: string, restaurantId: string) {
@@ -46,7 +52,9 @@ export async function getZeroPayStatus(
     votesRef(companyCode, restaurantId).get(),
   ]);
 
-  const registeredIsZeroPay = Boolean(restaurantSnap.data()?.isZeroPay);
+  const restaurantData = restaurantSnap.data();
+  const registeredIsZeroPay = Boolean(restaurantData?.isZeroPay);
+  const lastActivityAt = (restaurantData?.lastActivityAt as string | undefined) ?? null;
   const recentCutoffMs = Date.now() - RECENT_DOWN_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
   let upCount = 0;
@@ -71,13 +79,18 @@ export async function getZeroPayStatus(
   const effectiveIsZeroPay = registeredIsZeroPay || upCount >= ZERO_PAY_UP_THRESHOLD;
   const needsReview = effectiveIsZeroPay && recentDownCount >= ZERO_PAY_NEEDS_REVIEW_THRESHOLD;
 
-  return { upCount, downCount, needsReview, myVote, effectiveIsZeroPay };
+  return { upCount, downCount, needsReview, myVote, effectiveIsZeroPay, lastActivityAt };
 }
 
 // 같은 버튼을 다시 누르면 투표를 취소(토글)하고, 다른 버튼을 누르면 투표를 바꾼다.
 // 계산된 결과를 restaurants 문서의 isZeroPay / isZeroPayNeedsReview 필드에도 그대로 반영해둔다 -
 // listRestaurants(지도/리스트 전체 조회)는 매번 votes 서브컬렉션까지 읽지 않고 이 캐시된 필드만
 // 쓰기 때문에, 투표가 일어난 시점에 미리 계산해서 저장해둬야 지도/리스트에도 바로 반영된다.
+//
+// 2026-08-11 수정(RestaurantDetail 재오픈 캐시 개선): 투표가 반영된 "이후" 시각을 lastActivityAt에
+// 새로 써넣는다. getZeroPayStatus()는 이 merge write 이전에 호출되므로 그 결과의 lastActivityAt은
+// 아직 예전 값 - 반환 직전에 방금 계산한 새 시각으로 덮어써서, 클라이언트가 자기가 방금 만든
+// 변경을 정확한 값으로 캐시에 반영할 수 있게 한다.
 export async function setZeroPayVote(
   companyCode: string,
   restaurantId: string,
@@ -94,12 +107,13 @@ export async function setZeroPayVote(
   }
 
   const status = await getZeroPayStatus(companyCode, restaurantId, nicknameId);
+  const lastActivityAt = new Date().toISOString();
 
   await restaurantRef(companyCode, restaurantId).set(
-    { isZeroPay: status.effectiveIsZeroPay, isZeroPayNeedsReview: status.needsReview },
+    { isZeroPay: status.effectiveIsZeroPay, isZeroPayNeedsReview: status.needsReview, lastActivityAt },
     { merge: true }
   );
   invalidateRestaurantsCache(companyCode); // 제로페이 상태가 지도/리스트에 바로 반영되도록 캐시 무효화
 
-  return status;
+  return { ...status, lastActivityAt };
 }

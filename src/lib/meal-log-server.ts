@@ -27,19 +27,32 @@ function mealLogsRef(companyCode: string, nicknameId: string) {
     .collection("mealLogs");
 }
 
-// 이 사용자의 특정 월(yearMonth: "YYYY-MM") 기록 전체(하루에 여러 건 포함). 개인 기록이라
-// 규모가 작아서(길게 써도 1년에 수백 건 수준) 컬렉션 전체를 가져와 날짜 접두어로 걸러내는
-// 방식을 쓴다 - 이 프로젝트의 다른 목록 조회들과 같은 "orderBy/복합인덱스 없이 메모리에서
-// 필터링" 패턴을 그대로 따른다.
+// "YYYY-MM" 다음 달의 "YYYY-MM-01"을 계산한다 (range 쿼리의 배타적 상한으로 씀).
+function nextMonthStart(yearMonth: string): string {
+  const [y, m] = yearMonth.split("-").map(Number);
+  const nextMonth = m === 12 ? 1 : m + 1;
+  const nextYear = m === 12 ? y + 1 : y;
+  return `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+}
+
+// 2026-08-11 수정(firestore 과잉사용 분석 반영): 예전엔 전체 컬렉션을 다 읍고 JS에서
+// date.startsWith(yearMonth)로 걸러냈다 - 개인 기록이 누적될수록(달을 이동할 때마다 매번
+// 전체를 다시 읍는 구조라) 비용이 계속 커지는 문제가 있었다. date 필드가 "YYYY-MM-DD" 형식의
+// 사전순 정렬 가능한 문자열이라는 걸 이용해서, [이 달 1일, 다음 달 1일) range 쿼리로 서버에서
+// 바로 그 달 것만 좁혀서 읍는다(단일 필드 range 쿼리라 복합 인덱스도 필요 없음).
 export async function listMealLogsForMonth(
   companyCode: string,
   nicknameId: string,
   yearMonth: string
 ): Promise<MealLogEntry[]> {
-  const snapshot = await mealLogsRef(companyCode, nicknameId).get();
+  const monthStart = `${yearMonth}-01`;
+  const monthEnd = nextMonthStart(yearMonth);
+  const snapshot = await mealLogsRef(companyCode, nicknameId)
+    .where("date", ">=", monthStart)
+    .where("date", "<", monthEnd)
+    .get();
   return snapshot.docs
     .map((doc) => ({ id: doc.id, ...doc.data() } as MealLogEntry))
-    .filter((entry) => entry.date.startsWith(yearMonth))
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
 }
 
@@ -57,24 +70,26 @@ export async function listMealLogsForDate(
 }
 
 // 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛 기능이 Gemini에게 "최근에 다녀온 곳은 피해줘"라고
-// 알려주기 위해 최근 방문 식당 이름 목록이 필요하다. mealLogs 전체를 가져와(위 함수들과 동일
-// 패턴 - orderBy 없이 메모리에서 처리) 최근 daysBack일 이내 기록만 날짜 내림차순으로 훑어서
-// 중복 없이 최근 이름 순으로 최대 limit개를 뽑는다. 실패해도(권한/네트워크 등) 이 기능은 있으면
-// 좋은 부가정보일 뿐이라 호출부에서 try/catch로 조용히 빈 배열로 대체하면 된다.
+// 알려주기 위해 최근 방문 식당 이름 목록이 필요하다.
+// 2026-08-11 수정(firestore 과잉사용 분석 반영): 예전엔 mealLogs 전체를 가져와 메모리에서
+// date >= cutoffStr로 걸러냈다 - 룰렛 호출 시 참가자마다(최대 15명) 병렬로 호출되는 함수라,
+// "전체 스캔"이 참가자 수만큼 동시에 곱해지는 게 가장 부담이 큰 지점이었다. date 필드가
+// 사전순 정렬 가능한 문자열이라는 걸 이용해서 where("date", ">=", cutoffStr) range 쿼리로
+// 서버에서 바로 최근 daysBack일 것만 좁혀서 읍는다(단일 필드 range라 복합 인덱스 불필요).
 export async function getRecentRestaurantNames(
   companyCode: string,
   nicknameId: string,
   daysBack = 14,
   limit = 8
 ): Promise<string[]> {
-  const snapshot = await mealLogsRef(companyCode, nicknameId).get();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - daysBack);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
 
+  const snapshot = await mealLogsRef(companyCode, nicknameId).where("date", ">=", cutoffStr).get();
+
   const entries = snapshot.docs
     .map((doc) => ({ id: doc.id, ...doc.data() } as MealLogEntry))
-    .filter((entry) => entry.date >= cutoffStr)
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
 
   const names: string[] = [];

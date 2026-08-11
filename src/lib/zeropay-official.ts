@@ -11,7 +11,8 @@ export interface ZeroPayOfficialCheckResult {
 const FOOD_BIZ_KEYWORDS = [
   "음식점", "육류", "요리", "중식", "일식", "서양식", "제과", "피자", "햄버거",
   "샌드위치", "치킨", "김밥", "간이", "포장", "생맥주", "주점", "커피", "카페",
-  "베이커리", "분식", "휴게음식", "패스트푸드", "식당", "떡볶이", "해장국", "단팥빵"
+  "베이커리", "분식", "휴게음식", "패스트푸드", "식당", "떡볶이", "해장국", "단팥빵",
+  "편의점", "소매", "슈퍼", "유통"
 ];
 
 function isFoodBizType(bizType: string | null | undefined): boolean {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
 
@@ -66,6 +66,11 @@ interface LunchVoteModalProps {
   onNotify?: (message: string) => void;
   // 알림함 "투표하러 가기"에서 열 때 바로 펼쳐서 보여줄 투표 id (2026-08-06 신규).
   focusVoteId?: string | null;
+  // 2026-08-11 신규(firestore 과잉사용 분석 반영): 친구목록/전체 사용자 목록을 이 모달이 매번
+  // 자체적으로 /api/users로 다시 불러오는 대신, CompanyHome이 한 번 로드해서 내려주는 값을
+  // 그대로 쓴다(FriendsModal/LunchRouletteModal과 캐시 공유). 값이 없으면(로딩 전) 빈 배열로
+  // 취급 - 검색/빠른선택 UI가 잠깐 비어 보일 뿐 기능 자체는 그대로 동작한다.
+  companyUsers: CompanyUserEntry[];
 }
 
 const VOTES_PAGE_SIZE = 10;
@@ -84,19 +89,12 @@ function formatRelativeTime(iso: string): string {
 // 먹을게요" 옵션은 항상 자동으로 포함된다(서버가 붙여줌). 히스토리 전체를 검색/페이징으로 보고,
 // 각 투표 안에서 응답/댓글을 남길 수 있다.
 //
-// 2026-08-06 3차 개편:
-// - 참가자 초대를 "친구목록에 있는 사람만"에서 "회사 내 누구나"로 완화했다. 친구목록은 그대로
-//   두되 "빠르게 선택"하는 보조 UI로 남기고, 별도로 전체 사용자 검색창을 추가했다.
-// - 메뉴(식당) 옵션 검색 결과/선택된 칩에 카테고리 라벨(예: "중식")을 작게 같이 보여준다.
-// - 투표함 탭에 검색창 + 10개씩 페이징을 추가했다(서버가 이미 최신순으로 내려주므로 정렬은
-//   그대로 두고, 클라이언트에서 검색 필터링 + 페이지 자르기만 한다).
-//
-// 2026-08-06 4차 개편:
-// - "새 투표 만들기" 폼이 검색 결과 목록이 인라인으로 계속 늘어나면서 지저분하다는 피드백을 받아
-//   전체 레이아웃을 정리했다. 참가자/메뉴 옵션을 각각 카드 섹션으로 묶고, 검색 결과는 입력창
-//   아래 떠있는(absolute) 드롭다운으로 바꿔서 다른 요소를 밀어내지 않게 했다.
-// - 이미 응답한 옵션을 다시 누르면 응답이 취소되는(토글) 동작은 서버(vote-server.ts
-//   respondToVote)에서 처리하므로, 이 컴포넌트의 응답 버튼 클릭 핸들러는 그대로 둔다.
+// 2026-08-11 개편(firestore 과잉사용 분석 반영): 투표함 목록을 불러올 때 투표마다 responses/
+// comments 서브컬렉션을 다 읍던 N+1을 없앴다. 이제 목록(GET /api/votes)은 제목/참가자수 같은
+// 가벼운 필드만 내려주고, 카드를 펼칠 때(VoteCard)만 그 투표 1건에 대해 GET /api/votes/{id}로
+// 상세(응답/댓글)를 지연 로딩한다. 또한 응답/댓글/메뉴추가 액션들은 서버가 매번 vote 전체를
+// 재조립해서 돌려주는 대신 "무엇이 바뀌었는지"(델타)만 돌려주고, 그 델타를 로컬에 들고 있는
+// vote 객체에 병합한다 - 서버 쪽 재조회 자체가 사라졌다.
 export default function LunchVoteModal({
   companyCode,
   myNickname,
@@ -105,11 +103,11 @@ export default function LunchVoteModal({
   onClose,
   onNotify,
   focusVoteId,
+  companyUsers,
 }: LunchVoteModalProps) {
   const [tab, setTab] = useState<"list" | "create">("list");
   const [loading, setLoading] = useState(false);
   const [friends, setFriends] = useState<FriendEntry[]>([]);
-  const [companyUsers, setCompanyUsers] = useState<CompanyUserEntry[]>([]);
   const [votes, setVotes] = useState<VoteSummary[]>([]);
   const [expandedVoteId, setExpandedVoteId] = useState<string | null>(null);
 
@@ -126,17 +124,17 @@ export default function LunchVoteModal({
   const [customOptionText, setCustomOptionText] = useState("");
   const [creating, setCreating] = useState(false);
 
+  // 친구목록만 이 모달 전용으로 불러온다 - 전체 사용자 목록(companyUsers)은 CompanyHome이
+  // 내려주는 공유 데이터를 쓴다(2026-08-11 수정).
   function loadAll() {
     setLoading(true);
     Promise.all([
       fetch(`/api/friends?companyCode=${encodeURIComponent(companyCode)}`).then((r) => r.json()),
       fetch(`/api/votes?companyCode=${encodeURIComponent(companyCode)}`).then((r) => r.json()),
-      fetch(`/api/users?companyCode=${encodeURIComponent(companyCode)}`).then((r) => r.json()),
     ])
-      .then(([friendsData, votesData, usersData]) => {
+      .then(([friendsData, votesData]) => {
         setFriends(friendsData.friends ?? []);
         setVotes(votesData.votes ?? []);
-        setCompanyUsers(usersData.users ?? []);
       })
       .catch(() => onNotify?.("투표 정보를 불러오지 못했어요."))
       .finally(() => setLoading(false));
@@ -267,6 +265,8 @@ export default function LunchVoteModal({
         onNotify?.(data.error ?? "투표를 만들지 못했어요.");
         return;
       }
+      // 새로 만든 투표는 생성 응답 자체가 이미 responses:[]/comments:[]까지 완전한 형태라
+      // 별도로 다시 조회할 필요가 없다.
       setVotes((prev) => [data.vote, ...prev]);
       setExpandedVoteId(data.vote.id);
       setVoteSearch("");
@@ -281,6 +281,8 @@ export default function LunchVoteModal({
     }
   }
 
+  // 카드가 부분(델타) 병합이든 지연 로딩한 상세 전체든, 최신 vote 객체로 목록의 해당 항목만
+  // 교체한다 - respond/comment/옵션추가/상세로딩 전부 이 콜백 하나로 반영.
   function handleVoteUpdated(updated: VoteSummary) {
     setVotes((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
   }
@@ -295,7 +297,9 @@ export default function LunchVoteModal({
           <h3 className="text-base font-bold text-ink">오늘 점심 투표</h3>
           <div className="flex items-center gap-1">
             {/* 2026-08-11 신규: 다른 참가자가 투표를 새로 만들거나 메뉴를 추가한 걸 반영하려면
-                모달을 닫았다 다시 열 필요 없이 이 버튼으로 목록 전체를 다시 불러올 수 있게 한다. */}
+                모달을 닫았다 다시 열 필요 없이 이 버튼으로 목록 전체를 다시 불러올 수 있게 한다.
+                목록 자체는 가벼운 요약만 다시 받아오고, 펼쳐진 카드가 있었다면 그 카드는 다음에
+                펼침 상태를 다시 감지할 때(아래 VoteCard의 useEffect) 상세를 다시 지연 로딩한다. */}
             <button
               onClick={loadAll}
               disabled={loading}
@@ -590,12 +594,18 @@ interface VoteCardProps {
   onNotify?: (message: string) => void;
 }
 
-// 투표 하나(옵션별 응답 현황 + 댓글)를 보여주는 카드. 응답/댓글 이후에는 서버가 돌려주는
-// 최신 vote 전체를 그대로 반영한다(부분 상태 갱신보다 단순하고 항상 일관됨).
+// 투표 하나(옵션별 응답 현황 + 댓글)를 보여주는 카드.
 //
-// 2026-08-06 추가: 이미 응답한 옵션을 다시 누르면 응답이 취소된다(토글). 실제 취소 로직은
-// 서버(vote-server.ts respondToVote)가 처리하므로, 여기서는 그냥 항상 같은 respond(optionId)를
-// 호출하기만 하면 된다 - 서버가 "이미 그 옵션에 응답한 상태인지"를 보고 삭제/저장을 알아서 고른다.
+// 2026-08-11 개편(firestore 과잉사용 분석 반영):
+// - 목록에서 받은 vote는 responses/comments가 빈 배열인 "가벼운 요약"일 수 있다. 카드를 처음
+//   펼칠 때(expanded가 true가 됐는데 아직 상세를 못 받았을 때)만 GET /api/votes/{id}로 그
+//   투표 1건의 상세(응답+댓글)를 지연 로딩해서 onVoteUpdated로 반영한다. 한 번 로딩되면
+//   detailLoadedRef로 표시해두고, 접었다 다시 펴도 재요청하지 않는다.
+// - 응답(respond)/댓글(comment)/메뉴추가(option) 액션은 서버가 vote 전체를 돌려주지 않고
+//   "무엇이 바뀌었는지"만 돌려준다. 이 컴포넌트가 그 델타를 현재 vote 객체에 병합해서
+//   onVoteUpdated로 올린다 - 그 순간부터는 이 카드도 "상세를 이미 가지고 있는" 상태가 되므로
+//   detailLoadedRef를 true로 표시해서, 그 사이 지연 로딩 요청이 늦게 도착해도 방금 반영한
+//   변경을 덮어쓰지 않게 막는다(느린 네트워크에서 상세 로딩과 응답 클릭이 겹치는 드문 경우 대비).
 function VoteCard({
   vote,
   companyCode,
@@ -609,12 +619,32 @@ function VoteCard({
   const [responding, setResponding] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const detailLoadedRef = useRef(false);
 
   // 2026-08-11 신규: 투표가 이미 만들어진 뒤에도 참가자가 메뉴(식당) 옵션을 더 추가할 수
   // 있게 하는 미니 검색/직접입력 상태 새 투표 만들기 폼과 같은 패턴).
   const [optionFilter, setOptionFilter] = useState("");
   const [customOptionText, setCustomOptionText] = useState("");
   const [addingOption, setAddingOption] = useState(false);
+
+  useEffect(() => {
+    if (!expanded || detailLoadedRef.current) return;
+    setLoadingDetail(true);
+    fetch(`/api/votes/${vote.id}?companyCode=${encodeURIComponent(companyCode)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.vote) return;
+        // 상세 로딩 중에 사용자가 이미 응답/댓글/옵션추가를 해서 detailLoadedRef가 true가
+        // 됐다면(방금 반영한 변경이 최신 상태), 늦게 도착한 이 결과로 덮어쓰지 않는다.
+        if (detailLoadedRef.current) return;
+        onVoteUpdated(data.vote);
+        detailLoadedRef.current = true;
+      })
+      .catch(() => onNotify?.("투표 상세 정보를 불러오지 못했어요."))
+      .finally(() => setLoadingDetail(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, vote.id]);
 
   const myResponse = vote.responses.find((r) => r.nickname === myNickname);
 
@@ -640,7 +670,8 @@ function VoteCard({
         onNotify?.(data.error ?? "메뉴를 추가하지 못했어요.");
         return;
       }
-      onVoteUpdated(data.vote);
+      detailLoadedRef.current = true;
+      onVoteUpdated({ ...vote, options: data.options });
       setOptionFilter("");
     } catch {
       onNotify?.("네트워크 오류로 메뉴를 추가하지 못했어요.");
@@ -669,7 +700,13 @@ function VoteCard({
         onNotify?.(data.error ?? "투표에 응답하지 못했어요.");
         return;
       }
-      onVoteUpdated(data.vote);
+      // 서버는 델타(removed/entry)만 돌려준다 - 내 예전 응답을 지우고, 취소가 아니면 새
+      // 응답으로 채운다. nicknameId 대신 nickname으로 내 응답을 찾는 건 myResponse와 동일한
+      // 방식(이 앱은 nickname이 회사 내에서 유일하다는 전제를 그대로 따른다).
+      const filtered = vote.responses.filter((r) => r.nickname !== myNickname);
+      const newResponses = data.removed ? filtered : [...filtered, data.entry];
+      detailLoadedRef.current = true;
+      onVoteUpdated({ ...vote, responses: newResponses });
     } catch {
       onNotify?.("네트워크 오류로 응답하지 못했어요.");
     } finally {
@@ -692,7 +729,10 @@ function VoteCard({
         onNotify?.(data.error ?? "댓글을 남기지 못했어요.");
         return;
       }
-      onVoteUpdated(data.vote);
+      // 새 댓글은 항상 가장 최근 createdAt을 가지므로 배열 끝에 그대로 append하면 된다
+      // (서버 hydrateVote도 createdAt 오름차순으로 정렬해서 내려주던 것과 동일한 순서).
+      detailLoadedRef.current = true;
+      onVoteUpdated({ ...vote, comments: [...vote.comments, data.comment] });
       setCommentText("");
     } catch {
       onNotify?.("네트워크 오류로 댓글을 남기지 못했어요.");
@@ -713,6 +753,9 @@ function VoteCard({
 
       {expanded && (
         <div className="mt-3 flex flex-col gap-3">
+          {loadingDetail && vote.responses.length === 0 && vote.comments.length === 0 && (
+            <p className="text-xs text-ink-soft">응답/댓글을 불러오는 중...</p>
+          )}
           <ul className="flex flex-col gap-1.5">
             {vote.options.map((option) => {
               const voters = vote.responses.filter((r) => r.optionId === option.id);
@@ -793,7 +836,7 @@ function VoteCard({
 
           <div className="border-t border-black/5 pt-2">
             <p className="mb-1.5 text-xs font-semibold text-ink-soft">댓글</p>
-            {vote.comments.length === 0 && (
+            {vote.comments.length === 0 && !loadingDetail && (
               <p className="text-xs text-ink-soft">아직 댓글이 없어요.</p>
             )}
             <ul className="flex flex-col gap-1.5">

@@ -18,6 +18,47 @@ function todayDateKey(): string {
   return `${y}-${m}-${d}`;
 }
 
+// 2026-08-11 개편(firestore 과잉사용 분석 반영 - "방법 A" 변경감지 캐싱): 식당 상세모달의 4개
+// 데이터는 성격이 다르다.
+//   - todayLogs(오늘 내 기록), myEditRequests(내가 보낸 수정요청) - 오직 "나"의 행동으로만
+//     바뀐다. 이 컴포넌트 안의 액션(handleLogMealToday 등) 이후에 바로 캐시에 반영해두므로,
+//     같은 식당을 다시 열 때는 시간 제한 없이 캐시를 그대로 써도 안전하다.
+//   - reviews(댓글), zeroPayStatus(제로페이 투표) - 다른 동료도 바꿀 수 있다. 그래서 예전엔
+//     30초 TTL로 "일정 시간 지나면 무조건 다시 불러오기"를 했는데, 이제는 식당 문서의
+//     lastActivityAt 필드(리뷰 작성/투표 시 갱신 - review-server.ts, zeropay-server.ts 참고)
+//     하나만 가볍게 확인해서(GET /api/restaurants/{id}/activity, 문서 1건 읍기) 캐시해둔 값과
+//     다를 때만 실제로 다시 불러온다. 즉 시간이 아니라 "실제 변경 여부"로 판단한다.
+// 캐시 자체는 시간 만료가 없고(세션 내내 유지), 자정을 넘기면 todayLogs가 "오늘"이 아니게 되니
+// 키에 오늘 날짜를 포함시켜서 날짜가 바뀌면 자연히 새 키로 다시 전체 로딩되게 한다.
+interface DetailCacheEntry {
+  reviews: ReviewSummary[];
+  zeroPayStatus: ZeroPayStatus | null;
+  todayLogs: MealLogEntry[];
+  myEditRequests: RestaurantEditRequest[];
+  // reviews/zeroPayStatus를 마지막으로 불러왔을 때 서버가 알려준 lastActivityAt. 재오픈 시 이
+  // 값을 다시 확인해서 서버 쪽 값과 같으면 reviews/zeroPayStatus는 캐시를 그대로 쓴다.
+  lastActivityAt: string | null;
+}
+
+const detailCache = new Map<string, DetailCacheEntry>();
+
+function cacheKeyFor(companyCode: string, restaurantId: string): string {
+  return `${companyCode}:${restaurantId}:${todayDateKey()}`;
+}
+
+function writeCache(companyCode: string, restaurantId: string, patch: Partial<DetailCacheEntry>) {
+  const key = cacheKeyFor(companyCode, restaurantId);
+  const existing = detailCache.get(key);
+  detailCache.set(key, {
+    reviews: existing?.reviews ?? [],
+    zeroPayStatus: existing?.zeroPayStatus ?? null,
+    todayLogs: existing?.todayLogs ?? [],
+    myEditRequests: existing?.myEditRequests ?? [],
+    lastActivityAt: existing?.lastActivityAt ?? null,
+    ...patch,
+  });
+}
+
 // 2026-08-09 신규: businessHours는 네이버 내부(Apollo 캐시) 응답을 그대로 저장해둔 값이라
 // 문자열/배열/객체 등 형태가 일정하지 않다. 어떤 형태든 안 죽고 "요일: 시간" 비슷한 줄 목록으로
 // 최대한 뽑아내고, 못 알아보는 형태면 조용히 빈 배열을 반환한다(그 경우 화면에 그냥 안 보임).
@@ -145,8 +186,10 @@ interface RestaurantDetailProps {
 // (enrich 스크립트가 최대 10개까지 저장해두니 그 이상 늘어나도 카드 하나가 너무 길어지지 않게).
 const MENU_PREVIEW_COUNT = 5;
 
-// 마커 클릭 / 리스트 클릭으로 열리는 식당 상세 모달. 댓글과 제로페이 투표 현황, 오늘 이 식당을
-// 밥 먹은 기록으로 남겼는지는 열릴 때마다 서버에서 새로 불러온다.
+// 마커 클릭 / 리스트 클릭으로 열리는 식당 상세 모달. 처음 열 때는 4개 데이터(댓글/제로페이 현황/
+// 오늘 내 기록/내 수정요청)를 서버에서 새로 불러오고, 그 다음부터는 위 detailCache를 활용한다
+// (같은 식당을 다시 열면 todayLogs/myEditRequests는 무조건 캐시, reviews/zeroPayStatus는
+// lastActivityAt 변경 감지 결과에 따라 캐시 또는 재조회).
 export default function RestaurantDetail({
   restaurant,
   companyCode,
@@ -191,7 +234,9 @@ export default function RestaurantDetail({
       .then((data) => {
         const all = (data.requests ?? []) as RestaurantEditRequest[];
         const myId = toNicknameId(nickname);
-        setMyEditRequests(all.filter((r) => r.requestedByNicknameId === myId));
+        const mine = all.filter((r) => r.requestedByNicknameId === myId);
+        setMyEditRequests(mine);
+        writeCache(companyCode, restaurant.id, { myEditRequests: mine });
       })
       .catch(() => {
         // 내 요청 상태는 부가 정보라 실패해도 조용히 무시.
@@ -200,37 +245,97 @@ export default function RestaurantDetail({
 
   useEffect(() => {
     if (!restaurant) return;
-    setReviews([]);
     setLoadError(null);
-    setLoading(true);
     setShowAllMenus(false);
 
-    fetch(
-      `/api/reviews?companyCode=${encodeURIComponent(companyCode)}&restaurantId=${encodeURIComponent(restaurant.id)}`
-    )
-      .then((res) => res.json())
-      .then((data) => setReviews(data.reviews ?? []))
-      .catch(() => setLoadError("댓글을 불러오지 못했어요."))
-      .finally(() => setLoading(false));
+    const key = cacheKeyFor(companyCode, restaurant.id);
+    const cached = detailCache.get(key);
 
-    setZeroPayStatus(null);
-    fetch(
-      `/api/zeropay-votes?companyCode=${encodeURIComponent(companyCode)}&restaurantId=${encodeURIComponent(restaurant.id)}`
-    )
+    // 이 식당을 처음 여는 경우(또는 자정이 지나 캐시 키 자체가 바뀐 경우) - 4개 전부 새로 불러온다.
+    if (!cached) {
+      setReviews([]);
+      setZeroPayStatus(null);
+      setTodayLogs(null);
+      setMyEditRequests([]);
+      setLoading(true);
+
+      Promise.all([
+        fetch(
+          `/api/reviews?companyCode=${encodeURIComponent(companyCode)}&restaurantId=${encodeURIComponent(restaurant.id)}`
+        ).then((res) => res.json()),
+        fetch(
+          `/api/zeropay-votes?companyCode=${encodeURIComponent(companyCode)}&restaurantId=${encodeURIComponent(restaurant.id)}`
+        ).then((res) => res.json()),
+        fetch(`/api/meal-logs?companyCode=${encodeURIComponent(companyCode)}&date=${todayDateKey()}`).then((res) =>
+          res.json()
+        ),
+        fetch(
+          `/api/edit-requests?companyCode=${encodeURIComponent(companyCode)}&restaurantId=${encodeURIComponent(restaurant.id)}`
+        ).then((res) => res.json()),
+      ])
+        .then(([reviewsData, zeroPayData, mealLogData, editRequestData]) => {
+          const reviewList = (reviewsData.reviews ?? []) as ReviewSummary[];
+          const logs = (mealLogData.logs ?? []) as MealLogEntry[];
+          const allRequests = (editRequestData.requests ?? []) as RestaurantEditRequest[];
+          const myId = toNicknameId(nickname);
+          const mine = allRequests.filter((r) => r.requestedByNicknameId === myId);
+          const status = zeroPayData as ZeroPayStatus;
+
+          setReviews(reviewList);
+          setZeroPayStatus(status);
+          setTodayLogs(logs);
+          setMyEditRequests(mine);
+
+          detailCache.set(key, {
+            reviews: reviewList,
+            zeroPayStatus: status,
+            todayLogs: logs,
+            myEditRequests: mine,
+            lastActivityAt: status?.lastActivityAt ?? null,
+          });
+        })
+        .catch(() => setLoadError("정보를 불러오지 못했어요."))
+        .finally(() => setLoading(false));
+      return;
+    }
+
+    // 캐시가 있다. todayLogs/myEditRequests는 오직 "나"의 행동으로만 바뀌고, 그 행동 이후엔
+    // 이미 캐시에 반영해뒀으니 여기서는 무조건 그대로 쓴다(재조회 없음).
+    setTodayLogs(cached.todayLogs);
+    setMyEditRequests(cached.myEditRequests);
+    // reviews/zeroPayStatus는 우선 캐시로 즉시 보여준다 - 다른 동료가 바꿨는지는 아래에서 확인.
+    setReviews(cached.reviews);
+    setZeroPayStatus(cached.zeroPayStatus);
+    setLoading(false);
+
+    fetch(`/api/restaurants/${restaurant.id}/activity?companyCode=${encodeURIComponent(companyCode)}`)
       .then((res) => res.json())
-      .then((data) => setZeroPayStatus(data))
+      .then((data) => {
+        const latest = (data.lastActivityAt as string | null) ?? null;
+        if (latest === cached.lastActivityAt) return; // 변경 없음 - 캐시 그대로 유지
+
+        return Promise.all([
+          fetch(
+            `/api/reviews?companyCode=${encodeURIComponent(companyCode)}&restaurantId=${encodeURIComponent(restaurant.id)}`
+          ).then((res) => res.json()),
+          fetch(
+            `/api/zeropay-votes?companyCode=${encodeURIComponent(companyCode)}&restaurantId=${encodeURIComponent(restaurant.id)}`
+          ).then((res) => res.json()),
+        ]).then(([reviewsData, zeroPayData]) => {
+          const reviewList = (reviewsData.reviews ?? []) as ReviewSummary[];
+          const status = zeroPayData as ZeroPayStatus;
+          setReviews(reviewList);
+          setZeroPayStatus(status);
+          writeCache(companyCode, restaurant.id, {
+            reviews: reviewList,
+            zeroPayStatus: status,
+            lastActivityAt: latest,
+          });
+        });
+      })
       .catch(() => {
-        // 투표 현황은 부가 정보라 실패해도 조용히 무시 - 기존 isZeroPay 배지만 보여준다.
+        // 변경 감지 실패는 부가 기능이라 조용히 무시 - 캐시된 값을 그대로 보여준 채로 둔다.
       });
-
-    setTodayLogs(null);
-    fetch(`/api/meal-logs?companyCode=${encodeURIComponent(companyCode)}&date=${todayDateKey()}`)
-      .then((res) => res.json())
-      .then((data) => setTodayLogs((data.logs ?? []) as MealLogEntry[]))
-      .catch(() => setTodayLogs([]));
-
-    setMyEditRequests([]);
-    refreshMyEditRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurant, companyCode]);
 
@@ -265,6 +370,9 @@ export default function RestaurantDetail({
       if (!res.ok) return;
       const data = (await res.json()) as ZeroPayStatus;
       setZeroPayStatus(data);
+      // 서버가 방금 이 투표로 갱신한 lastActivityAt을 같이 돌려주므로, 그 값 그대로 캐시에
+      // 반영해서 다음에 이 식당을 다시 열 때 불필요한 재조회가 안 나가게 한다.
+      writeCache(companyCode, restaurant.id, { zeroPayStatus: data, lastActivityAt: data.lastActivityAt });
       onZeroPayStatusChange?.(restaurant.id, data);
     } catch {
       // 네트워크 오류 시 조용히 무시 - 다시 눌러보게 둔다.
@@ -296,7 +404,9 @@ export default function RestaurantDetail({
         onNotify?.(data.error ?? "기록을 남기지 못했어요.");
         return;
       }
-      setTodayLogs((prev) => [...(prev ?? []), data.log as MealLogEntry]);
+      const nextLogs = [...(todayLogs ?? []), data.log as MealLogEntry];
+      setTodayLogs(nextLogs);
+      writeCache(companyCode, restaurant.id, { todayLogs: nextLogs });
       onNotify?.("오늘 여기서 먹었다고 기록했어요.");
       onMealLogged?.();
     } catch {
@@ -307,6 +417,7 @@ export default function RestaurantDetail({
   }
 
   async function handleRemoveTodayLog(id: string) {
+    if (!restaurant) return;
     setDeletingLogId(id);
     try {
       const res = await fetch("/api/meal-logs", {
@@ -318,7 +429,9 @@ export default function RestaurantDetail({
         onNotify?.("기록을 삭제하지 못했어요.");
         return;
       }
-      setTodayLogs((prev) => (prev ?? []).filter((e) => e.id !== id));
+      const nextLogs = (todayLogs ?? []).filter((e) => e.id !== id);
+      setTodayLogs(nextLogs);
+      writeCache(companyCode, restaurant.id, { todayLogs: nextLogs });
       onMealLogged?.();
     } catch {
       onNotify?.("네트워크 오류로 삭제하지 못했어요.");
@@ -351,7 +464,11 @@ export default function RestaurantDetail({
         return;
       }
 
-      setReviews((prev) => [data.review, ...prev]);
+      const nextReviews = [data.review, ...reviews];
+      setReviews(nextReviews);
+      // 서버가 방금 이 댓글로 갱신한 lastActivityAt을 같이 돌려주므로, 그 값 그대로 캐시에
+      // 반영한다(다음 재오픈 시 불필요한 변경감지 재조회 방지).
+      writeCache(companyCode, restaurant.id, { reviews: nextReviews, lastActivityAt: data.lastActivityAt });
       setCommentText("");
     } catch {
       setSubmitError("네트워크 오류로 댓글을 남기지 못했어요.");

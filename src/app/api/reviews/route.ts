@@ -44,6 +44,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
 
-  const review = await addReview(companyCode, restaurantId, session.nickname, content.trim());
-  return NextResponse.json({ review });
+  const result = await addReview(companyCode, restaurantId, session.nickname, content.trim());
+  return NextResponse.json({ review: result.review, lastActivityAt: result.lastActivityAt });
 }

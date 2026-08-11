@@ -22,6 +22,11 @@ interface FriendsModalProps {
   onFriendsChanged?: (friends: FriendEntry[]) => void;
   // 알림함의 "나도 추가하기"에서 열 때 검색창에 미리 채워주는 닉네임 (2026-08-06 신규).
   prefillNickname?: string | null;
+  // 2026-08-11 신규(firestore 과잉사용 분석 반영): 예전엔 이 모달이 열릴 때마다 직접
+  // /api/users를 불렀다 - LunchVoteModal/LunchRouletteModal도 각자 같은 목록을 따로
+  // 불러오고 있어서, 세 모달을 순서대로 열면 같은 목록을 3번 재조회하는 낭비가 있었다.
+  // CompanyHome이 1회만 불러와 공유하는 값을 props로 물려받는다.
+  companyUsers: CompanyUserEntry[];
 }
 
 // 한 번에 더 보여주는 단위. 숫자 페이징(1,2,3...) 대신 "더보기"를 누를 때마다 이만큼씩 늘어난다.
@@ -42,6 +47,11 @@ const ALL_USERS_PAGE_SIZE = 20;
 // 2026-08-10 신규: "내 친구" 목록에 검색창 추가 - 닉네임뿐 아니라 메모(예: "마케팅팀 김OO")로도
 // 필터링된다. 친구 추가/전체목록 탭의 검색(회사 전체 사용자 대상)과는 별개의, 이미 추가한 내
 // 친구들만 대상으로 하는 검색이라 상태를 분리했다(myFriendsSearch).
+//
+// 2026-08-11 개편(firestore 과잉사용 분석 반영): companyUsers(회사 전체 사용자 목록)를 이 모달이
+// 직접 fetch하지 않는다 - CompanyHome이 페이지 진입 시 1회만 불러와서 props로 내려주는 값을
+// 그대로 쓴다. LunchVoteModal/LunchRouletteModal도 같은 값을 공유해서, 세 모달을 순서대로 열어도
+// 같은 목록을 3번 재조회하던 낭비가 없어졌다.
 export default function FriendsModal({
   companyCode,
   open,
@@ -49,9 +59,9 @@ export default function FriendsModal({
   onNotify,
   onFriendsChanged,
   prefillNickname,
+  companyUsers,
 }: FriendsModalProps) {
   const [friends, setFriends] = useState<FriendEntry[]>([]);
-  const [companyUsers, setCompanyUsers] = useState<CompanyUserEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"search" | "all">("search");
   const [search, setSearch] = useState("");
@@ -77,14 +87,9 @@ export default function FriendsModal({
     setVisibleAllUsersCount(ALL_USERS_PAGE_SIZE);
     setMyFriendsSearch("");
     setLoading(true);
-    Promise.all([
-      fetch(`/api/friends?companyCode=${encodeURIComponent(companyCode)}`).then((r) => r.json()),
-      fetch(`/api/users?companyCode=${encodeURIComponent(companyCode)}`).then((r) => r.json()),
-    ])
-      .then(([friendsData, usersData]) => {
-        setFriends(friendsData.friends ?? []);
-        setCompanyUsers(usersData.users ?? []);
-      })
+    fetch(`/api/friends?companyCode=${encodeURIComponent(companyCode)}`)
+      .then((r) => r.json())
+      .then((friendsData) => setFriends(friendsData.friends ?? []))
       .catch(() => onNotify?.("친구목록을 불러오지 못했어요."))
       .finally(() => setLoading(false));
   }, [open, companyCode, prefillNickname, onNotify]);

@@ -110,6 +110,23 @@ export function toRestaurantSummary(id: string, data: Record<string, unknown>): 
   } as RestaurantSummary;
 }
 
+// 2026-08-11 신규(RestaurantDetail 재오픈 캐시 개선): 식당 문서에서 lastActivityAt 필드 하나만
+// 확인한다(리뷰/제로페이 투표 아무거나 있으면 갱신되는 필드 - review-server.ts addReview,
+// zeropay-server.ts setZeroPayVote 참고). 문서 1건 읍기라 저렴하고, 이 값이 클라이언트가 캐시해둔
+// 값과 같으면 reviews/제로페이 전체를 다시 안 불러와도 된다는 뜻이다.
+export async function getRestaurantActivity(
+  companyCode: string,
+  restaurantId: string
+): Promise<string | null> {
+  const snapshot = await db
+    .collection("companies")
+    .doc(companyCode)
+    .collection("restaurants")
+    .doc(restaurantId)
+    .get();
+  return (snapshot.data()?.lastActivityAt as string | undefined) ?? null;
+}
+
 // companies/{code}/restaurants 서브컬렉션 전체를 읽어온다. 서버(Server Component / API route)에서만 사용.
 export async function listRestaurants(companyCode: string): Promise<RestaurantSummary[]> {
   const cached = restaurantsCache.get(companyCode);

@@ -33,6 +33,11 @@ interface LunchRouletteModalProps {
   onClose: () => void;
   onFocusRestaurant?: (restaurant: RestaurantSummary) => void;
   onSelectRestaurant?: (restaurant: RestaurantSummary) => void;
+  // 2026-08-11 신규(firestore 과잉사용 분석 반영): 예전엔 이 모달이 열릴 때마다 직접 /api/users를
+  // 불렀다 - FriendsModal/LunchVoteModal도 각자 같은 목록을 따로 불러오고 있어서, 세 모달을
+  // 순서대로 열면 같은 목록을 3번 재조회하는 낭비가 있었다. CompanyHome이 1회만 불러와
+  // 공유하는 값을 props로 물려받는다.
+  companyUsers: CompanyUserEntry[];
 }
 
 // 룰렛이 실제로 도는 것처럼 느껴지려면 최소 이 정도는 돌아야 한다 - 응답이 그보다 빨리 와도
@@ -63,6 +68,10 @@ type Phase = "conditions" | "spinning" | "result" | "error";
 // - 친구 초대 기능 추가: 초대된 사람들의 최근 방문 이력도 같이 모아서 /api/recommend에 넘기고,
 //   서버가 그 전체를 Gemini에게 "이 사람들이 최근에 다녀온 곳"으로 알려줘서 추천에 반영하게 한다
 //   (LunchVoteModal의 참가자 검색 + 친구 빠른선택 UI 패턴을 그대로 재사용).
+//
+// 2026-08-11 개편(firestore 과잉사용 분석 반영): companyUsers(회사 전체 사용자 목록)를 이 모달이
+// 직접 fetch하지 않는다 - CompanyHome이 페이지 진입 시 1회만 불러와서 props로 내려주는 값을
+// 그대로 쓴다. friends(내 친구 목록)는 이 모달만의 것이라 그대로 자체 fetch를 유지한다.
 export default function LunchRouletteModal({
   open,
   companyCode,
@@ -70,6 +79,7 @@ export default function LunchRouletteModal({
   onClose,
   onFocusRestaurant,
   onSelectRestaurant,
+  companyUsers,
 }: LunchRouletteModalProps) {
   const [phase, setPhase] = useState<Phase>("conditions");
   const [spinName, setSpinName] = useState("");
@@ -86,7 +96,6 @@ export default function LunchRouletteModal({
   // 2026-08-08 신규: 룰렛에 초대할 사람들. friends는 "내 친구 중에서 빠르게 선택"용, companyUsers는
   // 닉네임 검색으로 누구나 초대할 수 있게 하기 위함(LunchVoteModal 참가자 초대와 동일 패턴).
   const [friends, setFriends] = useState<FriendEntry[]>([]);
-  const [companyUsers, setCompanyUsers] = useState<CompanyUserEntry[]>([]);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<Set<string>>(new Set());
   const [participantSearch, setParticipantSearch] = useState("");
 
@@ -204,8 +213,8 @@ export default function LunchRouletteModal({
     setPhase("conditions");
   }, [open]);
 
-  // 친구 초대용 목록(친구목록 + 전체 사용자)은 열릴 때마다 새로 받아온다 - 그 사이 새 친구가
-  // 생겼을 수도 있으니.
+  // 친구 초대용 목록 중 내 친구목록만 열릴 때마다 새로 받아온다(전체 사용자 목록은 이제
+  // CompanyHome이 공유하는 companyUsers prop을 쓴다) - 그 사이 새 친구가 생겼을 수도 있으니.
   useEffect(() => {
     if (!open) return;
     fetch(`/api/friends?companyCode=${encodeURIComponent(companyCode)}`)
@@ -214,10 +223,6 @@ export default function LunchRouletteModal({
       .catch(() => {
         // 친구 초대는 부가 기능이라 실패해도 조용히 무시한다(빈 목록으로 남아 검색만 안 될 뿐).
       });
-    fetch(`/api/users?companyCode=${encodeURIComponent(companyCode)}`)
-      .then((r) => r.json())
-      .then((d) => setCompanyUsers(d.users ?? []))
-      .catch(() => {});
   }, [open, companyCode]);
 
   useEffect(() => () => stopSpinInterval(), []);
