@@ -186,6 +186,41 @@ export async function respondToVote(
   await responseRef.set({ nickname, optionId, respondedAt: new Date().toISOString() });
 }
 
+// 2026-08-11 신규: 투표를 만든 뒤에도 참가자가 메뉴(식당) 옵션을 추가할 수 있게 한다(사용자 요청 -
+// 만들 때 깜빡한 식당을 나중에 아무 참가자나 끼워 넣을 수 있어야 함). 이미 있는 옵션과 같은
+// restaurantId(또는 같은 label의 직접입력 옵션)면 중복 추가하지 않고 현재 상태를 그대로 반환한다.
+export async function addVoteOption(
+  companyCode: string,
+  voteId: string,
+  option: { label: string; restaurantId?: string }
+): Promise<VoteSummary | null> {
+  const voteRef = votesRef(companyCode).doc(voteId);
+  const voteSnap = await voteRef.get();
+  if (!voteSnap.exists) return null;
+
+  const data = voteSnap.data()!;
+  const existingOptions: VoteOption[] = data.options ?? [];
+  const label = option.label.trim();
+
+  const isDuplicate = existingOptions.some(
+    (o) => (option.restaurantId && o.restaurantId === option.restaurantId) || o.label === label
+  );
+  if (isDuplicate) {
+    return hydrateVote(companyCode, voteSnap);
+  }
+
+  const newOption: VoteOption = {
+    id: `opt${existingOptions.length}`,
+    label,
+    ...(option.restaurantId ? { restaurantId: option.restaurantId } : {}),
+  };
+
+  await voteRef.update({ options: [...existingOptions, newOption] });
+
+  const updatedSnap = await voteRef.get();
+  return hydrateVote(companyCode, updatedSnap);
+}
+
 export async function addVoteComment(
   companyCode: string,
   voteId: string,

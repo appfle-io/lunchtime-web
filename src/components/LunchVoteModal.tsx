@@ -293,13 +293,26 @@ export default function LunchVoteModal({
       >
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-ink">오늘 점심 투표</h3>
-          <button
-            onClick={onClose}
-            aria-label="닫기"
-            className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-1">
+            {/* 2026-08-11 신규: 다른 참가자가 투표를 새로 만들거나 메뉴를 추가한 걸 반영하려면
+                모달을 닫았다 다시 열 필요 없이 이 버튼으로 목록 전체를 다시 불러올 수 있게 한다. */}
+            <button
+              onClick={loadAll}
+              disabled={loading}
+              aria-label="새로고침"
+              title="새로고침"
+              className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted disabled:opacity-50"
+            >
+              ⟳
+            </button>
+            <button
+              onClick={onClose}
+              aria-label="닫기"
+              className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-1.5">
@@ -348,6 +361,7 @@ export default function LunchVoteModal({
                   vote={vote}
                   companyCode={companyCode}
                   myNickname={myNickname}
+                  restaurants={restaurants}
                   expanded={expandedVoteId === vote.id}
                   onToggleExpand={() => setExpandedVoteId((prev) => (prev === vote.id ? null : vote.id))}
                   onVoteUpdated={handleVoteUpdated}
@@ -569,6 +583,7 @@ interface VoteCardProps {
   vote: VoteSummary;
   companyCode: string;
   myNickname: string;
+  restaurants: RestaurantSummary[];
   expanded: boolean;
   onToggleExpand: () => void;
   onVoteUpdated: (vote: VoteSummary) => void;
@@ -585,6 +600,7 @@ function VoteCard({
   vote,
   companyCode,
   myNickname,
+  restaurants,
   expanded,
   onToggleExpand,
   onVoteUpdated,
@@ -594,7 +610,51 @@ function VoteCard({
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
 
+  // 2026-08-11 신규: 투표가 이미 만들어진 뒤에도 참가자가 메뉴(식당) 옵션을 더 추가할 수
+  // 있게 하는 미니 검색/직접입력 상태 새 투표 만들기 폼과 같은 패턴).
+  const [optionFilter, setOptionFilter] = useState("");
+  const [customOptionText, setCustomOptionText] = useState("");
+  const [addingOption, setAddingOption] = useState(false);
+
   const myResponse = vote.responses.find((r) => r.nickname === myNickname);
+
+  const filteredRestaurantsForOption = useMemo(() => {
+    const q = optionFilter.trim().toLowerCase();
+    if (!q) return [];
+    return restaurants
+      .filter((r) => r.name.toLowerCase().includes(q))
+      .filter((r) => !vote.options.some((o) => o.restaurantId === r.id))
+      .slice(0, 10);
+  }, [optionFilter, restaurants, vote.options]);
+
+  async function handleAddOption(payload: { label: string; restaurantId?: string }) {
+    setAddingOption(true);
+    try {
+      const res = await fetch(`/api/votes/${vote.id}/options`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyCode, ...payload }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        onNotify?.(data.error ?? "메뉴를 추가하지 못했어요.");
+        return;
+      }
+      onVoteUpdated(data.vote);
+      setOptionFilter("");
+    } catch {
+      onNotify?.("네트워크 오류로 메뉴를 추가하지 못했어요.");
+    } finally {
+      setAddingOption(false);
+    }
+  }
+
+  function handleAddCustomOption() {
+    const label = customOptionText.trim();
+    if (!label) return;
+    setCustomOptionText("");
+    handleAddOption({ label });
+  }
 
   async function respond(optionId: string) {
     setResponding(true);
@@ -682,6 +742,54 @@ function VoteCard({
               );
             })}
           </ul>
+
+          {/* 2026-08-11 신규: 투표 생성 이후에도 참가자 누구나 메뉴를 더 추가할 수 있게 하는 미니 폼. */}
+          <div className="rounded-xl border border-dashed border-black/15 p-2.5">
+            <p className="mb-1.5 text-[11px] font-medium text-ink-soft">메뉴 추가하기</p>
+            <div className="relative">
+              <input
+                value={optionFilter}
+                onChange={(e) => setOptionFilter(e.target.value)}
+                placeholder="식당 이름으로 검색해서 추가"
+                className="w-full rounded-lg border border-black/10 px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+              />
+              {optionFilter.trim() && (
+                <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-black/10 bg-surface p-1 shadow-soft">
+                  {filteredRestaurantsForOption.length === 0 && (
+                    <li className="px-2 py-1.5 text-xs text-ink-soft">일치하는 식당이 없어요.</li>
+                  )}
+                  {filteredRestaurantsForOption.map((r) => (
+                    <li key={r.id}>
+                      <button
+                        onClick={() => handleAddOption({ label: r.name, restaurantId: r.id })}
+                        disabled={addingOption}
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-ink transition hover:bg-primary-light hover:text-primary-dark disabled:opacity-50"
+                      >
+                        <span className="min-w-0 flex-1 truncate">{r.name}</span>
+                        <span className="shrink-0 text-[10px] text-ink-soft">+ 추가</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              <input
+                value={customOptionText}
+                onChange={(e) => setCustomOptionText(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddCustomOption()}
+                placeholder="목록에 없는 메뉴 직접 입력"
+                className="min-w-0 flex-1 rounded-lg border border-black/10 px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+              />
+              <button
+                onClick={handleAddCustomOption}
+                disabled={addingOption || !customOptionText.trim()}
+                className="shrink-0 rounded-lg bg-surface px-2.5 py-1.5 text-xs font-medium text-ink-soft ring-1 ring-inset ring-black/10 transition hover:bg-primary-light hover:text-primary-dark disabled:opacity-50"
+              >
+                추가
+              </button>
+            </div>
+          </div>
 
           <div className="border-t border-black/5 pt-2">
             <p className="mb-1.5 text-xs font-semibold text-ink-soft">댓글</p>
