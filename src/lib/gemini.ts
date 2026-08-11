@@ -17,7 +17,13 @@ const GEMINI_ENDPOINT = (model: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
 // packinbag과 동일: 간단한 분류/요약 용도로는 빠르고 저렴한 flash-lite면 충분하다.
-const DEFAULT_MODEL = "gemini-2.5-flash-lite";
+// 2026-08-11: gemini-2.5-flash-lite가 "신규 사용자에게는 더 이상 제공되지 않는 모델"이 되어
+// (밥시간의 Gemini API 키는 packinbag보다 나중에 새로 발급받은 신규 프로젝트라 이 모델에 접근이
+// 막혀 있었음 - 404 "is no longer available to new users" 응답으로 확인됨) gemini-3.5-flash-lite로
+// 교체함. scripts/classify-categories-ai.ts는 이미 같은 이유로 다른 세션에서 먼저 고쳐져 있었는데
+// (그쪽 파일의 GEMINI_MODEL 상수), 이 파일(lib/gemini.ts)의 DEFAULT_MODEL은 그때 같이 안 바뀌어서
+// "오늘 뭐 먹지?" 추천(recommendLunch)만 계속 404가 나고 있었던 것 - 이제 두 곳 다 통일함.
+const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 900;

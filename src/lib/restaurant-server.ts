@@ -73,7 +73,7 @@ export function invalidateRestaurantsCache(companyCode: string): void {
   restaurantsCache.delete(companyCode);
 }
 
-function toRestaurantSummary(id: string, data: Record<string, unknown>): RestaurantSummary {
+export function toRestaurantSummary(id: string, data: Record<string, unknown>): RestaurantSummary {
   return {
     id,
     name: data.name,

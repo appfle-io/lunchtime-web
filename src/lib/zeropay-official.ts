@@ -71,33 +71,49 @@ function isAddressMatched(dbAddr: string, officialAddr: string): boolean {
 function generateQueryVariants(name: string): string[] {
   const list: string[] = [];
 
+  list.push(name);
+  list.push(name.replace(/\s+/g, ""));
+
   let clean1 = name
     .replace(/\(주\)|\(유\)|주식회사/g, "")
     .replace(/\(.*?\)|\[.*?\]|\{.*?\}/g, "")
-    .replace(/(영등포|문래|당산|여의도|타임스퀘어|신길|대림|양평|도림)?\s*(시장점|역점|본점|직영점|[0-9]+호점|점)$/g, "")
+    .replace(/(영등포|문래|당산|여의도|타임스퀘어|신길|대림|양평|도림)?\s*(시장점|역점|본점|직영점|[0-9]+호점|점)$/gi, "")
     .trim();
-  list.push(clean1);
+  if (clean1) {
+    list.push(clean1);
+    list.push(clean1.replace(/\s+/g, ""));
+  }
 
-  const noSpace = clean1.replace(/\s+/g, "");
-  if (noSpace) list.push(noSpace);
+  // 지점 접미사만 단순 제거 (예: "GS25 영등포충무점" -> "GS25 영등포충무")
+  const noSuffix = name.replace(/\s*점$/i, "").trim();
+  if (noSuffix) {
+    list.push(noSuffix);
+    list.push(noSuffix.replace(/\s+/g, ""));
+  }
 
-  list.push(`${clean1}식당`);
-  list.push(`${clean1}맛집`);
-
-  let variant = clean1
-    .replace(/천씨씨/g, "1000cc")
+  // 브랜드명 영문/한글 변환 (GS25 <-> 지에스25, CU <-> 씨유 등)
+  let brandVariant = name
+    .replace(/GS25/gi, "지에스25")
+    .replace(/CU/gi, "씨유")
     .replace(/서브웨이/g, "써브웨이")
-    .replace(/삼삼/g, "33")
-    .replace(/[a-zA-Z0-9]/g, "");
-  if (variant) list.push(variant.replace(/\s+/g, ""));
+    .replace(/천씨씨/g, "1000cc")
+    .replace(/삼삼/g, "33");
+  if (brandVariant !== name) {
+    list.push(brandVariant);
+    list.push(brandVariant.replace(/\s+/g, ""));
+    list.push(brandVariant.replace(/\s*점$/i, "").trim());
+  }
 
-  const koreanWords = clean1.match(/[\uAC00-\uD7A3]+/g) ?? [];
+  const koreanWords = (clean1 || name).match(/[\uAC00-\uD7A3]+/g) ?? [];
   for (const w of koreanWords) {
-    if (w.length >= 2) list.push(w.slice(0, 4));
+    if (w.length >= 2) list.push(w);
   }
 
   return [...new Set(list)].filter((q) => q && q.length >= 2);
 }
+
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 export async function checkZeroPayOfficial(
   merchantName: string,
@@ -106,7 +122,12 @@ export async function checkZeroPayOfficial(
 ): Promise<ZeroPayOfficialCheckResult> {
   const isOwnContext = !existingContext;
   const browser = isOwnContext ? await chromium.launch({ headless: true }) : null;
-  const context = existingContext ?? (await browser!.newContext({ locale: "ko-KR" }));
+  const context =
+    existingContext ??
+    (await browser!.newContext({
+      locale: "ko-KR",
+      userAgent: BROWSER_UA,
+    }));
   const page = await context.newPage();
 
   let isZeroPay = false;
@@ -116,11 +137,16 @@ export async function checkZeroPayOfficial(
   let isNotFoodBiz = false;
 
   try {
-    await page.goto("https://www.zeropay.or.kr/UI_HP_009_03.act", {
-      waitUntil: "domcontentloaded",
-      timeout: 15000,
-    });
-    await page.waitForTimeout(1000);
+    try {
+      await page.goto("https://www.zeropay.or.kr/UI_HP_009_03.act", {
+        waitUntil: "domcontentloaded",
+        timeout: 4000,
+      });
+      await page.waitForTimeout(500);
+    } catch (_) {
+      // 회사 방화벽 차단 또는 네트워크 연결 차단 시 지연 없이 즉시 종료
+      return { isZeroPay: false };
+    }
 
     const variants = generateQueryVariants(merchantName);
 

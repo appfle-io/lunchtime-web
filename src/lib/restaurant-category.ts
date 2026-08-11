@@ -22,6 +22,11 @@ export interface CategoryVisual {
 
 const RULES: { test: RegExp; visual: CategoryVisual }[] = [
   {
+    // 네이버: 편의점 계열 / 공공데이터: 편의점, GS25, CU, 세븐일레븐, 이마트24 등
+    test: /편의점|GS25|CU|세븐일레븐|이마트24|미니스톱|씨유/i,
+    visual: { emoji: "🏪", color: "#10B981", label: "편의점" },
+  },
+  {
     // 네이버: 한식, 백반, 국밥 등 / 공공데이터: 한식음식점, 일반음식점(한식 계열)
     test: /한식|백반|국밥|찌개|한정식|해장국|감자탕|설렁탕|곰탕|매운탕|추어탕|순두부|한식음식점|낙지|해물요리|복어/,
     visual: { emoji: "🍚", color: "#F59E0B", label: "한식" },
@@ -128,7 +133,7 @@ export function getCategoryVisual(
 // 이 둘 중 하나로 시작하지 않으면 음식/카페 관련이 아니라고 판단해서 제외한다.
 export function isFoodRelatedCategory(category: string | null | undefined): boolean {
   if (!category) return false;
-  return /^\s*(음식점|카페)/.test(category);
+  return /^\s*(음식점|카페|생활|편의|편의점)/.test(category);
 }
 
 // "회식"에 어울리는 곳을 판별하는 로직.

@@ -37,17 +37,9 @@ export async function POST(req: Request) {
 
     // 새로 만들어진 경우에만 백그라운드로 공식 제로페이 검증 및 정보 보완
     if (!result.existing) {
-      const companySnap = await db.collection("companies").doc(companyCode).get();
-      const rawDistrict: string = companySnap.data()?.districtCode ?? "";
-      const districtKeyword = rawDistrict.replace(/(구|시|군)$/, "").trim() || undefined;
-
-      enrichRestaurantInBackground(
-        companyCode,
-        result.restaurant.id,
-        candidate.title,
-        districtKeyword,
-        candidate.category
-      );
+      import("@/lib/enrich-server")
+        .then(({ enrichRestaurantById }) => enrichRestaurantById(companyCode, result.restaurant.id))
+        .catch((err) => console.error(`[enrich] "${candidate.title}" 백그라운드 수집 실패:`, err));
     }
 
     return NextResponse.json(result);

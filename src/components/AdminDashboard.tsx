@@ -66,6 +66,7 @@ export default function AdminDashboard({
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(0);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
+  const [enrichingId, setEnrichingId] = useState<string | null>(null);
 
   // 2026-08-10 신규: 표 정렬 상태. sortColumn===null이면 "기본(가나다순)" - 아래 sortedRows에서
   // 항상 이름 오름차순으로 fallback한다.
@@ -221,6 +222,31 @@ export default function AdminDashboard({
       setToastMessage("네트워크 오류로 저장하지 못했어요.");
     } finally {
       setSavingRowId(null);
+    }
+  }
+
+  async function handleEnrichRow(restaurant: RestaurantSummary) {
+    setEnrichingId(restaurant.id);
+    try {
+      const res = await fetch("/api/admin/restaurants/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyCode, restaurantId: restaurant.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setToastMessage(data.error ?? "정보를 불러오지 못했어요.");
+        return;
+      }
+      updateRow(restaurant.id, data.restaurant);
+      if (detailId === restaurant.id) {
+        openDetail(data.restaurant);
+      }
+      setToastMessage(`[${restaurant.name}] 제로페이 및 네이버맵 정보를 성공적으로 불러왔어요.`);
+    } catch {
+      setToastMessage("네트워크 오류로 정보를 불러오지 못했어요.");
+    } finally {
+      setEnrichingId(null);
     }
   }
 
@@ -402,6 +428,7 @@ export default function AdminDashboard({
                       </th>
                     ))}
                     <th className="px-2 py-2 text-center font-medium">메뉴</th>
+                    <th className="px-2 py-2 text-center font-medium">정보수집</th>
                     <th className="px-2 py-2 text-center font-medium">상세</th>
                     <th className="px-2 py-2 text-center font-medium">저장</th>
                   </tr>
@@ -466,6 +493,16 @@ export default function AdminDashboard({
                         </td>
                         <td className="px-2 py-1.5 text-center text-xs text-ink-soft">
                           {(r.menus ?? []).length}개
+                        </td>
+                        <td className="px-2 py-1.5 text-center">
+                          <button
+                            onClick={() => handleEnrichRow(r)}
+                            disabled={enrichingId === r.id}
+                            className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+                            title="네이버맵 및 공식 제로페이 정보 실시간 수집"
+                          >
+                            {enrichingId === r.id ? "수집중..." : "🔄 수동수집"}
+                          </button>
                         </td>
                         <td className="px-2 py-1.5 text-center">
                           <button
@@ -588,6 +625,19 @@ export default function AdminDashboard({
                 className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
               >
                 ✕
+              </button>
+            </div>
+
+            <div className="mt-2.5">
+              <button
+                type="button"
+                onClick={() => handleEnrichRow(detailRestaurant)}
+                disabled={enrichingId === detailRestaurant.id}
+                className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60 flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                {enrichingId === detailRestaurant.id
+                  ? "🔄 네이버/제로페이 정보를 수집하고 있어요..."
+                  : "🔄 네이버/제로페이 정보 자동 불러오기"}
               </button>
             </div>
 
