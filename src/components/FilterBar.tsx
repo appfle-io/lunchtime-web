@@ -52,6 +52,20 @@ interface FilterBarProps {
 // calc(50%+224px)로 바꾸면 창 폭이 바뀌어도(리사이즈) 순수 CSS 계산이라 항상 다시 맞다 -
 // 별도의 리사이즈 이벤트 리스너가 필요 없다. 448px 값은 MapView.tsx의 지도 컨테이너 오프셋과
 // 반드시 같이 바뀌어야 하는 매직넘버 - 그쪽을 바꾸면 이 224px(=448/2)도 같이 바꿔야 한다.
+// 2026-08-11 신규: 선택된 필터와 아닌 필터가 한눈에 구분되게 하는 공통 스타일 헬퍼. 예전엔
+// 선택 여부와 무관하게 둘 다 옅은 배경(bg-surface-muted)에 테두리가 없어서 알약끼리도, 알약과
+// 뒷배경(bg-surface/95)도 잘 구분이 안 됐다(사용자가 스크린샷으로 "안 이쁘다"고 지적). 이제
+// 선택 안 된 알약은 옅은 테두리로 경계를 뚜렷하게 주고, 선택된 알약은 진한 배경+테두리+굵은 글씨+
+// 체크마크(✓)까지 붙여서 "켜져 있다"는 게 색약/저채도 화면에서도 확실히 보이게 한다.
+function filterChipClassName(active: boolean) {
+  return [
+    "whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition",
+    active
+      ? "border-primary bg-primary text-white font-semibold shadow-sm"
+      : "border-black/10 bg-surface text-ink-soft hover:border-primary/50 hover:bg-primary-light",
+  ].join(" ");
+}
+
 export default function FilterBar({
   restaurants,
   activeCategory,
@@ -101,16 +115,16 @@ export default function FilterBar({
 
       <div className="pointer-events-auto flex max-w-[92vw] flex-wrap items-center justify-center gap-1.5 rounded-full bg-surface/95 px-3 py-2 shadow-soft backdrop-blur md:max-w-none">
         {/* 제로페이는 모바일에서도 항상 보이는 필수 태그 - 나머지(카테고리/다른 특수태그)와 분리해서
-            "더보기"로 접었을 때도 이것만은 계속 눌러서 켤 수 있게 한다. */}
+            "더보기"로 접었을 때도 이것만은 계속 눌러서 켤 수 있게 한다.
+            2026-08-11: 예전엔 아래 collapsible <div>가 데스크톱에서도 하나의 flex item으로 통째로
+            취급돼서, 그 div가 이 버튼 옆 남는 공간에 다 안 들어가면 제로페이만 혼자 첫 줄에 고립되고
+            나머지 태그 전부가 다음 줄로 밀려나 어색해 보였다(사용자가 스크린샷으로 지적한 문제).
+            아래 collapsible 그룹을 display:contents로 바꿔서 해결함(더 아래 주석 참고). */}
         <button
           onClick={() => onToggleSpecialFilter(zeroPayFilter.key)}
-          className={[
-            "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition",
-            activeSpecialFilters.has(zeroPayFilter.key)
-              ? "bg-primary text-white"
-              : "bg-surface-muted text-ink-soft hover:bg-primary-light",
-          ].join(" ")}
+          className={filterChipClassName(activeSpecialFilters.has(zeroPayFilter.key))}
         >
+          {activeSpecialFilters.has(zeroPayFilter.key) && "✓ "}
           {zeroPayFilter.label}
         </button>
 
@@ -118,7 +132,7 @@ export default function FilterBar({
             상태라 접었다 펼 필요가 없다. */}
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-1 whitespace-nowrap rounded-full bg-surface-muted px-3 py-1.5 text-xs font-medium text-ink-soft transition hover:bg-primary-light md:hidden"
+          className="flex items-center gap-1 whitespace-nowrap rounded-full border border-black/10 bg-surface px-3 py-1.5 text-xs font-medium text-ink-soft transition hover:border-primary/50 hover:bg-primary-light md:hidden"
         >
           {expanded ? "접기" : "더보기"}
           {!expanded && hiddenActiveCount > 0 && (
@@ -129,19 +143,21 @@ export default function FilterBar({
           <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
         </button>
 
-        {/* 카테고리 + 제로페이 외 특수태그 - 모바일은 expanded일 때만, 데스크톱은 항상 보임. */}
-        <div className={["flex-wrap items-center gap-1.5", expanded ? "flex" : "hidden", "md:flex"].join(" ")}>
+        {/* 카테고리 + 제로페이 외 특수태그 - 모바일은 expanded일 때만, 데스크톱은 항상 보임.
+            2026-08-11: 이 그룹을 감싸던 <div>가 데스크톱에서 "제로페이" 버튼과 별개의 flex item으로
+            통째로 줄바꿈되면서, 제로페이만 혼자 첫 줄에 남고 나머지가 전부 다음 줄로 밀려나 보이는
+            문제가 있었다. display:contents로 이 <div> 자체를 박스 모델에서 없애면, 안에 있는
+            버튼들이 바깥 컨테이너의 flex-wrap에 직접 참여하게 되어 제로페이/카테고리/나머지
+            특수태그가 전부 하나의 흐름으로 자연스럽게 줄바꿈된다(hidden은 그대로 display:none이라
+            접힌 상태에서는 여전히 전부 안 보인다). */}
+        <div className={[expanded ? "contents" : "hidden", "md:contents"].join(" ")}>
           {categoryLabels.map((label) => (
             <button
               key={label}
               onClick={() => onToggleCategory(label)}
-              className={[
-                "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition",
-                activeCategory === label
-                  ? "bg-primary text-white"
-                  : "bg-surface-muted text-ink-soft hover:bg-primary-light",
-              ].join(" ")}
+              className={filterChipClassName(activeCategory === label)}
             >
+              {activeCategory === label && "✓ "}
               {label}
             </button>
           ))}
@@ -152,13 +168,9 @@ export default function FilterBar({
             <button
               key={f.key}
               onClick={() => onToggleSpecialFilter(f.key)}
-              className={[
-                "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition",
-                activeSpecialFilters.has(f.key)
-                  ? "bg-primary text-white"
-                  : "bg-surface-muted text-ink-soft hover:bg-primary-light",
-              ].join(" ")}
+              className={filterChipClassName(activeSpecialFilters.has(f.key))}
             >
+              {activeSpecialFilters.has(f.key) && "✓ "}
               {f.label}
             </button>
           ))}
