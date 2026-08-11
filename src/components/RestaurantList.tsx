@@ -86,6 +86,11 @@ interface RestaurantListProps {
 // 사용자가 주소를 직접 보고 맞는지 최종 판단한다 (2026-08-06, 아래 큰 주석 참고).
 const FAR_AWAY_METERS = 5000;
 
+// 2026-08-11 신규: 회사 구내식당(직원식당)은 매주 갱신되는 네이버 페이지로만 존재해서(지도에
+// 등록된 개별 식당이 아님), 지도 마커로 넣는 대신 리스트 상단에 바로가기 버튼만 연결한다(1단계 -
+// 나중에 필요하면 지도 고정 핀/앱 내 메뉴 표시로 확장 가능, 프로젝트 문서 참고).
+const EMPLOYEE_CAFETERIA_MENU_URL = "https://m.site.naver.com/24Lw0";
+
 interface RestaurantRowData {
   restaurants: RestaurantSummary[];
   favoriteIds: Set<string>;
@@ -402,6 +407,16 @@ export default function RestaurantList({
         >
           🎲 오늘 뭐 먹지?
         </button>
+        {/* 2026-08-11 신규: 구내식당(직원식당) 매주 메뉴표로 바로가는 링크. 새로운 탭으로 열어서
+            앱 내부 네비게이션을 뜨지 않는다. */}
+        <a
+          href={EMPLOYEE_CAFETERIA_MENU_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-xl2 border border-black/10 px-4 py-2.5 text-sm font-medium text-ink-soft transition hover:border-primary hover:text-primary"
+        >
+          이번주 직원식당 메뉴
+        </a>
         <button
           onClick={() => setShowAddModal(true)}
           className="mb-1 w-full rounded-xl2 border border-dashed border-black/15 px-4 py-2.5 text-sm font-medium text-ink-soft transition hover:border-primary hover:text-primary"
