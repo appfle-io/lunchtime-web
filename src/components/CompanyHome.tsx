@@ -99,8 +99,14 @@ export default function CompanyHome({
   const [selectedRestaurant, setSelectedRestaurant] = useState<RestaurantSummary | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => new Set(initialFavoriteIds));
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  // 2026-08-11 신규: 처음 로딩 시 전체 가맹점을 다 보여주면(특히 공공데이터로 시딩된 회사는 수가
+  // 많아서) 지도/마커/리스트가 동시에 다 그려지며 초기 로딩이 무거워진다(사용자 지적). 기본값을
+  // "제로페이" 필터가 켜져있는 상태로 바꿔서 처음에는 제로페이 가맹점만 보여주고, 그 이후에는
+  // 기존 toggleSpecialFilter 로직을 그대로 써서 사용자가 자유롭게 켜고/끔고 할 수 있다(필터 상태가 바뀌면
+  // 그 뒤로는 사용자 조작만 반영되고 자동으로 다시 켜지거나 꺼지지 않음 - 이 useState 초기값은 첫 마운트
+  // 시점에만 적용되는 값이라서).
   const [activeSpecialFilters, setActiveSpecialFilters] = useState<Set<SpecialFilterKey>>(
-    () => new Set()
+    () => new Set(["zeropay"])
   );
   const [popularEntries, setPopularEntries] = useState<PopularEntry[]>([]);
   const [isRefreshingPopular, setIsRefreshingPopular] = useState(false);
