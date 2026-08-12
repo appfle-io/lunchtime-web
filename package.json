@@ -14,8 +14,6 @@
     "seed:security-question": "tsx scripts/seed-security-question.ts",
     "set:admin": "tsx scripts/set-admin.ts",
     "classify:categories": "tsx scripts/classify-categories-ai.ts",
-    "seed:dummy-users": "tsx scripts/seed-dummy-users.ts",
-    "remove:dummy-users": "tsx scripts/remove-dummy-users.ts",
     "set:neighborhoods": "tsx scripts/set-company-neighborhoods.ts",
     "set:signgucd": "tsx scripts/set-company-signgucd.ts",
     "enrich:zeropay": "tsx scripts/enrich-zeropay-naver.ts",

@@ -132,6 +132,9 @@ export default function CompanyHome({
   // null 그대로 두면 WeatherWidget이 조용히 안 보여준다 - 부가 기능이라 실패해도 지도/추천
   // 자체는 계속 동작해야 한다는 기존 원칙(popularEntries/companyUsers)과 동일하게 처리.
   const [weather, setWeather] = useState<CurrentWeather | null>(null);
+  // 2026-08-12 신규: 날씨 위젯을 눌러서 수동으로 새로고침할 때 잠깐 보여줄 "새로고침 중" 상태
+  // (PopularWidget의 isRefreshingPopular와 동일한 패턴).
+  const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
 
   // 2026-08-06 오후 신규: 지도에서 클러스터 마커를 클릭하면, 그 그룹에 속한 식당 id들을 여기 담아둔다.
   // null이면 "구역 확대" 상태가 아님(평소 상태). 이 값이 있으면 지도와 좌측 리스트 둘 다 이 id들로만
@@ -243,28 +246,51 @@ export default function CompanyHome({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyCode]);
 
-  // 2026-08-12 신규: 회사 주변 날씨도 companyUsers와 같은 패턴 - 페이지 진입 시 1회만 불러오고,
-  // sessionStorage 캐시(TTL 20분)가 있으면 fetch 자체를 스킵한다. 날씨는 회사 전체가 같은 값을
-  // 보는 공용 정보라(개인화 없음) 로그인 여부와 무관하게 조회 가능한 /api/weather를 그대로 쓴다.
-  useEffect(() => {
-    const cacheKey = `lt:weather:${companyCode}`;
-    const cached = readSessionCache<CurrentWeather>(cacheKey, WEATHER_CACHE_TTL_MS);
-    if (cached) {
-      setWeather(cached);
-      return;
-    }
+  // 2026-08-12 신규: 회사 주변 날씨도 companyUsers/popular와 같은 패턴 - 페이지 진입 시 1회만
+  // 불러오고, sessionStorage 캐시(TTL 20분)가 있으면 fetch 자체를 스킵한다. 날씨는 회사 전체가
+  // 같은 값을 보는 공용 정보라(개인화 없음) 로그인 여부와 무관하게 조회 가능한 /api/weather를
+  // 그대로 쓴다.
+  // 2026-08-12 추가: 위젯을 눌러서 수동으로 다시 불러올 수 있게 fetchPopular와 동일한 형태로
+  // force 파라미터를 넣은 함수로 분리했다 - force=true면 sessionStorage 캐시를 건너뛰고 항상
+  // 새로 불러온 뒤 캐시도 갱신한다(단, 서버 쪽 weather-server.ts의 20분 캐시는 그대로 적용되므로,
+  // 마지막 실제 기상청 조회로부터 20분이 안 지났으면 같은 값이 그대로 돌아올 수 있다 - 어차피
+  // 기상청 데이터 자체가 매시간 정시에만 바뀌는 값이라 문제되지 않는다).
+  const weatherCacheKey = `lt:weather:${companyCode}`;
+  const fetchWeather = useCallback(
+    async (force = false) => {
+      if (!force) {
+        const cached = readSessionCache<CurrentWeather>(weatherCacheKey, WEATHER_CACHE_TTL_MS);
+        if (cached) {
+          setWeather(cached);
+          return;
+        }
+      }
 
-    fetch(`/api/weather?companyCode=${encodeURIComponent(companyCode)}`)
-      .then((res) => res.json())
-      .then((data) => {
+      try {
+        const res = await fetch(`/api/weather?companyCode=${encodeURIComponent(companyCode)}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { weather: CurrentWeather | null };
         if (data.weather) {
           setWeather(data.weather);
-          writeSessionCache(cacheKey, data.weather);
+          writeSessionCache(weatherCacheKey, data.weather);
         }
-      })
-      .catch(() => {
+      } catch {
         // 날씨 위젯은 부가 기능이라 실패해도 조용히 무시한다 - null 상태 그대로 위젯이 안 보일 뿐.
-      });
+      }
+    },
+    [companyCode, weatherCacheKey]
+  );
+
+  // 위젯 클릭 시 - 버튼에 "새로고침 중" 표시를 잠깐 보여주기 위해 fetchWeather를 감싼다
+  // (handleManualPopularRefresh와 동일한 패턴).
+  const handleManualWeatherRefresh = useCallback(async () => {
+    setIsRefreshingWeather(true);
+    await fetchWeather(true);
+    setIsRefreshingWeather(false);
+  }, [fetchWeather]);
+
+  useEffect(() => {
+    fetchWeather(); // 로그인/페이지 진입 시(또는 F5로 이 컴포넌트가 다시 마운트될 때) 1회
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyCode]);
 
@@ -508,7 +534,11 @@ export default function CompanyHome({
         onGoHome={handleGoHome}
       />
 
-      <WeatherWidget weather={weather} />
+      <WeatherWidget
+        weather={weather}
+        onRefresh={handleManualWeatherRefresh}
+        isRefreshing={isRefreshingWeather}
+      />
 
       <PopularWidget
         entries={popularEntries.slice(0, 3)}
