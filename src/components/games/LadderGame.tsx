@@ -19,6 +19,7 @@ const COL_WIDTH = 52;
 const ROW_HEIGHT = 22;
 const LADDER_HEIGHT = ROWS * ROW_HEIGHT;
 const TRACE_DURATION_MS = 900;
+const RESHUFFLE_DURATION_MS = 550;
 
 // 참가자 수(n)만큼 세로줄을 만들고, 각 행마다 인접한 두 줄 사이에 가로줄(rung)을 무작위로
 // 놓는다. 같은 행 안에서 가로줄끼리 겹치면(예: 1-2번 사이와 2-3번 사이가 동시에) 사다리가
@@ -139,16 +140,26 @@ function AnimatedLadderPath({ points, color }: { points: PathPoint[]; color: str
 // 순서 상관없이 자기 세로줄을 클릭하면 된다. 여러 명이 거의 동시에 눌러도 애니메이션은 한 번에
 // 하나씩만 재생되도록 대기열(queue)로 처리하지만, 그 사이에 "확인" 버튼을 누를 필요는 없다.
 // 전원이 다 뽑으면 별도 확인 절차 없이 바로 결과 화면으로 넘어간다.
+//
+// 2026-08-12 5차 수정: 아무도 아직 안 뽑은 상태에서 "다시 그리기"를 눌러 사다리 구조(가로줄
+// 배치)와 당첨 위치를 통째로 다시 무작위로 뽑아볼 수 있게 했다 - 마음에 드는 모양이 나올
+// 때까지 여러 번 반복하고, 원할 때 실제로 뽑기 시작하면 된다. 한 명이라도 이미 세로줄을
+// 골랐으면(claimedColumns에 뭔가 있으면) 다시 그리기는 막아서 이미 진행된 결과가 안 꼬이게 한다.
 export default function LadderGame({ participants, winnerCount, onFinish }: LadderGameProps) {
   const n = participants.length;
-  const [rungs] = useState(() => generateRungs(n));
-  const [winnerBottoms] = useState<Set<number>>(() => new Set(shuffleIndices(n).slice(0, winnerCount)));
+  const [rungs, setRungs] = useState(() => generateRungs(n));
+  const [winnerBottoms, setWinnerBottoms] = useState<Set<number>>(
+    () => new Set(shuffleIndices(n).slice(0, winnerCount))
+  );
 
   const [claimedColumns, setClaimedColumns] = useState<Set<number>>(new Set());
   const [queue, setQueue] = useState<number[]>([]);
   const [animatingColumn, setAnimatingColumn] = useState<{ column: number; path: RevealedPath } | null>(null);
   const [revealedPaths, setRevealedPaths] = useState<Record<number, RevealedPath>>({});
   const [winners, setWinners] = useState<MiniGameParticipant[]>([]);
+  const [shuffling, setShuffling] = useState(false);
+
+  const hasStarted = claimedColumns.size > 0;
 
   // 대기열에 쌓인 세로줄을 순서대로 하나씩 애니메이션 처리한다.
   useEffect(() => {
@@ -184,9 +195,21 @@ export default function LadderGame({ participants, winnerCount, onFinish }: Ladd
   }, [revealedPaths]);
 
   function pickColumn(column: number) {
-    if (claimedColumns.has(column)) return;
+    if (shuffling || claimedColumns.has(column)) return;
     setClaimedColumns((prev) => new Set(prev).add(column));
     setQueue((prev) => [...prev, column]);
+  }
+
+  // "다시 그리기" - 아직 아무도 세로줄을 고르지 않았을 때만 가로줄 배치와 당첨 위치를 통째로
+  // 새로 무작위로 뽑아서 원하는 만큼 반복할 수 있게 한다.
+  function handleReshuffle() {
+    if (shuffling || hasStarted) return;
+    setShuffling(true);
+    setTimeout(() => {
+      setRungs(generateRungs(n));
+      setWinnerBottoms(new Set(shuffleIndices(n).slice(0, winnerCount)));
+      setShuffling(false);
+    }, RESHUFFLE_DURATION_MS);
   }
 
   // "결과 바로 보기" - 아직 공개 안 된 줄을 전부 한 번에 확정해서 결과 화면으로 넘어간다
@@ -210,21 +233,50 @@ export default function LadderGame({ participants, winnerCount, onFinish }: Ladd
     <div className="flex flex-col items-center gap-3 py-2">
       <div className="flex w-full items-center justify-between gap-2">
         <p className="text-sm font-semibold text-ink">
-          {animatingColumn ? "사다리를 타고 내려가는 중..." : "각자 자기 세로줄을 클릭해서 확인하세요"}
+          {shuffling
+            ? "사다리를 다시 그리는 중..."
+            : animatingColumn
+              ? "사다리를 타고 내려가는 중..."
+              : "각자 자기 세로줄을 클릭해서 확인하세요"}
         </p>
-        <button
-          onClick={handleRevealAll}
-          className="shrink-0 text-xs text-ink-soft underline-offset-2 transition hover:text-primary hover:underline"
-        >
-          결과 바로 보기
-        </button>
+        <div className="flex shrink-0 gap-2.5">
+          {!hasStarted && (
+            <button
+              onClick={handleReshuffle}
+              disabled={shuffling}
+              className="text-xs text-ink-soft underline-offset-2 transition hover:text-primary hover:underline disabled:opacity-40"
+            >
+              다시 그리기
+            </button>
+          )}
+          <button
+            onClick={handleRevealAll}
+            disabled={shuffling}
+            className="text-xs text-ink-soft underline-offset-2 transition hover:text-primary hover:underline disabled:opacity-40"
+          >
+            결과 바로 보기
+          </button>
+        </div>
       </div>
+
+      {shuffling && (
+        <div className="flex items-center justify-center gap-1.5">
+          <span className="h-2 w-2 animate-bounce rounded-full bg-ink [animation-delay:-0.2s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-ink [animation-delay:-0.1s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-ink" />
+        </div>
+      )}
 
       {/* 실제 사다리 그림: 위쪽 선택 버튼(참가자 이름) - 세로줄+가로줄 SVG - 아래쪽 결과 칸을
           하나의 가로 스크롤 영역 안에 같이 묶어서, 참가자가 많아 옆으로 스크롤해도 세 부분이
           항상 같이 움직여 서로 어긋나지 않게 한다. */}
       <div className="w-full overflow-x-auto">
-        <div style={{ width: n * COL_WIDTH }} className="mx-auto flex flex-col">
+        <div
+          style={{ width: n * COL_WIDTH }}
+          className={["mx-auto flex flex-col transition-opacity", shuffling ? "pointer-events-none opacity-40" : ""].join(
+            " "
+          )}
+        >
           <div className="flex">
             {participants.map((p, col) => {
               const revealed = revealedPaths[col];
@@ -233,7 +285,7 @@ export default function LadderGame({ participants, winnerCount, onFinish }: Ladd
                 <button
                   key={col}
                   onClick={() => pickColumn(col)}
-                  disabled={claimedColumns.has(col)}
+                  disabled={shuffling || claimedColumns.has(col)}
                   title={p.name}
                   style={{ width: COL_WIDTH }}
                   className={[
