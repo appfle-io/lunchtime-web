@@ -13,6 +13,7 @@ import NotificationsModal, { type NotificationEntry } from "./NotificationsModal
 import LunchVoteModal from "./LunchVoteModal";
 import LunchRouletteModal from "./LunchRouletteModal";
 import RestaurantSearchModal from "./RestaurantSearchModal";
+import MiniGameModal from "./MiniGameModal";
 import UserMenu from "./UserMenu";
 import PinResetModal from "./PinResetModal";
 import MealLogCalendar from "./MealLogCalendar";
@@ -27,6 +28,7 @@ import type { ZeroPayStatus } from "@/lib/zeropay-server";
 import type { CompanyUserEntry } from "@/lib/user-server";
 import type { CurrentWeather } from "@/lib/weather";
 import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
+import { toNicknameId } from "@/lib/nickname";
 
 // 인기 Top3(위젯)과 "최근많이찾는" 필터 태그가 같은 데이터를 쓰므로, top10 정도를 한 번만 받아와서
 // 위젯은 앞 3개만 자르고 필터 태그는 id Set으로 전체를 쓴다.
@@ -195,10 +197,18 @@ export default function CompanyHome({
   const [showRecommend, setShowRecommend] = useState(false);
   // 2026-08-08 신규: 돋보기(🔍) 가맹점 검색 모달 상태.
   const [showSearch, setShowSearch] = useState(false);
+  // 2026-08-12 신규: "🎮 미니게임"(제비뽑기/룰렛/사다리타기/팀나누기) 모달 상태.
+  const [showMiniGame, setShowMiniGame] = useState(false);
   // 2026-08-06 3차 신규: 닉네임 드롭다운의 "비밀번호 변경" 버튼을 눌렀을 때 띄우는 모달 상태.
   const [showPasswordChange, setShowPasswordChange] = useState(false);
 
   const unreadNotifCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+
+  // 2026-08-12 신규: 세션 자체에는 nicknameId가 없고 nickname 문자열만 내려오는데, nicknameId는
+  // nickname을 정규화한 결정론적 값이라(toNicknameId) 서버를 안 거치고 클라이언트에서 그대로
+  // 계산할 수 있다(auth-server.ts가 로그인/가입 시 쓰는 것과 동일한 함수) - MiniGameModal이
+  // "나 자신"을 기본 참가자로 넣을 때 필요하다.
+  const myNicknameId = useMemo(() => toNicknameId(nickname), [nickname]);
 
   function handleMealLogged() {
     setMealLogVersion((v) => v + 1);
@@ -579,6 +589,7 @@ export default function CompanyHome({
           }}
           onOpenRecommend={() => setShowRecommend(true)}
           onOpenSearch={() => setShowSearch(true)}
+          onOpenMiniGame={() => setShowMiniGame(true)}
           clusterFilterCount={clusterFilterIds ? clusterFilterIds.size : null}
           onClearClusterFilter={handleGoHome}
           userMenu={
@@ -685,6 +696,19 @@ export default function CompanyHome({
         onClose={() => setShowSearch(false)}
         onFocusRestaurant={focusRestaurant}
         onSelectRestaurant={handleSelectRestaurant}
+      />
+
+      {/* 2026-08-12 신규: 미니게임(제비뽑기/룰렛/사다리타기/팀나누기) - 점심 먹고 후식 내기 등에
+          쓰라고 추가. 참가자 등록은 companyUsers(가입자 검색)+친구목록+수기입력(게스트) 세
+          가지를 지원한다(ParticipantPicker.tsx). */}
+      <MiniGameModal
+        open={showMiniGame}
+        companyCode={companyCode}
+        myNicknameId={myNicknameId}
+        myNickname={nickname}
+        companyUsers={companyUsers}
+        onClose={() => setShowMiniGame(false)}
+        onNotify={setToastMessage}
       />
 
       <PinResetModal

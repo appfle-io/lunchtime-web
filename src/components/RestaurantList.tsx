@@ -66,6 +66,9 @@ interface RestaurantListProps {
   // 2026-08-08 신규: 돋보기(🔍) 검색 버튼 - 실제 검색 상태/모달은 CompanyHome이 들고 있는
   // RestaurantSearchModal이 담당(마찬가지로 다른 헤더 버튼들과 동일한 패턴).
   onOpenSearch?: () => void;
+  // 2026-08-12 신규: "미니게임"(제비뽑기/룰렛/사다리타기/팀나누기) 버튼 - 실제 모달은
+  // CompanyHome이 들고 있는 MiniGameModal이 담당(다른 헤더 버튼들과 동일한 패턴).
+  onOpenMiniGame?: () => void;
   // 2026-08-06 오후 신규: 지도에서 클러스터를 클릭해 구역 확대 상태로 들어왔을 때(null이 아니면 숫자)
   // 리스트도 그 구역 식당만 보고 있다는 걸 배너로 바로 알려주기 위해.
   clusterFilterCount?: number | null;
@@ -206,6 +209,7 @@ export default function RestaurantList({
   onOpenVote,
   onOpenRecommend,
   onOpenSearch,
+  onOpenMiniGame,
   clusterFilterCount = null,
   onClearClusterFilter,
   userMenu,
@@ -411,6 +415,14 @@ export default function RestaurantList({
           className="mb-2 w-full rounded-xl2 bg-ink px-4 py-3 font-semibold text-white transition hover:bg-black"
         >
           🎲 오늘 뭐 먹지?
+        </button>
+        {/* 2026-08-12 신규: 미니게임(제비뽑기/룰렛/사다리타기/팀나누기) - 점심 먹고 후식 내기
+            등으로 쓰라고 추가. "오늘 뭐 먹지?"와 나란히 눈에 잘 띄게 배치. */}
+        <button
+          onClick={onOpenMiniGame}
+          className="mb-2 w-full rounded-xl2 border border-black/10 px-4 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
+        >
+          미니게임
         </button>
         {/* 2026-08-11 신규: 구내식당(직원식당) 매주 메뉴표로 바로가는 링크. 새로운 탭으로 열어서
             앱 내부 네비게이션을 뜨지 않는다. */}

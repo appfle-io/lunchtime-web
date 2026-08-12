@@ -98,3 +98,47 @@ export interface SessionUser {
   companyCode: string;
   nickname: string;
 }
+
+// 2026-08-12 신규: 미니게임(제비뽑기/룰렛/사다리타기/팀나누기) 공통 타입. 가위바위보는
+// 구현 우선순위가 낮아 최종 목록에서 뺐다(기획/미니게임_설계.md v2 참고).
+//
+// nicknameId가 있으면 lunchtime 가입자, null이면 계정 없이 그 자리에서 수기입력으로 추가한
+// 게스트다. 게스트는 동명이인을 구분할 방법이 없어서 랭킹 집계 대상에서 제외한다(그날 결과
+// 화면에는 이름이 나오지만 월간/주간/종합 랭킹에는 반영되지 않음).
+export interface MiniGameParticipant {
+  id: string; // 가입자는 nicknameId와 동일, 게스트는 로컬에서 생성한 임시 id
+  name: string;
+  nicknameId: string | null;
+  isGuest: boolean;
+}
+
+export type MiniGameType = "draw" | "roulette" | "ladder" | "teams";
+
+export interface MiniGameTeam {
+  name: string;
+  members: MiniGameParticipant[];
+}
+
+// draw(제비뽑기)/roulette(룰렛)/ladder(사다리타기)는 winnerCount+winners를 쓰고,
+// teams(팀나누기)는 당첨/탈락 개념이 없어 teamCount+teams(+leftover)만 쓴다 - 두 모양을
+// 하나의 타입에 optional 필드로 같이 둬서 minigame-server.ts가 Firestore 문서를 그대로
+// 이 타입으로 다룰 수 있게 했다.
+export interface MiniGameResult {
+  id: string;
+  type: MiniGameType;
+  winnerCount?: number;
+  winners?: MiniGameParticipant[];
+  teamCount?: number;
+  teams?: MiniGameTeam[];
+  leftover?: MiniGameParticipant[]; // 팀나누기에서 팀 수로 안 나눠떨어질 때 "깍두기"로 분리된 인원
+  participants: MiniGameParticipant[];
+  createdByNicknameId: string;
+  createdByNickname: string;
+  createdAt: string;
+}
+
+export interface MiniGameRankingEntry {
+  nicknameId: string;
+  nickname: string;
+  winCount: number;
+}
