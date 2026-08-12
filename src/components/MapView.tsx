@@ -250,11 +250,20 @@ function bindLazyTooltip(el: HTMLElement, buildTooltip: () => TooltipSpec) {
 // 마커의 "항상 보이는 부분"(bodyHtml)만 실제 DOM으로 만들고, 툴팁(buildTooltip)은
 // 호버할 때만 지연 생성해서 붙인다. naver.maps.Marker의 icon.content에 문자열 대신 이
 // 엘리먼트를 그대로 넘기면(NCP Maps v3는 HTMLElement도 허용) 우리가 붙인 리스너가 유지된다.
-function buildMarkerElement(bodyHtml: string, buildTooltip: () => TooltipSpec): HTMLElement {
+// 2026-08-12 신규: options.enableHoverTooltip=false면 mouseenter/mouseleave 리스너 자체를 안
+// 붙인다 - 클러스터 마커의 검정 리스트 툴팁을 모바일에서 아예 안 띄우기 위함(아래 buildClusterMarkerIcon
+// 참고). 기본값(true, 안 넘기면 그대로)은 기존 동작(개별 식당 마커 이름 툴팁 등) 그대로 유지.
+function buildMarkerElement(
+  bodyHtml: string,
+  buildTooltip: () => TooltipSpec,
+  options: { enableHoverTooltip?: boolean } = {}
+): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = bodyHtml.trim();
   const root = wrapper.firstElementChild as HTMLElement;
-  bindLazyTooltip(root, buildTooltip);
+  if (options.enableHoverTooltip !== false) {
+    bindLazyTooltip(root, buildTooltip);
+  }
   return root;
 }
 
@@ -286,6 +295,19 @@ export default function MapView({
   // idle(드래그/줌 종료) 이벤트가 발생할 때마다 1씩 증가 - 아래 마커 effect가 이 값을 의존성으로
   // 갖고 있어서, 지도를 움직인 "직후"에만 화면에 보이는 마커를 다시 계산한다.
   const [boundsVersion, setBoundsVersion] = useState(0);
+
+  // 2026-08-12 신규: 클러스터 마커의 검정 리스트 툴팁을 모바일에서는 아예 안 띄우기 위한 뷰포트
+  // 감지(CompanyHome.tsx의 useIsDesktop과 동일한 768px 기준, 부호만 반대). 아래 마커 그리기
+  // effect의 의존성에 포함시켜서, 창 폭이 브레이크포인트를 넘나들면(태블릿 회전 등) 다음 재계산
+  // 때 바로 반영되게 한다.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 767px)");
+    setIsMobile(mql.matches);
+    const handleChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener("change", handleChange);
+    return () => mql.removeEventListener("change", handleChange);
+  }, []);
 
   // 2026-08-06 저녁 추가: "즐겨찾기 하트 하나만 눌러도 지도 마커 전체가 다시 그려져서 렉이 난다"는
   // 문제를 발견해서 고침. 원인: 부모(CompanyHome)의 visibleRestaurants useMemo가 favoriteIds를
@@ -540,7 +562,7 @@ export default function MapView({
           // names and fixes the decomposed ones.
           // 2026-08-07: 이름 목록만 넘기던 것을 group(실제 식당 객체 포함)으로 바꿔서, 툴팁 안의
           // 각 이름을 클릭했을 때 그 가맹점 정보(상세모달)를 바로 열 수 있게 한다.
-          icon: buildClusterMarkerIcon(group, onMarkerClick),
+          icon: buildClusterMarkerIcon(group, onMarkerClick, isMobile),
         });
 
         // 2026-08-06 오후 수정: 클릭하면 "몇 단계 확대"가 아니라, 그 그룹 전체를 부모에게 넘겨서
@@ -604,6 +626,7 @@ export default function MapView({
     focusTarget?.id,
     centerLat,
     centerLng,
+    isMobile,
   ]);
 
   // 리스트/인기Top3/투표/룰렛/검색 등에서 포커스를 옮겼을 때 지도를 그 위치로 이동시키고
@@ -727,9 +750,19 @@ export function buildRestaurantMarkerIcon(
 // 2026-08-07 신규: 툴팁에 뜬 이름을 클릭하면 그 가맹점의 상세 정보(RestaurantDetail 모달)가
 // 바로 열리게 한다 - 예전엔 목록만 보여주고 클릭해도 아무 반응이 없었다. onMount에서 각 이름
 // <div>에 클릭 리스너를 걸어 onSelectRestaurant(마커 클릭과 동일한 핸들러)를 호출한다.
+//
+// 2026-08-12 신규: 이 툴팁(스크롤 가능한 검정 리스트)은 데스크톱 마우스 hover 전용으로 설계됐다
+// (onwheel/onmousedown만 stopPropagation 처리되어 있고 touchmove는 처리 안 됨). 모바일에서는
+// 탭이 mouseenter를 흉내내면서 툴팁이 뜨긴 뜨는데, 안에서 스와이프하면 touchmove가 그대로
+// 지도 컨테이너까지 버블링돼서 지도가 팬되어버리고 리스트 자체는 스크롤이 안 되는 문제가 있었다
+// (사용자 실사용 패턴도 "리스트보다 지도 확대해서 마커 직접 탭"이라, 고치는 것보다 모바일에서는
+// 이 툴팁을 아예 안 띄우는 쪽을 택함 - isMobile이 true면 buildMarkerElement에
+// enableHoverTooltip:false를 넘겨서 mouseenter 리스너 자체를 안 붙인다. 탭하면 hover 없이
+// 바로 아래 "click" 리스너(onClusterClick + focusOnCluster)만 동작해서 즉시 확대된다.
 function buildClusterMarkerIcon(
   group: ClusterGroup,
-  onSelectRestaurant?: (restaurant: RestaurantSummary) => void
+  onSelectRestaurant?: (restaurant: RestaurantSummary) => void,
+  isMobile?: boolean
 ) {
   const count = group.restaurants.length;
   // 식당 수가 많을수록 살짝 더 크게 - 한눈에 "여기 많이 모여있다"는 걸 알 수 있게.
@@ -785,7 +818,8 @@ function buildClusterMarkerIcon(
             });
           },
         };
-      }
+      },
+      { enableHoverTooltip: !isMobile }
     ),
     anchor: new window.naver.maps.Point(size / 2, size / 2),
   };
