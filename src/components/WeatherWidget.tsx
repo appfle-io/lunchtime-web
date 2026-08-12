@@ -19,7 +19,10 @@ export default function WeatherWidget({ weather }: WeatherWidgetProps) {
   return (
     <div
       className={[
-        "pointer-events-none absolute z-20 flex items-center gap-1.5 rounded-full bg-surface/95 px-3 py-1.5 text-xs font-medium text-ink shadow-soft backdrop-blur",
+        // 2026-08-12 추가: 배경(bg-surface/95)이 지도/버튼들과 톤이 비슷해서 눈에 잘 안 띈다는
+        // 피드백 - 다른 알약들(border-black/10)보다 확실히 튀는 색깔 테두리(border-primary)를
+        // 둘러서 "여기 정보성 위젯이 있다"는 게 한눈에 들어오게 했다.
+        "pointer-events-none absolute z-20 flex items-center gap-1.5 rounded-full border-2 border-primary/60 bg-surface/95 px-3 py-1.5 text-xs font-medium text-ink shadow-soft backdrop-blur",
         "right-4 top-2",
         "md:left-[calc(50%+224px)] md:right-auto md:top-6 md:-translate-x-1/2",
       ].join(" ")}

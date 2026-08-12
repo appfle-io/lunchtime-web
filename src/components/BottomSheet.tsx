@@ -55,11 +55,17 @@ export default function BottomSheet({ children, title, titleRight, header }: Bot
         "md:static md:h-auto md:w-full md:flex-1 md:min-h-0 md:rounded-xl2",
       ].join(" ")}
     >
+      {/* 2026-08-12 변경: 예전엔 그냥 짧은 회색 바(h-1.5 w-10)만 있어서 "이게 눌리는 버튼이고
+          펼치기/접기 기능이 있다"는 게 잘 안 보였다("이렇게 되어있는데" 지적). 방향을 바로 알 수
+          있게 ▲(펼치기)/▼(접기) 화살표로 바꾼다 - 접혀있을 때는 위로 펼쳐지니 ▲, 펼쳐져 있을 때는
+          아래로 접히니 ▼로, 버튼을 눌렀을 때 실제로 일어날 움직임 방향과 화살표 방향을 맞췄다. */}
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="mx-auto mt-3 block h-1.5 w-10 shrink-0 rounded-full bg-black/10 md:hidden"
-        aria-label="펼치기/접기"
-      />
+        className="mx-auto mt-2 flex h-6 w-12 shrink-0 items-center justify-center rounded-full bg-black/5 text-[11px] leading-none text-ink-soft md:hidden"
+        aria-label={expanded ? "접기" : "펼치기"}
+      >
+        {expanded ? "▼" : "▲"}
+      </button>
       {(title || titleRight) && (
         <div className="flex shrink-0 items-center justify-between gap-2 px-5 pt-3 md:pt-5">
           {title && <h2 className="text-lg font-bold text-ink">{title}</h2>}
