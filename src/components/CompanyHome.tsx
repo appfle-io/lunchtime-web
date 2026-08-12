@@ -24,6 +24,7 @@ import { logRestaurantClick } from "@/lib/analytics-client";
 import type { PopularEntry } from "@/lib/popular-server";
 import type { ZeroPayStatus } from "@/lib/zeropay-server";
 import type { CompanyUserEntry } from "@/lib/user-server";
+import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
 
 // 인기 Top3(위젯)과 "최근많이찾는" 필터 태그가 같은 데이터를 쓰므로, top10 정도를 한 번만 받아와서
 // 위젯은 앞 3개만 자르고 필터 태그는 id Set으로 전체를 쓴다.
@@ -35,6 +36,14 @@ const POPULAR_FETCH_LIMIT = 10;
 // 읍고, 그 외엔 사용자가 새로고침 버튼을 누르거나 브라우저를 새로고침(F5 → 리마운트)했을 때만 다시 읍는다.
 const POPULAR_AUTO_REFRESH_HOURS = [9, 10, 11, 12, 13, 14, 15]; // 로컬 시각 기준 정각(시 단위)
 const POPULAR_SCHEDULE_CHECK_MS = 60 * 1000; // 정각 도달 여부만 확인하는 타이머 - 네트워크 요청 아님
+
+// 2026-08-11 신규(페이지 로드 캐싱 2차 개선): companyUsers/popular는 페이지 진입(마운트)마다
+// 캐시 없이 매번 새로 fetch하고 있었다(어제 firestore 과잉사용 분석에서 발견). 서버 쪽에도
+// TTL 캐시를 추가했지만(user-server.ts/popular-server.ts), 같은 탭에서 F5로 반복 새로고침하는
+// 경우엔 sessionStorage에 저장해두고 TTL 안이면 fetch 자체를 안 보내는 게 더 확실하게 아낀다 -
+// 서버 캐시는 "네트워크는 타지만 Firestore는 안 읍는" 정도고, 이건 "네트워크 요청 자체를 스킵".
+const COMPANY_USERS_CACHE_TTL_MS = 5 * 60 * 1000; // 5분 - 사용자 목록은 가입 시에만 바뀌는 데이터
+const POPULAR_CACHE_TTL_MS = 60 * 1000; // 1분 - 인기 순위는 이 정도 지연은 체감상 문제없음
 
 // Tailwind의 md 브레이크포인트(768px)와 맞춘 값. 캘린더뷰를 데스크톱에서는 "주변 식당" 카드
 // 아래 빈 공간에 별도 카드(CalendarPanel)로 띄우고, 모바일에서는 RestaurantList 안의
@@ -198,10 +207,23 @@ export default function CompanyHome({
   // 2026-08-11 신규: 회사 전체 사용자 목록도 페이지 진입 시 1회만 불러온다 - 이 값을
   // FriendsModal/LunchVoteModal/LunchRouletteModal이 props로 그대로 물려받는다(세 모달이 각자
   // 열 때마다 재조회하던 것을 없앰).
+  // 2026-08-11 캐싱 2차 개선: sessionStorage에 캐시된 값이 TTL 안이면 fetch 자체를 스킵한다 -
+  // 같은 탭에서 F5로 반복 새로고침해도 네트워크 요청이 안 나간다.
   useEffect(() => {
+    const cacheKey = `lt:companyUsers:${companyCode}`;
+    const cached = readSessionCache<CompanyUserEntry[]>(cacheKey, COMPANY_USERS_CACHE_TTL_MS);
+    if (cached) {
+      setCompanyUsers(cached);
+      return;
+    }
+
     fetch(`/api/users?companyCode=${encodeURIComponent(companyCode)}`)
       .then((res) => res.json())
-      .then((data) => setCompanyUsers(data.users ?? []))
+      .then((data) => {
+        const users = data.users ?? [];
+        setCompanyUsers(users);
+        writeSessionCache(cacheKey, users);
+      })
       .catch(() => {
         // 회사 사용자 목록은 보조 정보라 실패해도 조용히 무시한다 - 이 값을 쓰는
         // 모달들은 빈 목록이라면 검색/빠른선택이 비어 보일 뿐이다.
@@ -211,23 +233,41 @@ export default function CompanyHome({
 
   // 실시간 인기 Top3 (2026-08-06 신규, 2026-08-06 갱신주기 변경): 위젯 노출용 top3와 "최근많이찾는"
   // 필터 태그용 id Set이 같은 응답을 공유한다.
-  const fetchPopular = useCallback(async () => {
-    try {
-      const res = await fetch(
-        `/api/popular?companyCode=${encodeURIComponent(companyCode)}&limit=${POPULAR_FETCH_LIMIT}`
-      );
-      if (!res.ok) return;
-      const data = (await res.json()) as { entries: PopularEntry[] };
-      setPopularEntries(data.entries ?? []);
-    } catch {
-      // 인기 위젯은 부가 기능이라 실패해도 조용히 무시한다.
-    }
-  }, [companyCode]);
+  // 2026-08-11 캐싱 2차 개선: force가 아니면 sessionStorage 캐시가 TTL 안일 때 fetch를 스킵한다.
+  // 수동 새로고침 버튼(handleManualPopularRefresh)과 업무시간 정각 자동 갱신은 "지금 최신값을
+  // 봐야 하는" 상황이라 force=true로 캐시를 건너뛰고 항상 새로 불러온 뒤 캐시도 갱신한다.
+  const popularCacheKey = `lt:popular:${companyCode}`;
+  const fetchPopular = useCallback(
+    async (force = false) => {
+      if (!force) {
+        const cached = readSessionCache<PopularEntry[]>(popularCacheKey, POPULAR_CACHE_TTL_MS);
+        if (cached) {
+          setPopularEntries(cached);
+          return;
+        }
+      }
+
+      try {
+        const res = await fetch(
+          `/api/popular?companyCode=${encodeURIComponent(companyCode)}&limit=${POPULAR_FETCH_LIMIT}`
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { entries: PopularEntry[] };
+        const entries = data.entries ?? [];
+        setPopularEntries(entries);
+        writeSessionCache(popularCacheKey, entries);
+      } catch {
+        // 인기 위젯은 부가 기능이라 실패해도 조용히 무시한다.
+      }
+    },
+    [companyCode, popularCacheKey]
+  );
 
   // 새로고침 버튼 클릭 시 - 버튼에 "새로고침 중" 표시를 잠깐 보여주기 위해 fetchPopular를 감싼다.
+  // 사용자가 명시적으로 누른 새로고침이니 force=true로 캐시를 건너뛰고 항상 새로 불러온다.
   const handleManualPopularRefresh = useCallback(async () => {
     setIsRefreshingPopular(true);
-    await fetchPopular();
+    await fetchPopular(true);
     setIsRefreshingPopular(false);
   }, [fetchPopular]);
 
@@ -244,7 +284,7 @@ export default function CompanyHome({
       const hourKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;
       if (lastFetchedHourKey === hourKey) return; // 같은 정각에 중복 호출 방지
       lastFetchedHourKey = hourKey;
-      fetchPopular();
+      fetchPopular(true); // 정각 자동 갱신은 캐시 여부와 무관하게 항상 최신값을 받아온다
     }, POPULAR_SCHEDULE_CHECK_MS);
 
     return () => clearInterval(checkInterval);

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { db } from "@/lib/firebase";
 import { toNicknameId, resolveUniqueNickname } from "@/lib/nickname";
+import { invalidateCompanyUsersCache } from "@/lib/user-server";
 
 export const SESSION_COOKIE_NAME = "lt_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 180; // 180일 - 재입력 최소화 목적
@@ -98,6 +99,10 @@ export async function authenticate(
       pinHash,
       createdAt: new Date().toISOString(),
     });
+    // 2026-08-11 신규: 새 가입자가 listCompanyUsers() 캐시(user-server.ts, TTL 5분)에 바로
+    // 반영되도록 무효화 - 안 하면 최대 5분 동안 친구목록/투표/룰렛 모달의 "전체 사용자" 목록에
+    // 방금 가입한 사람이 안 보일 수 있다.
+    invalidateCompanyUsersCache(companyCode);
     return {
       status: "signup",
       token: issueToken(companyCode, nicknameId, nickname),

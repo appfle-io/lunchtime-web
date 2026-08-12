@@ -11,6 +11,15 @@ export interface PopularEntry {
   clickCount: number;
 }
 
+// 2026-08-11 신규(페이지 로드 캐싱 2차 개선): getPopularEntries()는 companyCode당 최대 24개의
+// hourlyStats 문서를 매번 getAll로 읍는다. 예전엔 CompanyHome 마운트(페이지 진입/새로고침)마다
+// 캐시 없이 매번 이 24건 읍기가 나갔다 - 인기 순위는 몇십 초 안에 바뀌어도 체감상 문제없는
+// 데이터라, restaurantsCache와 같은 짧은 TTL 인메모리 캐시를 적용한다. limit이 달라도 정렬된
+// 전체 목록 자체는 같으므로, limit별로 따로 캐시하지 않고 companyCode 하나로만 캐시해서
+// slice는 매번 요청받은 limit대로 적용한다.
+const POPULAR_CACHE_TTL_MS = 30_000;
+const popularCache = new Map<string, { data: PopularEntry[]; expiresAt: number }>();
+
 function hourKey(date: Date): string {
   return date.toISOString().slice(0, 13).replace(/[-T]/g, "");
 }
@@ -26,24 +35,33 @@ export async function getPopularEntries(
   companyCode: string,
   limit?: number
 ): Promise<PopularEntry[]> {
-  const refs = recentHourKeys(POPULAR_WINDOW_HOURS).map((key) =>
-    db.collection("companies").doc(companyCode).collection("hourlyStats").doc(key)
-  );
+  const cached = popularCache.get(companyCode);
+  let sorted: PopularEntry[];
 
-  const snapshots = await db.getAll(...refs);
+  if (cached && cached.expiresAt > Date.now()) {
+    sorted = cached.data;
+  } else {
+    const refs = recentHourKeys(POPULAR_WINDOW_HOURS).map((key) =>
+      db.collection("companies").doc(companyCode).collection("hourlyStats").doc(key)
+    );
 
-  const counts = new Map<string, number>();
-  for (const snap of snapshots) {
-    const data = snap.data();
-    if (!data?.counts) continue;
-    for (const [restaurantId, count] of Object.entries(data.counts as Record<string, number>)) {
-      counts.set(restaurantId, (counts.get(restaurantId) ?? 0) + count);
+    const snapshots = await db.getAll(...refs);
+
+    const counts = new Map<string, number>();
+    for (const snap of snapshots) {
+      const data = snap.data();
+      if (!data?.counts) continue;
+      for (const [restaurantId, count] of Object.entries(data.counts as Record<string, number>)) {
+        counts.set(restaurantId, (counts.get(restaurantId) ?? 0) + count);
+      }
     }
-  }
 
-  const sorted = Array.from(counts.entries())
-    .map(([restaurantId, clickCount]) => ({ restaurantId, clickCount }))
-    .sort((a, b) => b.clickCount - a.clickCount);
+    sorted = Array.from(counts.entries())
+      .map(([restaurantId, clickCount]) => ({ restaurantId, clickCount }))
+      .sort((a, b) => b.clickCount - a.clickCount);
+
+    popularCache.set(companyCode, { data: sorted, expiresAt: Date.now() + POPULAR_CACHE_TTL_MS });
+  }
 
   return typeof limit === "number" ? sorted.slice(0, limit) : sorted;
 }
