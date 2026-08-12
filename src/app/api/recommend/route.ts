@@ -5,6 +5,7 @@ import { recommendLunch } from "@/lib/gemini";
 import { getRecentRestaurantNames } from "@/lib/meal-log-server";
 import { getCompanyWeather } from "@/lib/weather-server";
 import { formatWeatherLabel } from "@/lib/weather";
+import { tryConsumeAiRecommendQuota } from "@/lib/ai-recommend-limit-server";
 import type { RestaurantSummary } from "@/types";
 
 // 참가자 한 명당 최근 방문 이력을 이 개수까지만 가져온다(기본 8개보다 살짝 좁힘) - 인원이
@@ -84,6 +85,21 @@ export async function POST(request: NextRequest) {
           ? `지금 조건에 맞는 곳이 여기 하나뿐이에요! ${participantCount}명이 다 같이 가면 되겠네요.`
           : "지금 조건에 맞는 곳이 여기 하나뿐이에요!",
       isFallback: false,
+    });
+  }
+
+  // 2026-08-12 신규: 사용자(나 자신 - session.nicknameId 기준, 초대된 친구 수와 무관)가 오늘
+  // 이미 하루 한도(DAILY_AI_RECOMMEND_LIMIT)만큼 AI를 불렀으면, Gemini를 아예 호출하지 않고
+  // 바로 랜덤으로 골라서 돌려준다. 기존에 "Gemini 호출이 실패했을 때" 쓰던 것과 완전히 동일한
+  // 응답 형태(reason/isFallback)를 재사용해서, 사용자 입장에서는 한도 때문인지 그냥 어쩌다
+  // Gemini가 삐끗한 건지 구분할 수 없게 한다(요구사항: 몇 번 남았는지 노출 안 함).
+  const withinDailyQuota = await tryConsumeAiRecommendQuota(companyCode, session.nicknameId);
+  if (!withinDailyQuota) {
+    const randomPick = pool[Math.floor(Math.random() * pool.length)];
+    return NextResponse.json({
+      restaurant: randomPick,
+      reason: "AI 추천을 잠깐 불러오지 못해서 랜덤으로 골라봤어요! 🎲",
+      isFallback: true,
     });
   }
 
