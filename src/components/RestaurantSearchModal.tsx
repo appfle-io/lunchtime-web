@@ -35,8 +35,8 @@ export default function RestaurantSearchModal({
     if (open) setQuery("");
   }, [open]);
 
-  // 이름이 먼저 일치하는 것을 우선으로, 이름에는 없지만 주소(랜드마크 등)에 일치하는 것을
-  // 그 다음으로 보여준다. 둘 다 회사에서 가까운 순으로 정렬.
+  // 상호명(네이버명, 제로페이 공식명, 사업자등록명 포함)이 먼저 일치하는 것을 우선으로,
+  // 상호명에는 없지만 주소(랜드마크 등)에 일치하는 것을 그 다음으로 보여준다.
   const results = useMemo(() => {
     const q = query.trim().toLowerCase().replace(/\s/g, "");
     if (!q) return [];
@@ -44,13 +44,25 @@ export default function RestaurantSearchModal({
     const byDistance = (a: RestaurantSummary, b: RestaurantSummary) =>
       (a.distanceMeters ?? Infinity) - (b.distanceMeters ?? Infinity);
 
+    const matchesName = (r: RestaurantSummary) => {
+      const names = [
+        r.name,
+        r.displayName,
+        r.naverMatchedName,
+        r.zeroPayOfficialName,
+        r.businessName,
+      ].filter(Boolean) as string[];
+
+      return names.some((n) => n.toLowerCase().replace(/\s/g, "").includes(q));
+    };
+
     const nameMatches = allRestaurants
-      .filter((r) => r.name.toLowerCase().replace(/\s/g, "").includes(q))
+      .filter((r) => matchesName(r))
       .sort(byDistance);
     const addressOnlyMatches = allRestaurants
       .filter(
         (r) =>
-          !r.name.toLowerCase().replace(/\s/g, "").includes(q) &&
+          !matchesName(r) &&
           r.address.toLowerCase().replace(/\s/g, "").includes(q)
       )
       .sort(byDistance);
@@ -119,6 +131,16 @@ export default function RestaurantSearchModal({
                       </span>
                       <span className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-ink">{r.name}</p>
+                        {(r.zeroPayOfficialName || r.businessName) &&
+                          (r.zeroPayOfficialName !== r.name || r.businessName !== r.name) && (
+                            <p className="truncate text-[11px] text-emerald-700 font-medium">
+                              {r.zeroPayOfficialName && r.zeroPayOfficialName !== r.name
+                                ? `제로페이 명칭: ${r.zeroPayOfficialName}`
+                                : r.businessName && r.businessName !== r.name
+                                ? `사업자 명칭: ${r.businessName}`
+                                : ""}
+                            </p>
+                          )}
                         <p className="truncate text-xs text-ink-soft">{r.address}</p>
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-1">

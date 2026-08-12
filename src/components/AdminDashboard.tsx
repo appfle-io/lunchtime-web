@@ -114,11 +114,19 @@ export default function AdminDashboard({
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase().replace(/\s/g, "");
     if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.name.toLowerCase().replace(/\s/g, "").includes(q) ||
-        r.address.toLowerCase().replace(/\s/g, "").includes(q)
-    );
+    return rows.filter((r) => {
+      const names = [
+        r.name,
+        r.displayName,
+        r.naverMatchedName,
+        r.zeroPayOfficialName,
+        r.businessName,
+      ].filter(Boolean) as string[];
+
+      const nameMatch = names.some((n) => n.toLowerCase().replace(/\s/g, "").includes(q));
+      const addrMatch = (r.address ?? "").toLowerCase().replace(/\s/g, "").includes(q);
+      return nameMatch || addrMatch;
+    });
   }, [rows, searchQuery]);
 
   // 2026-08-10 신규: sortColumn이 없으면(기본 상태) 항상 이름 가나다순으로 보여준다 - 컬럼
@@ -469,8 +477,17 @@ export default function AdminDashboard({
                           <input
                             value={r.name}
                             onChange={(e) => updateRow(r.id, { name: e.target.value })}
-                            className="w-full min-w-[120px] rounded-lg border border-transparent bg-transparent px-1.5 py-1 text-ink outline-none transition focus:border-primary focus:bg-surface-muted"
+                            className="w-full min-w-[120px] rounded-lg border border-transparent bg-transparent px-1.5 py-1 font-medium text-ink outline-none transition focus:border-primary focus:bg-surface-muted"
                           />
+                          {(r.zeroPayOfficialName || r.businessName) && (
+                            <p className="px-1.5 text-[10px] text-emerald-700 truncate max-w-[180px]" title={`제로페이명: ${r.zeroPayOfficialName ?? '-'} / 사업자명: ${r.businessName ?? '-'}`}>
+                              {r.zeroPayOfficialName && r.zeroPayOfficialName !== r.name
+                                ? `[제로페이: ${r.zeroPayOfficialName}]`
+                                : r.businessName && r.businessName !== r.name
+                                ? `[사업자: ${r.businessName}]`
+                                : ""}
+                            </p>
+                          )}
                         </td>
                         <td className="px-2 py-1.5">
                           <select
