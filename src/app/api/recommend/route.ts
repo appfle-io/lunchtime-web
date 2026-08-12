@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth-server";
 import { recommendLunch } from "@/lib/gemini";
 import { getRecentRestaurantNames } from "@/lib/meal-log-server";
+import { getCompanyWeather } from "@/lib/weather-server";
+import { formatWeatherLabel } from "@/lib/weather";
 import type { RestaurantSummary } from "@/types";
 
 // 참가자 한 명당 최근 방문 이력을 이 개수까지만 가져온다(기본 8개보다 살짝 좁힘) - 인원이
@@ -97,8 +99,21 @@ export async function POST(request: NextRequest) {
     MAX_TOTAL_RECENT_NAMES
   );
 
+  // 2026-08-12 신규: recommendLunch()는 원래부터 weather 파라미터를 받도록 설계돼 있었는데
+  // (프롬프트에 이미 "오늘 날씨: ..." 문구가 있었음) 여기서 안 넘겨줘서 항상 "정보 없음"으로
+  // 추천되고 있었다. 회사 위치 기준 날씨(weather-server.ts, 20분 캐시)를 조회해서 넘겨준다 -
+  // 날씨 조회가 실패해도(키 미설정, 기상청 API 에러 등) undefined로 넘어갈 뿐 추천 자체는
+  // 계속 진행된다(getCompanyWeather가 실패 시 null을 반환하도록 이미 설계되어 있음).
+  const weather = await getCompanyWeather(companyCode).catch(() => null);
+  const weatherLabel = weather ? formatWeatherLabel(weather) : undefined;
+
   try {
-    const raw = await recommendLunch({ recentRestaurantNames, candidates: pool, participantCount });
+    const raw = await recommendLunch({
+      recentRestaurantNames,
+      candidates: pool,
+      participantCount,
+      weather: weatherLabel,
+    });
     const parsed = parseRecommendationResponse(raw);
     if (!parsed) throw new Error("Gemini 응답을 파싱하지 못했습니다.");
 

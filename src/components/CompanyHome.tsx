@@ -7,6 +7,7 @@ import RestaurantList from "./RestaurantList";
 import RestaurantDetail from "./RestaurantDetail";
 import FilterBar from "./FilterBar";
 import PopularWidget from "./PopularWidget";
+import WeatherWidget from "./WeatherWidget";
 import FriendsModal from "./FriendsModal";
 import NotificationsModal, { type NotificationEntry } from "./NotificationsModal";
 import LunchVoteModal from "./LunchVoteModal";
@@ -24,6 +25,7 @@ import { logRestaurantClick } from "@/lib/analytics-client";
 import type { PopularEntry } from "@/lib/popular-server";
 import type { ZeroPayStatus } from "@/lib/zeropay-server";
 import type { CompanyUserEntry } from "@/lib/user-server";
+import type { CurrentWeather } from "@/lib/weather";
 import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
 
 // 인기 Top3(위젯)과 "최근많이찾는" 필터 태그가 같은 데이터를 쓰므로, top10 정도를 한 번만 받아와서
@@ -44,6 +46,12 @@ const POPULAR_SCHEDULE_CHECK_MS = 60 * 1000; // 정각 도달 여부만 확인�
 // 서버 캐시는 "네트워크는 타지만 Firestore는 안 읍는" 정도고, 이건 "네트워크 요청 자체를 스킵".
 const COMPANY_USERS_CACHE_TTL_MS = 5 * 60 * 1000; // 5분 - 사용자 목록은 가입 시에만 바뀌는 데이터
 const POPULAR_CACHE_TTL_MS = 60 * 1000; // 1분 - 인기 순위는 이 정도 지연은 체감상 문제없음
+
+// 2026-08-12 신규(날씨 위젯): 기상청 초단기실황은 매시간 정시에만 갱신되는 데이터라, 서버쪽
+// weather-server.ts에도 20분 TTL 캐시가 있지만(회사당 공용 캐시), 같은 탭에서 F5로 반복
+// 새로고침할 때 네트워크 요청 자체를 스킵하기 위해 companyUsers/popular와 동일하게 sessionStorage
+// 캐시도 같이 둔다.
+const WEATHER_CACHE_TTL_MS = 20 * 60 * 1000;
 
 // Tailwind의 md 브레이크포인트(768px)와 맞춘 값. 캘린더뷰를 데스크톱에서는 "주변 식당" 카드
 // 아래 빈 공간에 별도 카드(CalendarPanel)로 띄우고, 모바일에서는 RestaurantList 안의
@@ -120,6 +128,10 @@ export default function CompanyHome({
   );
   const [popularEntries, setPopularEntries] = useState<PopularEntry[]>([]);
   const [isRefreshingPopular, setIsRefreshingPopular] = useState(false);
+  // 2026-08-12 신규: 회사 주변 날씨(기온+아이콘). 못 불러와도(키 미설정/기상청 API 실패 등)
+  // null 그대로 두면 WeatherWidget이 조용히 안 보여준다 - 부가 기능이라 실패해도 지도/추천
+  // 자체는 계속 동작해야 한다는 기존 원칙(popularEntries/companyUsers)과 동일하게 처리.
+  const [weather, setWeather] = useState<CurrentWeather | null>(null);
 
   // 2026-08-06 오후 신규: 지도에서 클러스터 마커를 클릭하면, 그 그룹에 속한 식당 id들을 여기 담아둔다.
   // null이면 "구역 확대" 상태가 아님(평소 상태). 이 값이 있으면 지도와 좌측 리스트 둘 다 이 id들로만
@@ -227,6 +239,31 @@ export default function CompanyHome({
       .catch(() => {
         // 회사 사용자 목록은 보조 정보라 실패해도 조용히 무시한다 - 이 값을 쓰는
         // 모달들은 빈 목록이라면 검색/빠른선택이 비어 보일 뿐이다.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyCode]);
+
+  // 2026-08-12 신규: 회사 주변 날씨도 companyUsers와 같은 패턴 - 페이지 진입 시 1회만 불러오고,
+  // sessionStorage 캐시(TTL 20분)가 있으면 fetch 자체를 스킵한다. 날씨는 회사 전체가 같은 값을
+  // 보는 공용 정보라(개인화 없음) 로그인 여부와 무관하게 조회 가능한 /api/weather를 그대로 쓴다.
+  useEffect(() => {
+    const cacheKey = `lt:weather:${companyCode}`;
+    const cached = readSessionCache<CurrentWeather>(cacheKey, WEATHER_CACHE_TTL_MS);
+    if (cached) {
+      setWeather(cached);
+      return;
+    }
+
+    fetch(`/api/weather?companyCode=${encodeURIComponent(companyCode)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.weather) {
+          setWeather(data.weather);
+          writeSessionCache(cacheKey, data.weather);
+        }
+      })
+      .catch(() => {
+        // 날씨 위젯은 부가 기능이라 실패해도 조용히 무시한다 - null 상태 그대로 위젯이 안 보일 뿐.
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyCode]);
@@ -470,6 +507,8 @@ export default function CompanyHome({
         homeButtonVisible={clusterFilterIds !== null || focusTarget !== null || !isMapAtHome}
         onGoHome={handleGoHome}
       />
+
+      <WeatherWidget weather={weather} />
 
       <PopularWidget
         entries={popularEntries.slice(0, 3)}
