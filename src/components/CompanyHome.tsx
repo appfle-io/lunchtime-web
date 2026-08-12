@@ -412,6 +412,22 @@ export default function CompanyHome({
     [companyCode]
   );
 
+  // 2026-08-12 신규: 클러스터 마커 위 호버 툴팁의 가맹점 이름을 클릭했을 때 전용 핸들러.
+  // 그 가맹점은 클러스터 배지에 묶여 화면에 따로 안 보이는 상태라, 상세모달만 여는
+  // handleSelectRestaurant로는 부족하고 지도를 그 위치로 확대/이동(focus)까지 같이 해줘야
+  // 한다 - "클릭했을 때 왜 확대가 안 되냐"는 피드백으로 추가함. handleSelectRestaurant와
+  // 마찬가지로 MapView의 마커 재생성 effect 의존성에 들어가므로 useCallback으로 감싼다.
+  const handleTooltipRestaurantClick = useCallback(
+    (restaurant: RestaurantSummary) => {
+      if (typeof restaurant.lat === "number" && typeof restaurant.lng === "number") {
+        setFocusTarget({ id: restaurant.id, lat: restaurant.lat, lng: restaurant.lng });
+      }
+      setSelectedRestaurant(restaurant);
+      logRestaurantClick(companyCode, restaurant.id);
+    },
+    [companyCode]
+  );
+
   // 2026-08-06 오후 신규: 지도에서 클러스터 마커를 클릭했을 때 - 그 그룹의 식당 id로 좁힌다.
   // MapView는 이 prop의 참조가 바뀔 때마다 마커 effect를 다시 돌리므로 useCallback으로 감싼다
   // (handleSelectRestaurant와 같은 이유).
@@ -527,6 +543,7 @@ export default function CompanyHome({
         restaurants={mapAndListRestaurants}
         focusTarget={focusTarget}
         onMarkerClick={handleSelectRestaurant}
+        onTooltipRestaurantClick={handleTooltipRestaurantClick}
         onClusterClick={handleClusterClick}
         disableClustering={clusterFilterIds !== null}
         homeSignal={homeSignal}
@@ -554,6 +571,14 @@ export default function CompanyHome({
         entries={popularEntries.slice(0, 3)}
         restaurants={restaurants}
         onSelect={(restaurant) => {
+          // 2026-08-12 신규: 실시간 인기 Top3는 지금 적용된 필터(카테고리/특수태그/클러스터
+          // 확대)와 무관하게 전체 클릭 통계 기준으로 뽑힌 것이라, 기존 필터에 안 걸리는
+          // 가맹점을 클릭하면 지도만 그 위치로 확대되고 마커/리스트에는 정작 안 보이는
+          // 문제가 있었다("확대만 되고 노출이 안 됨" 피드백). 포커스하기 전에 필터를 먼저
+          // 다 풀어서, 어떤 가맹점을 클릭해도 항상 바로 보이게 한다.
+          setActiveCategory(null);
+          setActiveSpecialFilters(new Set());
+          setClusterFilterIds(null);
           focusRestaurant(restaurant);
           handleSelectRestaurant(restaurant);
         }}

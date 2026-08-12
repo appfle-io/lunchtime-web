@@ -20,6 +20,11 @@ interface MapViewProps {
   restaurants?: RestaurantSummary[];
   focusTarget?: FocusTarget | null;
   onMarkerClick?: (restaurant: RestaurantSummary) => void;
+  // 2026-08-12 신규: 클러스터 마커 위에 마우스를 올렸을 때 뜨는 검정 리스트 툴팁에서 이름을
+  // 클릭했을 때 쓰는 전용 콜백. 그 가맹점은 클러스터에 묶여 화면에 따로 안 보이는 상태이므로,
+  // 상세모달만 여는 onMarkerClick과 달리 지도를 그 위치로 확대/이동(focus)까지 같이 시켜줘야
+  // 한다 - 예전엔 onMarkerClick을 그대로 재사용해서 모달만 열리고 확대가 안 되는 버그가 있었다.
+  onTooltipRestaurantClick?: (restaurant: RestaurantSummary) => void;
   // 2026-08-06 오후 추가: 클러스터 마커를 클릭했을 때 그 그룹에 속한 식당 전체를 부모(CompanyHome)에게
   // 알려준다 - 좌측 주변식당 리스트도 같이 필터링하기 위함.
   onClusterClick?: (restaurants: RestaurantSummary[]) => void;
@@ -278,6 +283,7 @@ export default function MapView({
   restaurants = [],
   focusTarget,
   onMarkerClick,
+  onTooltipRestaurantClick,
   onClusterClick,
   disableClustering = false,
   homeSignal = 0,
@@ -562,7 +568,9 @@ export default function MapView({
           // names and fixes the decomposed ones.
           // 2026-08-07: 이름 목록만 넘기던 것을 group(실제 식당 객체 포함)으로 바꿔서, 툴팁 안의
           // 각 이름을 클릭했을 때 그 가맹점 정보(상세모달)를 바로 열 수 있게 한다.
-          icon: buildClusterMarkerIcon(group, onMarkerClick, isMobile),
+          // 2026-08-12: onMarkerClick(모달만 염) 대신 onTooltipRestaurantClick(모달+확대까지)을
+          // 넘긴다 - 이 가맹점은 클러스터에 묶여 화면에 따로 안 보이므로 확대가 꼭 필요하다.
+          icon: buildClusterMarkerIcon(group, onTooltipRestaurantClick ?? onMarkerClick, isMobile),
         });
 
         // 2026-08-06 오후 수정: 클릭하면 "몇 단계 확대"가 아니라, 그 그룹 전체를 부모에게 넘겨서
@@ -618,6 +626,7 @@ export default function MapView({
     markerSignature,
     ready,
     onMarkerClick,
+    onTooltipRestaurantClick,
     onClusterClick,
     disableClustering,
     boundsVersion,
@@ -759,6 +768,34 @@ export function buildRestaurantMarkerIcon(
 // 이 툴팁을 아예 안 띄우는 쪽을 택함 - isMobile이 true면 buildMarkerElement에
 // enableHoverTooltip:false를 넘겨서 mouseenter 리스너 자체를 안 붙인다. 탭하면 hover 없이
 // 바로 아래 "click" 리스너(onClusterClick + focusOnCluster)만 동작해서 즉시 확대된다.
+//
+// 2026-08-12 2차 수정: "글씨가 작다"는 컴플레인으로 12px→14px로 키웠고, 폭이 고정 240px이라
+// 이름이 짧을 때 오른쪽에 불필요한 여백이 많이 남는다는 지적도 있어서, 그룹 안에서 가장 긴
+// 이름의 실제 렌더링 폭을 캔버스로 측정해(measureTextWidth) 그 폭에 맞춰 툴팁 너비를
+// 동적으로 정하도록 바꿨다(너무 좁거나 넓어지지 않게 최소/최대값으로 clamp).
+// 주의: 이 값은 실제 렌더링될 폭을 재기 위한 측정용 폰트 크기다. 아래 툴팁 HTML의
+// `text-[14px]` Tailwind 클래스는 빌드 타임에 정적으로 스캔되는 문자열이라 여기서 동적으로
+// 생성할 수 없으므로(런타임 템플릿 문자열은 Tailwind JIT가 감지 못 함), 이 상수 값을 바꾸면
+// 아래 `text-[14px]` 리터럴도 반드시 같이 바꿔줘야 한다.
+const CLUSTER_TOOLTIP_FONT_SIZE = 14;
+const CLUSTER_TOOLTIP_FONT = `${CLUSTER_TOOLTIP_FONT_SIZE}px -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif`;
+const CLUSTER_TOOLTIP_MIN_WIDTH = 160;
+const CLUSTER_TOOLTIP_MAX_WIDTH = 320;
+// 좌우 padding(px-3.5 = 14px * 2) + 스크롤바/여유 공간.
+const CLUSTER_TOOLTIP_HPADDING = 36;
+
+let measureCanvas: HTMLCanvasElement | null = null;
+// 문자열이 실제로 화면에서 차지하는 폭(px)을 캔버스로 측정한다. 한글/영문이 섞여 있어도
+// 실제 폰트 렌더링 기준으로 정확히 재기 때문에, 글자 수만 세는 방식보다 훨씬 믿을 만하다.
+function measureTextWidth(text: string, font: string): number {
+  if (typeof document === "undefined") return 0;
+  if (!measureCanvas) measureCanvas = document.createElement("canvas");
+  const ctx = measureCanvas.getContext("2d");
+  if (!ctx) return 0;
+  ctx.font = font;
+  return ctx.measureText(text).width;
+}
+
 function buildClusterMarkerIcon(
   group: ClusterGroup,
   onSelectRestaurant?: (restaurant: RestaurantSummary) => void,
@@ -793,14 +830,26 @@ function buildClusterMarkerIcon(
             .join("") +
           (remaining > 0 ? `<div class="py-1 text-white/60">외 ${remaining}곳</div>` : "");
 
+        // 목록 중 가장 긴 이름을 기준으로 툴팁 폭을 정한다 - 이름이 다 짧으면 좁게, 긴 이름이
+        // 하나라도 있으면 그만큼만 넓게(최소/최대값 안에서).
+        const longestNameWidth = shown.reduce(
+          (max, r) => Math.max(max, measureTextWidth((r.name ?? "").normalize("NFC"), CLUSTER_TOOLTIP_FONT)),
+          0
+        );
+        const tooltipWidth = Math.min(
+          CLUSTER_TOOLTIP_MAX_WIDTH,
+          Math.max(CLUSTER_TOOLTIP_MIN_WIDTH, Math.ceil(longestNameWidth) + CLUSTER_TOOLTIP_HPADDING)
+        );
+
         return {
           html: `
           <div
-            class="pointer-events-auto absolute bottom-full left-1/2 mb-1.5 flex w-[240px] max-h-[260px] -translate-x-1/2 flex-col overflow-y-auto whitespace-normal divide-y divide-white/10 rounded-lg bg-ink px-3 py-1 text-left text-[12px] leading-snug text-white shadow-soft"
+            class="pointer-events-auto absolute bottom-full left-1/2 mb-1.5 flex max-h-[260px] -translate-x-1/2 flex-col overflow-y-auto whitespace-normal divide-y divide-white/10 rounded-lg bg-ink px-3.5 py-1 text-left text-[14px] leading-snug text-white shadow-soft"
+            style="width:${tooltipWidth}px;"
             onwheel="event.stopPropagation()"
             onmousedown="event.stopPropagation()"
           >
-            <div class="sticky top-0 bg-ink py-1.5 text-[10px] font-semibold text-white/60">총 ${count}곳</div>
+            <div class="sticky top-0 bg-ink py-1.5 text-[11px] font-semibold text-white/60">총 ${count}곳</div>
             ${namesHtml}
           </div>
         `,
