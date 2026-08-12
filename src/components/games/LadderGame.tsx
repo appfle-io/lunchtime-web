@@ -93,8 +93,6 @@ function shuffleIndices(n: number): number[] {
   return indices;
 }
 
-type Phase = "turn" | "revealed" | "handoff";
-
 interface RevealedPath {
   points: PathPoint[];
   isWinner: boolean;
@@ -132,75 +130,74 @@ function AnimatedLadderPath({ points, color }: { points: PathPoint[]; color: str
   );
 }
 
+// 세로줄 하나는 항상 같은 참가자에게 고정 배정된다(맨 위 버튼에 이름 표시) - 누구든 원할 때
+// 자기 줄을 클릭하면 된다.
+//
+// 2026-08-12 4차 수정: "다음 사람에게 넘겨주세요" 중간 화면과, 한 명씩 순서대로 확인하는
+// 방식을 없애달라는 피드백을 받았다("클릭이 너무 많아져서 귀찮다" - 인원이 많을수록 매번
+// "확인했어요"를 눌러야 해서 번거로웠음). 이제는 한 화면에 사다리를 다 같이 띄워두고, 누구든
+// 순서 상관없이 자기 세로줄을 클릭하면 된다. 여러 명이 거의 동시에 눌러도 애니메이션은 한 번에
+// 하나씩만 재생되도록 대기열(queue)로 처리하지만, 그 사이에 "확인" 버튼을 누를 필요는 없다.
+// 전원이 다 뽑으면 별도 확인 절차 없이 바로 결과 화면으로 넘어간다.
 export default function LadderGame({ participants, winnerCount, onFinish }: LadderGameProps) {
   const n = participants.length;
   const [rungs] = useState(() => generateRungs(n));
   const [winnerBottoms] = useState<Set<number>>(() => new Set(shuffleIndices(n).slice(0, winnerCount)));
 
   const [claimedColumns, setClaimedColumns] = useState<Set<number>>(new Set());
-  const [turnIndex, setTurnIndex] = useState(0);
-  const [phase, setPhase] = useState<Phase>("turn");
-  const [lastResult, setLastResult] = useState<{ isWinner: boolean } | null>(null);
-  const [winners, setWinners] = useState<MiniGameParticipant[]>([]);
-  // 사다리 그림 위에 남아있는, 이미 공개된 경로들(칸 번호 → 경로) + 지금 애니메이션 중인 경로 하나.
-  const [revealedPaths, setRevealedPaths] = useState<Record<number, RevealedPath>>({});
+  const [queue, setQueue] = useState<number[]>([]);
   const [animatingColumn, setAnimatingColumn] = useState<{ column: number; path: RevealedPath } | null>(null);
+  const [revealedPaths, setRevealedPaths] = useState<Record<number, RevealedPath>>({});
+  const [winners, setWinners] = useState<MiniGameParticipant[]>([]);
 
-  const currentParticipant = participants[turnIndex];
-  const isLastTurn = turnIndex === n - 1;
+  // 대기열에 쌓인 세로줄을 순서대로 하나씩 애니메이션 처리한다.
+  useEffect(() => {
+    if (animatingColumn || queue.length === 0) return;
+    const [next, ...rest] = queue;
+    const { points, finalColumn } = tracePath(rungs, next);
+    const isWinner = winnerBottoms.has(finalColumn);
+    setQueue(rest);
+    setAnimatingColumn({ column: next, path: { points, isWinner, finalColumn } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, animatingColumn]);
 
-  // 애니메이션 지속 시간만큼 기다렸다가 실제 결과("당첨!"/"꽝" 문구, 다음 버튼)를 공개한다 -
-  // 사다리를 타고 내려가는 걸 보는 재미를 위해 클릭 즉시가 아니라 선이 다 그려진 뒤에 보여준다.
+  // 애니메이션 지속 시간만큼 기다렸다가 그 줄의 결과를 확정한다.
   useEffect(() => {
     if (!animatingColumn) return;
     const timer = setTimeout(() => {
       setRevealedPaths((prev) => ({ ...prev, [animatingColumn.column]: animatingColumn.path }));
-      setLastResult({ isWinner: animatingColumn.path.isWinner });
       if (animatingColumn.path.isWinner) {
-        setWinners((prev) => [...prev, currentParticipant]);
+        setWinners((prev) => [...prev, participants[animatingColumn.column]]);
       }
       setAnimatingColumn(null);
-      setPhase("revealed");
     }, TRACE_DURATION_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animatingColumn]);
 
-  function pickColumn(column: number) {
-    if (phase !== "turn" || animatingColumn || claimedColumns.has(column)) return;
-    const { points, finalColumn } = tracePath(rungs, column);
-    const isWinner = winnerBottoms.has(finalColumn);
-    setClaimedColumns((prev) => new Set(prev).add(column));
-    setAnimatingColumn({ column, path: { points, isWinner, finalColumn } });
-  }
-
-  function handleAfterReveal() {
-    if (isLastTurn) {
+  // 전원(참가자 수만큼)의 세로줄이 다 공개되면 확인 버튼 없이 바로 결과 화면으로 넘어간다.
+  useEffect(() => {
+    if (n > 0 && Object.keys(revealedPaths).length === n) {
       onFinish(winners);
-      return;
     }
-    setPhase("handoff");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealedPaths]);
+
+  function pickColumn(column: number) {
+    if (claimedColumns.has(column)) return;
+    setClaimedColumns((prev) => new Set(prev).add(column));
+    setQueue((prev) => [...prev, column]);
   }
 
-  function handleHandoffConfirm() {
-    setTurnIndex((v) => v + 1);
-    setLastResult(null);
-    setPhase("turn");
-  }
-
-  // "결과 바로 보기" - 아직 안 고른 사람들에게 남은 세로줄을 임의로 배정해서 한 번에 결과를
-  // 확정한다(제비뽑기와 동일한 취지의 단축 버튼). 이 경로는 화면이 곧바로 전환되어 사라지므로
-  // 애니메이션 없이 최종 도착 칸만 계산한다.
+  // "결과 바로 보기" - 아직 공개 안 된 줄을 전부 한 번에 확정해서 결과 화면으로 넘어간다
+  // (애니메이션 대기열 중간이어도 상관없이 즉시 종료).
   function handleRevealAll() {
-    const remainingColumns = Array.from({ length: n }, (_, i) => i).filter((c) => !claimedColumns.has(c));
-    const remainingParticipants = participants.slice(turnIndex);
     const finalWinners = [...winners];
-    remainingParticipants.forEach((p, idx) => {
-      const column = remainingColumns[idx];
-      if (column === undefined) return;
-      const bottom = traceColumn(rungs, column);
-      if (winnerBottoms.has(bottom)) finalWinners.push(p);
-    });
+    for (let col = 0; col < n; col++) {
+      if (revealedPaths[col]) continue;
+      const bottom = traceColumn(rungs, col);
+      if (winnerBottoms.has(bottom)) finalWinners.push(participants[col]);
+    }
     onFinish(finalWinners);
   }
 
@@ -209,68 +206,51 @@ export default function LadderGame({ participants, winnerCount, onFinish }: Ladd
   const finalColumnStatus = new Map<number, boolean>();
   Object.values(revealedPaths).forEach((p) => finalColumnStatus.set(p.finalColumn, p.isWinner));
 
-  if (phase === "handoff") {
-    return (
-      <div className="flex flex-col items-center gap-4 py-6">
-        <p className="text-sm text-ink-soft">폰을 다음 사람에게 넘겨주세요</p>
-        <p className="text-lg font-bold text-ink">{participants[turnIndex + 1].name} 님 차례</p>
-        <button
-          onClick={handleHandoffConfirm}
-          className="rounded-xl2 bg-ink px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-black"
-        >
-          확인했어요
-        </button>
-        <button
-          onClick={handleRevealAll}
-          className="text-xs text-ink-soft underline-offset-2 transition hover:text-primary hover:underline"
-        >
-          결과 바로 보기
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col items-center gap-3 py-2">
       <div className="flex w-full items-center justify-between gap-2">
         <p className="text-sm font-semibold text-ink">
-          {phase === "revealed"
-            ? "결과"
-            : animatingColumn
-              ? "사다리를 타고 내려가는 중..."
-              : `${currentParticipant.name} 님 차례 - 세로줄을 하나 골라주세요`}
+          {animatingColumn ? "사다리를 타고 내려가는 중..." : "각자 자기 세로줄을 클릭해서 확인하세요"}
         </p>
         <button
           onClick={handleRevealAll}
-          disabled={!!animatingColumn}
-          className="shrink-0 text-xs text-ink-soft underline-offset-2 transition hover:text-primary hover:underline disabled:opacity-40"
+          className="shrink-0 text-xs text-ink-soft underline-offset-2 transition hover:text-primary hover:underline"
         >
           결과 바로 보기
         </button>
       </div>
 
-      {/* 실제 사다리 그림: 위쪽 선택 버튼 - 세로줄+가로줄 SVG - 아래쪽 결과 칸을 하나의 가로
-          스크롤 영역 안에 같이 묶어서, 참가자가 많아 옆으로 스크롤해도 세 부분이 항상 같이
-          움직여 서로 어긋나지 않게 한다. */}
+      {/* 실제 사다리 그림: 위쪽 선택 버튼(참가자 이름) - 세로줄+가로줄 SVG - 아래쪽 결과 칸을
+          하나의 가로 스크롤 영역 안에 같이 묶어서, 참가자가 많아 옆으로 스크롤해도 세 부분이
+          항상 같이 움직여 서로 어긋나지 않게 한다. */}
       <div className="w-full overflow-x-auto">
         <div style={{ width: n * COL_WIDTH }} className="mx-auto flex flex-col">
           <div className="flex">
-            {participants.map((_, col) => (
-              <button
-                key={col}
-                onClick={() => pickColumn(col)}
-                disabled={phase !== "turn" || !!animatingColumn || claimedColumns.has(col)}
-                style={{ width: COL_WIDTH }}
-                className={[
-                  "shrink-0 rounded-t-lg border-x border-t py-1.5 text-xs font-semibold transition",
-                  claimedColumns.has(col)
-                    ? "border-black/10 bg-surface-muted text-ink-soft"
-                    : "border-black/10 bg-surface text-ink hover:border-primary",
-                ].join(" ")}
-              >
-                {col + 1}
-              </button>
-            ))}
+            {participants.map((p, col) => {
+              const revealed = revealedPaths[col];
+              const label = revealed ? (revealed.isWinner ? "당첨!" : "꽝") : p.name;
+              return (
+                <button
+                  key={col}
+                  onClick={() => pickColumn(col)}
+                  disabled={claimedColumns.has(col)}
+                  title={p.name}
+                  style={{ width: COL_WIDTH }}
+                  className={[
+                    "shrink-0 truncate rounded-t-lg border-x border-t px-1 py-1.5 text-[11px] font-semibold transition",
+                    revealed
+                      ? revealed.isWinner
+                        ? "border-primary bg-primary-light text-primary-dark"
+                        : "border-black/10 bg-surface-muted text-ink-soft"
+                      : claimedColumns.has(col)
+                        ? "border-black/10 bg-surface-muted text-ink-soft"
+                        : "border-black/10 bg-surface text-ink hover:border-primary",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
 
           <svg width={n * COL_WIDTH} height={LADDER_HEIGHT} viewBox={`0 0 ${n * COL_WIDTH} ${LADDER_HEIGHT}`}>
@@ -339,20 +319,6 @@ export default function LadderGame({ participants, winnerCount, onFinish }: Ladd
           </div>
         </div>
       </div>
-
-      {phase === "revealed" && lastResult && (
-        <div className="flex flex-col items-center gap-3">
-          <p className="text-lg font-bold text-ink">
-            {currentParticipant.name} 님 {lastResult.isWinner ? "당첨!" : "꽝"}
-          </p>
-          <button
-            onClick={handleAfterReveal}
-            className="rounded-xl2 bg-ink px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-black"
-          >
-            {isLastTurn ? "결과 확인하기" : "다음 사람에게 넘기기"}
-          </button>
-        </div>
-      )}
     </div>
   );
 }

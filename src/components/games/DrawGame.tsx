@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { MiniGameParticipant } from "@/types";
 
 interface DrawGameProps {
@@ -22,12 +22,14 @@ function shuffle<T>(arr: T[]): T[] {
 type CardState = "hidden" | "win" | "lose";
 
 // 제비뽑기: 참가자 수만큼 제비 칸을 만들고, 그중 당첨자 수만큼만 미리 무작위로 "당첨"을
-// 배정해둔다(칸 위치는 섞어서 아무도 어느 칸이 당첨인지 미리 알 수 없다).
+// 배정해둔다(칸 위치는 섞어서 아무도 어느 칸이 당첨인지 미리 알 수 없다). 카드 하나는 항상 같은
+// 참가자에게 고정 배정되고(칸 아래 이름 표시), 그 사람이 원할 때 자기 카드를 클릭하면 된다.
 //
-// 2026-08-12 수정: 처음엔 카드를 뽑을 때마다 "폰을 다음 사람에게 넘겨주세요"라는 중간 화면을
-// 거치게 했었는데(사다리타기와 동일한 패턴), 사용자 피드백으로 제비뽑기는 그 절차가 필요
-// 없다고 판단해 없앴다 - 카드를 뽑으면 바로 그 자리에서 결과가 보이고, 버튼 한 번으로 곧장
-// 다음 사람 차례로 넘어가서 이어서 뽑을 수 있다(화면 전환/별도 확인 단계 없음).
+// 2026-08-12 3차 수정: "다음 사람에게 넘겨주세요"/"다음: OOO님 차례" 처럼 한 명씩 순서대로
+// 폰을 넘겨받아 진행하는 방식은 인원이 많아질수록 클릭 수가 계속 늘어나서 번거롭다는 피드백을
+// 받았다 - 한 화면을 다 같이 보면서 각자 자기 카드를 원하는 순서로 클릭하면 되는 방식으로
+// 바꿨다. 순서를 강제하지 않으므로 "차례" 개념 자체가 없어졌고, 모든 카드가 뽑히면 확인 버튼
+// 없이 바로 결과 화면으로 넘어간다.
 export default function DrawGame({ participants, winnerCount, onFinish }: DrawGameProps) {
   const [winnerSlots] = useState<boolean[]>(() =>
     shuffle(participants.map((_, i) => i < winnerCount))
@@ -35,41 +37,28 @@ export default function DrawGame({ participants, winnerCount, onFinish }: DrawGa
   const [cardStates, setCardStates] = useState<CardState[]>(() =>
     participants.map(() => "hidden" as CardState)
   );
-  const [turnIndex, setTurnIndex] = useState(0);
-  const [justPicked, setJustPicked] = useState<{ isWinner: boolean } | null>(null);
   const [winners, setWinners] = useState<MiniGameParticipant[]>([]);
 
-  const currentParticipant = participants[turnIndex];
-  const isLastTurn = turnIndex === participants.length - 1;
+  // 카드가 전부(=참가자 전원) 뽑히면 별도 확인 버튼 없이 바로 결과 화면으로 넘어간다.
+  useEffect(() => {
+    if (participants.length > 0 && cardStates.every((s) => s !== "hidden")) {
+      onFinish(winners);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardStates]);
 
   function pickCard(cardIndex: number) {
-    if (justPicked || cardStates[cardIndex] !== "hidden") return;
+    if (cardStates[cardIndex] !== "hidden") return;
     const isWinner = winnerSlots[cardIndex];
     setCardStates((prev) => prev.map((s, i) => (i === cardIndex ? (isWinner ? "win" : "lose") : s)));
-    setJustPicked({ isWinner });
-    if (isWinner) setWinners((prev) => [...prev, currentParticipant]);
+    if (isWinner) setWinners((prev) => [...prev, participants[cardIndex]]);
   }
 
-  function handleNext() {
-    if (isLastTurn) {
-      onFinish(winners);
-      return;
-    }
-    setTurnIndex((v) => v + 1);
-    setJustPicked(null);
-  }
-
-  // 2026-08-12 신규: "결과 바로 보기" - 아직 안 뽑은 사람들에게 남은 카드를 임의로 배정해서
-  // 한 번에 결과를 확정한다(폰을 계속 돌리지 않고 결과만 빨리 보고 싶을 때).
+  // "결과 바로 보기" - 아직 안 뽑힌 카드를 전부 한 번에 확정해서 결과 화면으로 넘어간다.
   function handleRevealAll() {
-    const remainingCardIndices = cardStates
-      .map((s, i) => (s === "hidden" ? i : -1))
-      .filter((i) => i !== -1);
-    const remainingParticipants = participants.slice(turnIndex);
     const finalWinners = [...winners];
-    remainingParticipants.forEach((p, idx) => {
-      const cardIndex = remainingCardIndices[idx];
-      if (cardIndex !== undefined && winnerSlots[cardIndex]) finalWinners.push(p);
+    cardStates.forEach((state, i) => {
+      if (state === "hidden" && winnerSlots[i]) finalWinners.push(participants[i]);
     });
     onFinish(finalWinners);
   }
@@ -77,9 +66,7 @@ export default function DrawGame({ participants, winnerCount, onFinish }: DrawGa
   return (
     <div className="flex flex-col items-center gap-4 py-2">
       <div className="flex w-full items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-ink">
-          {justPicked ? "결과" : `${currentParticipant.name} 님 차례 - 제비를 골라주세요`}
-        </p>
+        <p className="text-sm font-semibold text-ink">각자 자기 카드를 클릭해서 확인하세요</p>
         <button
           onClick={handleRevealAll}
           className="shrink-0 text-xs text-ink-soft underline-offset-2 transition hover:text-primary hover:underline"
@@ -88,14 +75,15 @@ export default function DrawGame({ participants, winnerCount, onFinish }: DrawGa
         </button>
       </div>
 
-      <div className="grid w-full grid-cols-4 gap-2">
-        {participants.map((_, cardIndex) => (
+      <div className="grid w-full grid-cols-3 gap-2">
+        {participants.map((p, cardIndex) => (
           <button
             key={cardIndex}
             onClick={() => pickCard(cardIndex)}
-            disabled={!!justPicked || cardStates[cardIndex] !== "hidden"}
+            disabled={cardStates[cardIndex] !== "hidden"}
+            title={p.name}
             className={[
-              "flex h-16 flex-col items-center justify-center rounded-xl2 border text-sm font-semibold transition",
+              "flex h-16 flex-col items-center justify-center gap-0.5 rounded-xl2 border px-1 text-sm font-semibold transition",
               cardStates[cardIndex] === "hidden"
                 ? "border-black/10 bg-surface text-ink hover:border-primary"
                 : cardStates[cardIndex] === "win"
@@ -103,24 +91,11 @@ export default function DrawGame({ participants, winnerCount, onFinish }: DrawGa
                   : "border-black/10 bg-surface-muted text-ink-soft",
             ].join(" ")}
           >
-            <span>{cardIndex + 1}</span>
+            <span className="max-w-full truncate text-xs font-medium">{p.name}</span>
+            <span>{cardStates[cardIndex] === "hidden" ? "" : cardStates[cardIndex] === "win" ? "당첨!" : "꽝"}</span>
           </button>
         ))}
       </div>
-
-      {justPicked && (
-        <div className="flex flex-col items-center gap-3">
-          <p className="text-lg font-bold text-ink">
-            {currentParticipant.name} 님 {justPicked.isWinner ? "당첨!" : "꽝"}
-          </p>
-          <button
-            onClick={handleNext}
-            className="rounded-xl2 bg-ink px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-black"
-          >
-            {isLastTurn ? "결과 확인하기" : `다음: ${participants[turnIndex + 1].name}님 차례`}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
