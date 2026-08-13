@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
 
     const diffs: ZeroPayAuditDiffItem[] = [];
 
+    // 1단계: 기존 DB 정합성 전수 스캔 (브랜드 불일치 오매칭 즉시 감지)
     for (const doc of snap.docs) {
       const data = doc.data();
       const id = doc.id;
@@ -123,35 +124,52 @@ export async function POST(request: NextRequest) {
           continue;
         }
       }
+    }
 
-      // Case 3: isZeroPay === false 매장 중 Pure HTTP 조회가 가능한 경우 신규 검증시도
-      if (!currentIsZeroPay) {
-        const res = await checkZeroPayOfficial(name, address);
-        if (res.isZeroPay && res.officialName) {
-          const isBrandValid = validateBrandMatch(name, res.officialName);
-          if (isBrandValid) {
-            diffs.push({
-              id,
-              name,
-              address,
-              currentIsZeroPay: false,
-              proposedIsZeroPay: true,
-              currentOfficialName,
-              proposedOfficialName: res.officialName,
-              currentOfficialAddress,
-              proposedOfficialAddress: res.officialAddress ?? null,
-              patch: {
-                isZeroPay: true,
-                zeroPayOfficialName: res.officialName,
-                zeroPayOfficialAddress: res.officialAddress ?? null,
-                zeroPaySource: "official_zeropay_api",
-                zeroPayEnrichedAt: new Date().toISOString(),
-              },
-              reason: `공식 제로페이 가맹점 매칭 성공 ('${res.officialName}')`,
-            });
-          }
-        }
-      }
+    // 2단계: isZeroPay === false 매장 중 제로페이 공식 사이트(zeropay.or.kr) 실시간 교차 조회 (Vercel 타임아웃 방지를 위해 20개 배치 병렬 수행)
+    const unverifiedDocs = snap.docs
+      .filter((d) => !d.data().isZeroPay && !d.data().zeroPayOfficialName)
+      .slice(0, 20);
+
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < unverifiedDocs.length; i += BATCH_SIZE) {
+      const chunk = unverifiedDocs.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        chunk.map(async (doc) => {
+          const data = doc.data();
+          const id = doc.id;
+          const name = (data.name as string) ?? "";
+          const address = (data.address as string) ?? "";
+
+          try {
+            const res = await checkZeroPayOfficial(name, address);
+            if (res && res.isZeroPay && res.officialName) {
+              const isBrandValid = validateBrandMatch(name, res.officialName);
+              if (isBrandValid) {
+                diffs.push({
+                  id,
+                  name,
+                  address,
+                  currentIsZeroPay: false,
+                  proposedIsZeroPay: true,
+                  currentOfficialName: null,
+                  proposedOfficialName: res.officialName,
+                  currentOfficialAddress: null,
+                  proposedOfficialAddress: res.officialAddress ?? null,
+                  patch: {
+                    isZeroPay: true,
+                    zeroPayOfficialName: res.officialName,
+                    zeroPayOfficialAddress: res.officialAddress ?? null,
+                    zeroPaySource: "official_zeropay_api",
+                    zeroPayEnrichedAt: new Date().toISOString(),
+                  },
+                  reason: `제로페이 공식 사이트 실시간 조회 매칭 성공 ('${res.officialName}')`,
+                });
+              }
+            }
+          } catch (_) {}
+        })
+      );
     }
 
     return NextResponse.json({ diffs, totalChecked: snap.size });
