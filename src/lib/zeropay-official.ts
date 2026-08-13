@@ -44,6 +44,44 @@ function extractBuildingNum(addr: string): string | null {
   return match ? match[2] : null;
 }
 
+export function validateBrandMatch(dbName: string, officialName: string): boolean {
+  if (!dbName || !officialName) return false;
+
+  const normalize = (s: string) =>
+    s
+      .replace(/\(주\)|\(유\)|주식회사/g, "")
+      .replace(/\(.*?\)|\[.*?\]|\{.*?\}/g, "")
+      .replace(/^(서울특별시|서울시|영등포구|영등포|마포구|마포|강남구|강남|구로구|구로|관악구|관악|동작구|동작|서초구|서초|용산구|용산|종로구|종로|중구)\s*/i, "")
+      .replace(/(영등포|문래|당산|여의도|타임스퀘어|신길|대림|양평|도림)?\s*(시장점|역점|본점|직영점|[0-9]+호점|점)$/gi, "")
+      .replace(/GS25/gi, "지에스")
+      .replace(/CU/gi, "씨유")
+      .replace(/BHC/gi, "비에이치씨")
+      .replace(/BBQ/gi, "비비큐")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+
+  const n1 = normalize(dbName);
+  const n2 = normalize(officialName);
+
+  if (n1 === n2 || n1.includes(n2) || n2.includes(n1)) return true;
+
+  // Extract core brand words excluding generic building/area terms
+  const GENERIC_WORDS = new Set([
+    "타임스퀘어", "홈플러스", "성심", "하이테크시티", "백화점", "신세계", "롯데", "현대", "빌딩", "타워",
+    "영등포", "여의도", "문래", "당산", "신길", "대림", "양평", "도림", "구청", "역", "사거리", "교차로"
+  ]);
+
+  const dbWords = (dbName.match(/[\uAC00-\uD7A3a-zA-Z0-9]+/g) ?? [])
+    .filter((w) => w.length >= 2 && !GENERIC_WORDS.has(w) && !/^[0-9]+(호점|점|층|F)?$/i.test(w));
+
+  if (dbWords.length === 0) return true; // Fallback if no specific word
+
+  return dbWords.some((w) => {
+    const normW = normalize(w);
+    return normW.length >= 2 && n2.includes(normW);
+  });
+}
+
 function isAddressMatched(dbAddr: string, officialAddr: string): boolean {
   if (!dbAddr || !officialAddr) return true;
 
@@ -54,7 +92,7 @@ function isAddressMatched(dbAddr: string, officialAddr: string): boolean {
 
   if (dbRoad && offRoad && dbRoad === offRoad) {
     if (!dbNum || !offNum) return true;
-    if (Math.abs(Number(dbNum) - Number(offNum)) <= 20) {
+    if (Math.abs(Number(dbNum) - Number(offNum)) <= 5) {
       return true;
     }
   }
@@ -110,9 +148,14 @@ function generateQueryVariants(name: string): string[] {
     list.push(brandVariant.replace(/\s*점$/i, "").trim());
   }
 
+  const GENERIC_BUILDING_WORDS = new Set([
+    "타임스퀘어", "홈플러스", "성심", "하이테크시티", "백화점", "신세계", "롯데", "현대", "빌딩", "타워",
+    "영등포", "여의도", "문래", "당산", "신길", "대림", "양평", "도림", "구청", "역"
+  ]);
+
   const koreanWords = (clean1 || name).match(/[\uAC00-\uD7A3]+/g) ?? [];
   for (const w of koreanWords) {
-    if (w.length >= 2) list.push(w);
+    if (w.length >= 2 && !GENERIC_BUILDING_WORDS.has(w)) list.push(w);
   }
 
   return [...new Set(list)].filter((q) => q && q.length >= 2);
@@ -162,7 +205,8 @@ async function queryZeroPayPureHttp(
       if (Array.isArray(list) && list.length > 0) {
         const matched = list.find((item: any) => {
           const itemAddr = item.AFLT_ROAD_ADDR ?? "";
-          return isAddressMatched(dbAddress ?? "", itemAddr);
+          const itemNm = item.AFLT_NM ?? "";
+          return isAddressMatched(dbAddress ?? "", itemAddr) && validateBrandMatch(merchantName, itemNm);
         });
 
         if (matched) {
@@ -258,7 +302,8 @@ export async function checkZeroPayOfficial(
       if (list.length > 0) {
         const matched = list.find((item: any) => {
           const itemAddr = item.AFLT_ROAD_ADDR ?? "";
-          return isAddressMatched(dbAddress ?? "", itemAddr);
+          const itemNm = item.AFLT_NM ?? "";
+          return isAddressMatched(dbAddress ?? "", itemAddr) && validateBrandMatch(merchantName, itemNm);
         });
 
         if (matched) {

@@ -73,6 +73,140 @@ export default function AdminDashboard({
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
+  // 점검 및 일괄 업데이트 모달 상태
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [auditModalType, setAuditModalType] = useState<"zeropay" | "naver" | null>(null);
+  interface DiffItem {
+    id: string;
+    name: string;
+    address: string;
+    patch: Record<string, any>;
+    reason: string;
+    currentView: string;
+    proposedView: string;
+  }
+  const [diffItems, setDiffItems] = useState<DiffItem[]>([]);
+  const [selectedDiffIds, setSelectedDiffIds] = useState<Set<string>>(new Set());
+  const [isApplyingBatch, setIsApplyingBatch] = useState(false);
+  const [modalFilterQuery, setModalFilterQuery] = useState("");
+
+  async function handleCheckZeroPayAll() {
+    setIsAuditing(true);
+    try {
+      const res = await fetch("/api/admin/zeropay/check-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setToastMessage(data.error ?? "제로페이 점검 중 오류가 발생했습니다.");
+        return;
+      }
+      if (!data.diffs || data.diffs.length === 0) {
+        setToastMessage("모든 가맹점의 제로페이 정보가 정합성에 부합하며 변경할 항목이 없습니다.");
+        return;
+      }
+      const formatted: DiffItem[] = data.diffs.map((d: any) => ({
+        id: d.id,
+        name: d.name,
+        address: d.address,
+        patch: d.patch,
+        reason: d.reason,
+        currentView: `isZeroPay: ${d.currentIsZeroPay ? "true (됨)" : "false (안됨)"}${
+          d.currentOfficialName ? `\n공식상호: ${d.currentOfficialName}` : ""
+        }`,
+        proposedView: `isZeroPay: ${d.proposedIsZeroPay ? "true (됨)" : "false (안됨)"}${
+          d.proposedOfficialName ? `\n공식상호: ${d.proposedOfficialName}` : ""
+        }`,
+      }));
+      setDiffItems(formatted);
+      setSelectedDiffIds(new Set(formatted.map((f) => f.id)));
+      setModalFilterQuery("");
+      setAuditModalType("zeropay");
+    } catch {
+      setToastMessage("네트워크 오류로 제로페이 점검을 진행하지 못했습니다.");
+    } finally {
+      setIsAuditing(false);
+    }
+  }
+
+  async function handleCheckNaverAll() {
+    setIsAuditing(true);
+    try {
+      const res = await fetch("/api/admin/naver/check-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setToastMessage(data.error ?? "네이버 정보 갱신 점검 중 오류가 발생했습니다.");
+        return;
+      }
+      if (!data.diffs || data.diffs.length === 0) {
+        setToastMessage("모든 가맹점의 네이버 정보가 최신 상태입니다.");
+        return;
+      }
+      const formatted: DiffItem[] = data.diffs.map((d: any) => ({
+        id: d.id,
+        name: d.name,
+        address: d.address,
+        patch: d.patch,
+        reason: d.reason,
+        currentView: `전화: ${d.currentPhone ?? "(없음)"}\n상호: ${d.currentNaverMatchedName ?? "(없음)"}`,
+        proposedView: `전화: ${d.proposedPhone ?? "(없음)"}\n상호: ${d.proposedNaverMatchedName ?? "(없음)"}`,
+      }));
+      setDiffItems(formatted);
+      setSelectedDiffIds(new Set(formatted.map((f) => f.id)));
+      setModalFilterQuery("");
+      setAuditModalType("naver");
+    } catch {
+      setToastMessage("네트워크 오류로 네이버 정보 갱신 점검을 진행하지 못했습니다.");
+    } finally {
+      setIsAuditing(false);
+    }
+  }
+
+  async function handleApplyBatchUpdate() {
+    const selectedList = diffItems.filter((item) => selectedDiffIds.has(item.id));
+    if (selectedList.length === 0) {
+      setToastMessage("업데이트할 가맹점을 선택해주세요.");
+      return;
+    }
+    setIsApplyingBatch(true);
+    try {
+      const res = await fetch("/api/admin/batch-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyCode,
+          items: selectedList.map((item) => ({ id: item.id, patch: item.patch })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setToastMessage(data.error ?? "업데이트 반영에 실패했습니다.");
+        return;
+      }
+      setRows((prev) =>
+        prev.map((r) => {
+          const matched = selectedList.find((s) => s.id === r.id);
+          if (matched) {
+            return { ...r, ...matched.patch };
+          }
+          return r;
+        })
+      );
+      setToastMessage(`선택한 ${data.updatedCount ?? selectedList.length}개 가맹점 정보가 DB에 반영되었습니다.`);
+      setAuditModalType(null);
+    } catch {
+      setToastMessage("네트워크 오류로 일괄 업데이트를 적용하지 못했습니다.");
+    } finally {
+      setIsApplyingBatch(false);
+    }
+  }
+
   function handleSortClick(column: SortColumn) {
     setPage(0); // 정렬이 바뀌면 페이지 번호가 안 맞을 수 있으니 첫 페이지로.
     if (sortColumn !== column) {
@@ -388,26 +522,47 @@ export default function AdminDashboard({
           </button>
         </div>
 
-        {/* 탭 */}
-        <div className="flex gap-1.5">
-          <button
-            onClick={() => setTab("restaurants")}
-            className={[
-              "rounded-full px-3.5 py-1.5 text-sm font-medium transition",
-              tab === "restaurants" ? "bg-primary text-white" : "bg-surface text-ink-soft",
-            ].join(" ")}
-          >
-            가맹점 관리
-          </button>
-          <button
-            onClick={() => setTab("requests")}
-            className={[
-              "rounded-full px-3.5 py-1.5 text-sm font-medium transition",
-              tab === "requests" ? "bg-primary text-white" : "bg-surface text-ink-soft",
-            ].join(" ")}
-          >
-            문의하기 ({pendingRequests.length})
-          </button>
+        {/* 탭 & 전체 점검 버튼 */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setTab("restaurants")}
+              className={[
+                "rounded-full px-3.5 py-1.5 text-sm font-medium transition",
+                tab === "restaurants" ? "bg-primary text-white" : "bg-surface text-ink-soft",
+              ].join(" ")}
+            >
+              가맹점 관리
+            </button>
+            <button
+              onClick={() => setTab("requests")}
+              className={[
+                "rounded-full px-3.5 py-1.5 text-sm font-medium transition",
+                tab === "requests" ? "bg-primary text-white" : "bg-surface text-ink-soft",
+              ].join(" ")}
+            >
+              문의하기 ({pendingRequests.length})
+            </button>
+          </div>
+
+          {tab === "restaurants" && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCheckZeroPayAll}
+                disabled={isAuditing}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50 shadow-sm"
+              >
+                🛡️ 제로페이 가맹점 전체 점검
+              </button>
+              <button
+                onClick={handleCheckNaverAll}
+                disabled={isAuditing}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
+              >
+                🔄 네이버 정보 갱신
+              </button>
+            </div>
+          )}
         </div>
 
         {tab === "restaurants" && (
@@ -861,6 +1016,142 @@ export default function AdminDashboard({
           </div>
         </div>
       )}
+
+      {/* 제로페이 / 네이버 정보 점검 변경 내역 프리뷰 및 선택 모달 */}
+      {auditModalType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl overflow-hidden">
+            {/* 모달 헤더 */}
+            <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 bg-surface-muted">
+              <div>
+                <h3 className="text-lg font-bold text-ink">
+                  {auditModalType === "zeropay" ? "🛡️ 제로페이 가맹점 전체 점검 결과" : "🔄 네이버 정보 갱신 점검 결과"}
+                </h3>
+                <p className="text-xs text-ink-soft mt-0.5">
+                  총 {diffItems.length}개 가맹점에서 변경 사항이 발견되었습니다. 반영할 항목을 선택해주세요.
+                </p>
+              </div>
+              <button
+                onClick={() => setAuditModalType(null)}
+                className="rounded-full p-1.5 text-ink-soft hover:bg-black/5 hover:text-ink transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* 필터 및 전체 선택 컨트롤 바 */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 px-5 py-3 bg-surface">
+              <label className="flex items-center gap-2 text-sm font-semibold text-ink cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={selectedDiffIds.size === diffItems.length && diffItems.length > 0}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedDiffIds(new Set(diffItems.map((d) => d.id)));
+                    } else {
+                      setSelectedDiffIds(new Set());
+                    }
+                  }}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                전체 선택 ({selectedDiffIds.size}/{diffItems.length}개 선택됨)
+              </label>
+
+              <input
+                value={modalFilterQuery}
+                onChange={(e) => setModalFilterQuery(e.target.value)}
+                placeholder="결과 내 검색 (이름/주소)"
+                className="w-64 rounded-lg border border-black/10 px-3 py-1.5 text-xs outline-none focus:border-primary"
+              />
+            </div>
+
+            {/* 변경 항목 목록 */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {diffItems
+                .filter((item) => {
+                  const q = modalFilterQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  return item.name.toLowerCase().includes(q) || item.address.toLowerCase().includes(q);
+                })
+                .map((item) => {
+                  const isSelected = selectedDiffIds.has(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedDiffIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(item.id)) next.delete(item.id);
+                          else next.add(item.id);
+                          return next;
+                        });
+                      }}
+                      className={[
+                        "flex cursor-pointer flex-col gap-2 rounded-xl border p-4 transition",
+                        isSelected ? "border-primary bg-primary-light/10 shadow-sm" : "border-black/10 bg-surface hover:bg-surface-muted",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                          />
+                          <div>
+                            <h4 className="font-bold text-ink text-sm">{item.name}</h4>
+                            <p className="text-xs text-ink-soft">{item.address}</p>
+                          </div>
+                        </div>
+                        <span className="rounded-md bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 shrink-0">
+                          {item.reason}
+                        </span>
+                      </div>
+
+                      {/* Diff Before ➔ After */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1 rounded-lg bg-surface-muted p-2.5 text-xs">
+                        <div className="flex flex-col gap-0.5 border-r border-black/10 pr-2">
+                          <span className="font-bold text-red-600">기존 (Before)</span>
+                          <pre className="whitespace-pre-wrap font-sans text-ink-soft text-[11px]">
+                            {item.currentView}
+                          </pre>
+                        </div>
+                        <div className="flex flex-col gap-0.5 pl-2">
+                          <span className="font-bold text-emerald-600">변경 예정 (After)</span>
+                          <pre className="whitespace-pre-wrap font-sans text-ink font-medium text-[11px]">
+                            {item.proposedView}
+                          </pre>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* 모달 하단 버튼 */}
+            <div className="flex items-center justify-end gap-2 border-t border-black/10 px-5 py-3 bg-surface-muted">
+              <button
+                onClick={() => setAuditModalType(null)}
+                className="rounded-xl px-4 py-2 text-xs font-semibold text-ink-soft hover:bg-black/5 transition"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleApplyBatchUpdate}
+                disabled={isApplyingBatch || selectedDiffIds.size === 0}
+                className="rounded-xl bg-primary px-5 py-2 text-xs font-bold text-white transition hover:bg-primary-dark disabled:opacity-50"
+              >
+                {isApplyingBatch
+                  ? "DB 반영 중..."
+                  : `선택한 ${selectedDiffIds.size}개 항목 DB 반영하기`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAuditing && <LoadingOverlay message="전체 가맹점 데이터를 점검하고 있습니다..." />}
 
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
       {isNavigatingHome && <LoadingOverlay message="메인으로 이동하는 중..." />}
