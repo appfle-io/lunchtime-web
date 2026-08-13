@@ -196,31 +196,13 @@ export async function checkZeroPayOfficial(
     return pureHttpResult;
   }
 
-  // 2. Pure HTTP 미반환시 Playwright 시도 (로컬 개발 환경용, Vercel Executable 예외 완전 방어)
-  const isOwnContext = !existingContext;
-  let browser: any = null;
-  let context: BrowserContext | null = null;
-
-  if (isOwnContext) {
-    try {
-      browser = await chromium.launch({ headless: true });
-      context = await browser.newContext({
-        locale: "ko-KR",
-        userAgent: BROWSER_UA,
-      });
-    } catch (pwErr) {
-      // Vercel 환경에서 Playwright 실행 불가능 시 예외를 던지지 않고 안전하게 리턴
-      console.warn(`[ZeroPay-Official] Playwright 실행 불가 (Pure HTTP 폴백 유지): ${(pwErr as Error).message}`);
-      return { isZeroPay: false };
-    }
-  } else {
-    context = existingContext!;
-  }
-
-  if (!context) {
+  // 2. existingContext가 명시적으로 전달된 경우에만 Playwright 실행 (로컬 특수 스크립트용)
+  // existingContext가 없으면 Vercel 등 무헤드 브라우저 미지원 환경이므로 chromium.launch를 절대 호출하지 않음.
+  if (!existingContext) {
     return { isZeroPay: false };
   }
 
+  const context = existingContext;
   let page: any = null;
   let isZeroPay = false;
   let officialName: string | undefined;
@@ -297,9 +279,6 @@ export async function checkZeroPayOfficial(
     console.warn(`[ZeroPay-Official] "${merchantName}" 검증 예외:`, (err as Error).message);
   } finally {
     if (page) await page.close().catch(() => {});
-    if (isOwnContext && browser) {
-      await browser.close().catch(() => {});
-    }
   }
 
   return { isZeroPay, officialName, officialAddress, bizType, isNotFoodBiz };

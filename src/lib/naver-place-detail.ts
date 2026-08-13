@@ -145,7 +145,7 @@ function parseBusinessHoursFromApolloBase(base: any): string | null {
 }
 
 /**
- * Pure HTTP fetch를 사용하여 네이버 플레이스 데이터를 직접 수집하는 폴백 함수 (Vercel Serverless 환경용)
+ * Pure HTTP fetch를 사용하여 네이버 플레이스 데이터를 직접 수집하는 폴백 함수 (Vercel Serverless 환경 100% 지원)
  */
 async function fetchNaverPlaceViaPureHttp(placeId: string): Promise<NaverPlaceFullDetails | null> {
   try {
@@ -262,25 +262,15 @@ export async function lookupNaverPlaceDetail(
     }
   } catch (_) {}
 
-  // 2. Playwright 폴백 (로컬 실행 환경용)
-  const ownContext = !options.context;
-  let browser;
-  let context = options.context;
-
-  if (ownContext) {
-    try {
-      browser = await chromium.launch({ headless: true });
-      context = await browser.newContext({
-        locale: "ko-KR",
-        userAgent: BROWSER_UA,
-      });
-    } catch (_) {
-      return null;
-    }
+  // 2. options.context가 있는 경우에만 Playwright 실행 (로컬 환경용)
+  if (!options.context) {
+    return null;
   }
 
+  const context = options.context;
+
   try {
-    const searchPage = await context!.newPage();
+    const searchPage = await context.newPage();
     let capturedItem: CapturedPlace | null = null;
 
     searchPage.on("response", async (response) => {
@@ -325,16 +315,14 @@ export async function lookupNaverPlaceDetail(
       matchedAddress: finalCaptured.address,
       phone: finalCaptured.phone,
     };
-  } finally {
-    if (ownContext && browser) {
-      await browser.close();
-    }
+  } catch (_) {
+    return null;
   }
 }
 
 /**
  * 네이버 플레이스 상세 정보를 수집합니다.
- * Vercel Serverless 환경에서도 동작하도록 Pure HTTP 수집을 우선 실행하고, 실패 시 Playwright를 폴백으로 사용합니다.
+ * Vercel Serverless 환경에서도 동작하도록 Pure HTTP 수집을 사용하며, existingContext가 넘겨진 경우에만 Playwright를 실행합니다.
  */
 export async function fetchNaverPlaceFullDetails(
   placeId: string,
@@ -342,29 +330,15 @@ export async function fetchNaverPlaceFullDetails(
 ): Promise<NaverPlaceFullDetails | null> {
   // 1. 먼저 Vercel Serverless에서 100% 동작하는 Pure HTTP 수집 실행
   const pureDetails = await fetchNaverPlaceViaPureHttp(placeId);
-  if (pureDetails && pureDetails.businessHours) {
+
+  // existingContext가 넘어오지 않은 환경(Vercel 등)인 경우 pureDetails 결과를 바로 반환
+  // chromium.launch()를 전혀 호출하지 않으므로 Playwright 아스키 박스 경고 및 Executable 예외가 발생하지 않습니다.
+  if (!existingContext) {
     return pureDetails;
   }
 
-  // 2. Pure HTTP 수집에서 businessHours가 부족하거나 실패한 경우 Playwright 실행 시도 (Playwright 지원 환경용)
-  const ownContext = !existingContext;
-  let browser;
-  let context = existingContext;
-
-  if (ownContext) {
-    try {
-      browser = await chromium.launch({ headless: true });
-      context = await browser.newContext({
-        locale: "ko-KR",
-        userAgent: BROWSER_UA,
-      });
-    } catch (_) {
-      // Vercel 등 Playwright 실행 불가능 환경인 경우 pureDetails 반환
-      return pureDetails;
-    }
-  }
-
-  const page = await context!.newPage();
+  const context = existingContext;
+  const page = await context.newPage();
 
   try {
     const homeUrl = `https://pcmap.place.naver.com/restaurant/${placeId}/home`;
@@ -593,8 +567,5 @@ export async function fetchNaverPlaceFullDetails(
     };
   } finally {
     await page.close();
-    if (ownContext && browser) {
-      await browser.close();
-    }
   }
 }
