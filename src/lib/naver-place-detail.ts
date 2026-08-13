@@ -81,22 +81,202 @@ export async function resolveNaverPlaceId(inputUrl: string): Promise<string | nu
   return null;
 }
 
+/**
+ * Apollo State JSON 또는 HTML에서 businessHours 정보(newBusinessHours 포함)를 추출하는 헬퍼 함수
+ */
+function parseBusinessHoursFromApolloBase(base: any): string | null {
+  if (!base) return null;
+
+  // 1. 기존 openingHours 또는 bizhourInfo
+  const bizHours = base.openingHours || base.bizhourInfo;
+  if (bizHours) {
+    if (typeof bizHours === "string") return bizHours;
+    if (Array.isArray(bizHours) && bizHours.length > 0) {
+      return bizHours
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (typeof item === "object" && item !== null) {
+            const day = item.day || item.title || "";
+            const time = item.time || item.hours || item.businessHours || "";
+            return day && time ? `${day}: ${time}` : day || time;
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+  }
+
+  // 2. newBusinessHours (예: newBusinessHours({"format":"restaurant"}))
+  const newBizKey = Object.keys(base).find((k) => k.startsWith("newBusinessHours"));
+  if (newBizKey && Array.isArray(base[newBizKey])) {
+    const newBizList = base[newBizKey];
+    if (newBizList.length > 0 && Array.isArray(newBizList[0]?.businessHours)) {
+      const formatted = newBizList[0].businessHours
+        .map((bh: any) => {
+          const day = bh.day || "";
+          if (bh.description) {
+            return `${day}: ${bh.description}`;
+          }
+          if (bh.businessHours) {
+            const times = `${bh.businessHours.start} - ${bh.businessHours.end}`;
+            const lastOrder =
+              Array.isArray(bh.lastOrderTimes) && bh.lastOrderTimes.length > 0
+                ? ` (${bh.lastOrderTimes[0].time} 라스트오더)`
+                : "";
+            return `${day}: ${times}${lastOrder}`;
+          }
+          return day;
+        })
+        .filter(Boolean);
+
+      const regularClosed = newBizList[0].comingRegularClosedDays;
+      if (regularClosed) {
+        formatted.push(`\n정기휴무: ${regularClosed}`);
+      }
+
+      if (formatted.length > 0) {
+        return formatted.join("\n");
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Pure HTTP fetch를 사용하여 네이버 플레이스 데이터를 직접 수집하는 폴백 함수 (Vercel Serverless 환경용)
+ */
+async function fetchNaverPlaceViaPureHttp(placeId: string): Promise<NaverPlaceFullDetails | null> {
+  try {
+    const url = `https://pcmap.place.naver.com/restaurant/${placeId}/home`;
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        "Accept-Language": "ko-KR,ko;q=0.9",
+      },
+    });
+
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    const apolloMatch = html.match(/window\.__APOLLO_STATE__\s*=\s*(\{[\s\S]*?\});?\s*window\.__/);
+    if (!apolloMatch) return null;
+
+    const apollo = JSON.parse(apolloMatch[1]);
+    const baseKey = Object.keys(apollo).find((k) => k.startsWith("PlaceDetailBase:") || k.startsWith("Restaurant:"));
+    const base = baseKey ? apollo[baseKey] : {};
+
+    const menuKeys = Object.keys(apollo).filter((k) => k.startsWith("Menu:"));
+    const menus: NaverEnrichedMenuItem[] = menuKeys
+      .map((k) => {
+        const item = apollo[k];
+        return {
+          name: item.name ?? "",
+          price: item.price ?? "",
+          description: item.description ?? "",
+          image: Array.isArray(item.images) && item.images.length > 0 ? item.images[0] : null,
+        };
+      })
+      .filter((m) => m.name);
+
+    const businessHours = parseBusinessHoursFromApolloBase(base);
+    let aiBriefing = null;
+    if (Array.isArray(base.microReviews) && base.microReviews.length > 0) {
+      aiBriefing = base.microReviews[0];
+    } else if (typeof base.smartSummary === "string") {
+      aiBriefing = base.smartSummary;
+    }
+
+    const paymentMethods: string[] = Array.isArray(base.paymentInfo) ? base.paymentInfo : [];
+    const isZeroPay = paymentMethods.some((pm: string) => pm.includes("제로페이"));
+
+    let mainImage: string | null = null;
+    if (Array.isArray(base.headerImages) && base.headerImages.length > 0) {
+      mainImage = base.headerImages[0].url || base.headerImages[0];
+    } else if (Array.isArray(base.images) && base.images.length > 0) {
+      mainImage = base.images[0].url || base.images[0];
+    }
+
+    return {
+      naverPlaceId: placeId,
+      naverPlaceUrl: `https://map.naver.com/p/entry/place/${placeId}`,
+      matchedName: base.name || "",
+      matchedAddress: base.roadAddress || base.address || "",
+      phone: base.phone || base.virtualPhone || null,
+      businessHours,
+      facilities: Array.isArray(base.conveniences)
+        ? base.conveniences
+        : Array.isArray(base.facilityInfo)
+        ? base.facilityInfo
+        : [],
+      paymentMethods,
+      aiBriefing,
+      menus: menus.slice(0, 15),
+      mainImage,
+      isZeroPay,
+    };
+  } catch (err) {
+    console.warn(`[fetchNaverPlaceViaPureHttp] Pure HTTP 수집 실패 (id: ${placeId}):`, err);
+    return null;
+  }
+}
+
 export async function lookupNaverPlaceDetail(
   name: string,
   options: NaverPlaceDetailOptions = {}
 ): Promise<NaverPlaceDetail | null> {
   const { districtKeyword } = options;
-  const ownContext = !options.context;
 
+  // 1. 먼저 Pure HTTP 네이버 지도 검색 API 호출 시도 (Playwright 불필요, Vercel 지원)
+  try {
+    const searchUrl = `https://map.naver.com/p/api/search/allSearch?query=${encodeURIComponent(name)}&type=all&searchCoord=126.9075977%3B37.5198698`;
+    const res = await fetch(searchUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        "Accept-Language": "ko-KR,ko;q=0.9",
+        "Referer": "https://map.naver.com/",
+      },
+    });
+
+    if (res.ok) {
+      const json = await res.json().catch(() => null);
+      const places = json?.result?.place?.list ?? json?.result?.place?.items ?? [];
+
+      for (const p of places) {
+        const pid = String(p.id ?? p.placeId ?? "");
+        const pname = String(p.name ?? p.title ?? "");
+        const paddr = String(p.roadAddress ?? p.address ?? p.jibunAddress ?? "");
+        const tel = String(p.tel ?? p.phone ?? "").trim() || undefined;
+
+        if (!pid) continue;
+        if (districtKeyword && !paddr.includes(districtKeyword)) continue;
+
+        return {
+          naverPlaceId: pid,
+          matchedName: pname,
+          matchedAddress: paddr,
+          phone: tel,
+        };
+      }
+    }
+  } catch (_) {}
+
+  // 2. Playwright 폴백 (로컬 실행 환경용)
+  const ownContext = !options.context;
   let browser;
   let context = options.context;
 
   if (ownContext) {
-    browser = await chromium.launch({ headless: true });
-    context = await browser.newContext({
-      locale: "ko-KR",
-      userAgent: BROWSER_UA,
-    });
+    try {
+      browser = await chromium.launch({ headless: true });
+      context = await browser.newContext({
+        locale: "ko-KR",
+        userAgent: BROWSER_UA,
+      });
+    } catch (_) {
+      return null;
+    }
   }
 
   try {
@@ -152,20 +332,36 @@ export async function lookupNaverPlaceDetail(
   }
 }
 
+/**
+ * 네이버 플레이스 상세 정보를 수집합니다.
+ * Vercel Serverless 환경에서도 동작하도록 Pure HTTP 수집을 우선 실행하고, 실패 시 Playwright를 폴백으로 사용합니다.
+ */
 export async function fetchNaverPlaceFullDetails(
   placeId: string,
   existingContext?: BrowserContext
 ): Promise<NaverPlaceFullDetails | null> {
+  // 1. 먼저 Vercel Serverless에서 100% 동작하는 Pure HTTP 수집 실행
+  const pureDetails = await fetchNaverPlaceViaPureHttp(placeId);
+  if (pureDetails && pureDetails.businessHours) {
+    return pureDetails;
+  }
+
+  // 2. Pure HTTP 수집에서 businessHours가 부족하거나 실패한 경우 Playwright 실행 시도 (Playwright 지원 환경용)
   const ownContext = !existingContext;
   let browser;
   let context = existingContext;
 
   if (ownContext) {
-    browser = await chromium.launch({ headless: true });
-    context = await browser.newContext({
-      locale: "ko-KR",
-      userAgent: BROWSER_UA,
-    });
+    try {
+      browser = await chromium.launch({ headless: true });
+      context = await browser.newContext({
+        locale: "ko-KR",
+        userAgent: BROWSER_UA,
+      });
+    } catch (_) {
+      // Vercel 등 Playwright 실행 불가능 환경인 경우 pureDetails 반환
+      return pureDetails;
+    }
   }
 
   const page = await context!.newPage();
@@ -183,7 +379,7 @@ export async function fetchNaverPlaceFullDetails(
       homeData = await page.evaluate(() => {
         const win = window as any;
         const apollo = win.__APOLLO_STATE__ || {};
-        const baseKey = Object.keys(apollo).find((k) => k.startsWith("PlaceDetailBase:"));
+        const baseKey = Object.keys(apollo).find((k) => k.startsWith("PlaceDetailBase:") || k.startsWith("Restaurant:"));
         const base = baseKey ? apollo[baseKey] : {};
 
         const menuKeys = Object.keys(apollo).filter((k) => k.startsWith("Menu:"));
@@ -200,6 +396,36 @@ export async function fetchNaverPlaceFullDetails(
           .filter((m) => m.name);
 
         let bizHours = base.openingHours || base.bizhourInfo || null;
+
+        // newBusinessHours 파싱
+        if (!bizHours) {
+          const newBizKey = Object.keys(base).find((k: string) => k.startsWith("newBusinessHours"));
+          if (newBizKey && Array.isArray(base[newBizKey])) {
+            const newBizList = base[newBizKey];
+            if (newBizList.length > 0 && Array.isArray(newBizList[0]?.businessHours)) {
+              const formatted = newBizList[0].businessHours
+                .map((bh: any) => {
+                  const day = bh.day || "";
+                  if (bh.description) return `${day}: ${bh.description}`;
+                  if (bh.businessHours) {
+                    const times = `${bh.businessHours.start} - ${bh.businessHours.end}`;
+                    const lastOrder =
+                      Array.isArray(bh.lastOrderTimes) && bh.lastOrderTimes.length > 0
+                        ? ` (${bh.lastOrderTimes[0].time} 라스트오더)`
+                        : "";
+                    return `${day}: ${times}${lastOrder}`;
+                  }
+                  return day;
+                })
+                .filter(Boolean);
+
+              const regularClosed = newBizList[0].comingRegularClosedDays;
+              if (regularClosed) formatted.push(`\n정기휴무: ${regularClosed}`);
+              if (formatted.length > 0) bizHours = formatted.join("\n");
+            }
+          }
+        }
+
         let aiBriefing = null;
         if (Array.isArray(base.microReviews) && base.microReviews.length > 0) {
           aiBriefing = base.microReviews[0];
@@ -227,10 +453,10 @@ export async function fetchNaverPlaceFullDetails(
     }
 
     if (!homeData) {
-      return null;
+      return pureDetails;
     }
 
-    // 정형 openingHours가 없는 경우 DOM '펼쳐보기' 클릭 후 텍스트 전체 수집
+    // 정형 openingHours 및 newBusinessHours가 모두 없는 경우 DOM '펼쳐보기' 클릭 후 텍스트 수집
     if (!homeData.businessHours) {
       try {
         const domBizHours = await page.evaluate(async () => {
@@ -357,12 +583,12 @@ export async function fetchNaverPlaceFullDetails(
       matchedName: homeData.name || "",
       matchedAddress: homeData.address || "",
       phone: homeData.phone || null,
-      businessHours: homeData.businessHours || null,
+      businessHours: homeData.businessHours || pureDetails?.businessHours || null,
       facilities: homeData.facilities || [],
       paymentMethods,
       aiBriefing: homeData.aiBriefing || null,
-      menus: enrichedMenus,
-      mainImage,
+      menus: enrichedMenus.length > 0 ? enrichedMenus : (pureDetails?.menus ?? []),
+      mainImage: mainImage || pureDetails?.mainImage || null,
       isZeroPay,
     };
   } finally {
