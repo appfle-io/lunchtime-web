@@ -44,9 +44,6 @@ function extractBuildingNum(addr: string): string | null {
   return match ? match[2] : null;
 }
 
-/** 
- * 주소 일치율 1:1 검증 
- */
 function isAddressMatched(dbAddr: string, officialAddr: string): boolean {
   if (!dbAddr || !officialAddr) return true;
 
@@ -124,27 +121,107 @@ function generateQueryVariants(name: string): string[] {
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
+/**
+ * Pure HTTP fetch를 통한 제로페이 가맹점 직접 조회 (Vercel Serverless 환경 100% 지원)
+ */
+async function queryZeroPayPureHttp(
+  merchantName: string,
+  dbAddress?: string
+): Promise<ZeroPayOfficialCheckResult | null> {
+  try {
+    const targetDistrict = extractDistrict(dbAddress);
+    const variants = generateQueryVariants(merchantName);
+
+    for (const queryKey of variants) {
+      const bodyParams = new URLSearchParams({
+        AFLT_ADDR_CITY: "서울특별시",
+        AFLT_ADDR_CITY_SIMPLE: "서울",
+        AFLT_ADDR_GU: targetDistrict,
+        AFLT_NM: queryKey,
+        AFLT_ROAD_ADDR: "",
+        BIZ_TYPE_CD: "",
+        TRX_TP: "01",
+      });
+
+      const res = await fetch("https://www.zeropay.or.kr/UI_HP_009_03.act", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "User-Agent": BROWSER_UA,
+          "X-Requested-With": "XMLHttpRequest",
+          "Referer": "https://www.zeropay.or.kr/UI_HP_009_03.act",
+        },
+        body: bodyParams.toString(),
+        signal: AbortSignal.timeout(4000),
+      });
+
+      if (!res.ok) continue;
+      const json = await res.json().catch(() => null);
+      const list = json?.LIST2 ?? [];
+
+      if (Array.isArray(list) && list.length > 0) {
+        const matched = list.find((item: any) => {
+          const itemAddr = item.AFLT_ROAD_ADDR ?? "";
+          return isAddressMatched(dbAddress ?? "", itemAddr);
+        });
+
+        if (matched) {
+          const bizType = matched.BIZ_TYPE ?? "";
+          if (!isFoodBizType(bizType)) {
+            return { isZeroPay: false, isNotFoodBiz: true, bizType };
+          }
+          return {
+            isZeroPay: true,
+            officialName: matched.AFLT_NM,
+            officialAddress: matched.AFLT_ROAD_ADDR,
+            bizType,
+          };
+        }
+      }
+    }
+  } catch (_) {
+    // 회사망 차단 또는 타임아웃 발생 시 null 반환하여 다음 처리
+  }
+  return null;
+}
+
 export async function checkZeroPayOfficial(
   merchantName: string,
   dbAddress?: string,
   existingContext?: BrowserContext
 ): Promise<ZeroPayOfficialCheckResult> {
+  // 1. 먼저 Pure HTTP fetch 시도 (Vercel Serverless 호환, Playwright 불필요)
+  const pureHttpResult = await queryZeroPayPureHttp(merchantName, dbAddress);
+  if (pureHttpResult !== null) {
+    return pureHttpResult;
+  }
+
+  // 2. Pure HTTP 미반환시 Playwright 시도 (로컬 개발 환경용, Vercel Executable 예외 완전 방어)
   const isOwnContext = !existingContext;
   let browser: any = null;
-  let context: BrowserContext;
+  let context: BrowserContext | null = null;
 
   if (isOwnContext) {
-    browser = await chromium.launch({ headless: true });
-    context = await browser.newContext({
-      locale: "ko-KR",
-      userAgent: BROWSER_UA,
-    });
+    try {
+      browser = await chromium.launch({ headless: true });
+      context = await browser.newContext({
+        locale: "ko-KR",
+        userAgent: BROWSER_UA,
+      });
+    } catch (pwErr) {
+      // Vercel 환경에서 Playwright 실행 불가능 시 예외를 던지지 않고 안전하게 리턴
+      console.warn(`[ZeroPay-Official] Playwright 실행 불가 (Pure HTTP 폴백 유지): ${(pwErr as Error).message}`);
+      return { isZeroPay: false };
+    }
   } else {
     context = existingContext!;
   }
 
-  const page = await context.newPage();
+  if (!context) {
+    return { isZeroPay: false };
+  }
 
+  let page: any = null;
   let isZeroPay = false;
   let officialName: string | undefined;
   let officialAddress: string | undefined;
@@ -152,6 +229,8 @@ export async function checkZeroPayOfficial(
   let isNotFoodBiz = false;
 
   try {
+    page = await context.newPage();
+
     try {
       await page.goto("https://www.zeropay.or.kr/UI_HP_009_03.act", {
         waitUntil: "domcontentloaded",
@@ -159,7 +238,6 @@ export async function checkZeroPayOfficial(
       });
       await page.waitForTimeout(500);
     } catch (_) {
-      // 회사 방화벽 차단 또는 zeropay.or.kr 접속 차단시 예외 없이 리턴
       return { isZeroPay: false };
     }
 
@@ -167,7 +245,7 @@ export async function checkZeroPayOfficial(
     const variants = generateQueryVariants(merchantName);
 
     for (const queryKey of variants) {
-      const list: any[] = await page.evaluate(async ({ q, gu }) => {
+      const list: any[] = await page.evaluate(async ({ q, gu }: { q: string; gu: string }) => {
         return new Promise((resolve) => {
           const win = window as any;
           if (typeof win.comAjax === "function") {
@@ -180,9 +258,15 @@ export async function checkZeroPayOfficial(
               BIZ_TYPE_CD: "",
               TRX_TP: "01",
             };
-            win.comAjax("UI_HP_009_03", reqParm, (data: any) => {
-              resolve(data?.LIST2 ?? []);
-            }, () => resolve([]), false);
+            win.comAjax(
+              "UI_HP_009_03",
+              reqParm,
+              (data: any) => {
+                resolve(data?.LIST2 ?? []);
+              },
+              () => resolve([]),
+              false
+            );
           } else {
             resolve([]);
           }
@@ -212,9 +296,9 @@ export async function checkZeroPayOfficial(
   } catch (err) {
     console.warn(`[ZeroPay-Official] "${merchantName}" 검증 예외:`, (err as Error).message);
   } finally {
-    await page.close();
+    if (page) await page.close().catch(() => {});
     if (isOwnContext && browser) {
-      await browser.close();
+      await browser.close().catch(() => {});
     }
   }
 
