@@ -20,6 +20,12 @@ function isFoodBizType(bizType: string | null | undefined): boolean {
   return FOOD_BIZ_KEYWORDS.some((kw) => bizType.includes(kw));
 }
 
+function extractDistrict(addr?: string): string {
+  if (!addr) return "영등포구";
+  const match = addr.match(/([가-힣]+[구|시|군])/);
+  return match ? match[1] : "영등포구";
+}
+
 function extractDong(addr: string): string | null {
   if (!addr) return null;
   const match = addr.match(/([가-힣]+동[0-9]*가?)/);
@@ -40,8 +46,6 @@ function extractBuildingNum(addr: string): string | null {
 
 /** 
  * 주소 일치율 1:1 검증 
- * 도로명("영등포로")이 동일할 경우, 행정동/법정동 경계 표기 차이(영등포동3가 vs 영등포동5가)와 관계없이
- * 건물 번호 차이가 20 이내이면 동일 매장으로 100% 인정!
  */
 function isAddressMatched(dbAddr: string, officialAddr: string): boolean {
   if (!dbAddr || !officialAddr) return true;
@@ -51,7 +55,6 @@ function isAddressMatched(dbAddr: string, officialAddr: string): boolean {
   const dbNum = extractBuildingNum(dbAddr);
   const offNum = extractBuildingNum(officialAddr);
 
-  // 1. 도로명이 동일한 경우 건물 번호 차이(<= 20) 최우선 매칭
   if (dbRoad && offRoad && dbRoad === offRoad) {
     if (!dbNum || !offNum) return true;
     if (Math.abs(Number(dbNum) - Number(offNum)) <= 20) {
@@ -59,7 +62,6 @@ function isAddressMatched(dbAddr: string, officialAddr: string): boolean {
     }
   }
 
-  // 2. 법정동 일치 확인
   const dbDong = extractDong(dbAddr);
   const offDong = extractDong(officialAddr);
   if (dbDong && offDong && dbDong === offDong) {
@@ -75,6 +77,14 @@ function generateQueryVariants(name: string): string[] {
   list.push(name);
   list.push(name.replace(/\s+/g, ""));
 
+  let strippedDistrict = name
+    .replace(/^(서울특별시|서울시|영등포구|영등포|마포구|마포|강남구|강남|구로구|구로|관악구|관악|동작구|동작|서초구|서초|용산구|용산|종로구|종로|중구)\s*/i, "")
+    .trim();
+  if (strippedDistrict && strippedDistrict !== name) {
+    list.push(strippedDistrict);
+    list.push(strippedDistrict.replace(/\s+/g, ""));
+  }
+
   let clean1 = name
     .replace(/\(주\)|\(유\)|주식회사/g, "")
     .replace(/\(.*?\)|\[.*?\]|\{.*?\}/g, "")
@@ -85,14 +95,12 @@ function generateQueryVariants(name: string): string[] {
     list.push(clean1.replace(/\s+/g, ""));
   }
 
-  // 지점 접미사만 단순 제거 (예: "GS25 영등포충무점" -> "GS25 영등포충무")
   const noSuffix = name.replace(/\s*점$/i, "").trim();
   if (noSuffix) {
     list.push(noSuffix);
     list.push(noSuffix.replace(/\s+/g, ""));
   }
 
-  // 브랜드명 영문/한글 변환 (GS25 <-> 지에스25, CU <-> 씨유 등)
   let brandVariant = name
     .replace(/GS25/gi, "지에스25")
     .replace(/CU/gi, "씨유")
@@ -122,13 +130,19 @@ export async function checkZeroPayOfficial(
   existingContext?: BrowserContext
 ): Promise<ZeroPayOfficialCheckResult> {
   const isOwnContext = !existingContext;
-  const browser = isOwnContext ? await chromium.launch({ headless: true }) : null;
-  const context =
-    existingContext ??
-    (await browser!.newContext({
+  let browser: any = null;
+  let context: BrowserContext;
+
+  if (isOwnContext) {
+    browser = await chromium.launch({ headless: true });
+    context = await browser.newContext({
       locale: "ko-KR",
       userAgent: BROWSER_UA,
-    }));
+    });
+  } else {
+    context = existingContext!;
+  }
+
   const page = await context.newPage();
 
   let isZeroPay = false;
@@ -141,25 +155,26 @@ export async function checkZeroPayOfficial(
     try {
       await page.goto("https://www.zeropay.or.kr/UI_HP_009_03.act", {
         waitUntil: "domcontentloaded",
-        timeout: 4000,
+        timeout: 5000,
       });
       await page.waitForTimeout(500);
     } catch (_) {
-      // 회사 방화벽 차단 또는 네트워크 연결 차단 시 지연 없이 즉시 종료
+      // 회사 방화벽 차단 또는 zeropay.or.kr 접속 차단시 예외 없이 리턴
       return { isZeroPay: false };
     }
 
+    const targetDistrict = extractDistrict(dbAddress);
     const variants = generateQueryVariants(merchantName);
 
     for (const queryKey of variants) {
-      const list: any[] = await page.evaluate(async (q) => {
+      const list: any[] = await page.evaluate(async ({ q, gu }) => {
         return new Promise((resolve) => {
           const win = window as any;
           if (typeof win.comAjax === "function") {
             const reqParm = {
               AFLT_ADDR_CITY: "서울특별시",
               AFLT_ADDR_CITY_SIMPLE: "서울",
-              AFLT_ADDR_GU: "영등포구",
+              AFLT_ADDR_GU: gu,
               AFLT_NM: q,
               AFLT_ROAD_ADDR: "",
               BIZ_TYPE_CD: "",
@@ -172,7 +187,7 @@ export async function checkZeroPayOfficial(
             resolve([]);
           }
         });
-      }, queryKey);
+      }, { q: queryKey, gu: targetDistrict });
 
       if (list.length > 0) {
         const matched = list.find((item: any) => {

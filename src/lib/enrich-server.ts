@@ -1,6 +1,10 @@
 import { db } from "@/lib/firebase";
 import { invalidateRestaurantsCache, toRestaurantSummary } from "@/lib/restaurant-server";
-import { lookupNaverPlaceDetail } from "@/lib/naver-place-detail";
+import {
+  lookupNaverPlaceDetail,
+  resolveNaverPlaceId,
+  fetchNaverPlaceFullDetails,
+} from "@/lib/naver-place-detail";
 import { checkZeroPayOfficial } from "@/lib/zeropay-official";
 import { CATEGORY_LABELS } from "@/lib/restaurant-category";
 import type { RestaurantSummary } from "@/types";
@@ -14,12 +18,16 @@ export interface EnrichResult {
     isZeroPay?: boolean;
     zeroPaySource?: string;
     categoryLabel?: string;
+    menusCount?: number;
   };
 }
 
 /**
- * 특정 가맹점의 제로페이 공식 가맹 여부 및 네이버맵 상세 정보(전화번호, 영업시간, 카테고리 등)를
+ * 특정 가맹점의 제로페이 공식 가맹 여부 및 네이버맵 상세 정보(전화번호, 영업시간, 메뉴, 편의시설 등)를
  * 수집/검증하여 DB를 업데이트하고 최신 식당 객체를 반환합니다.
+ * 
+ * [주의] 네이버맵 텍스트에 "제로페이"가 들어있더라도 그것으로 isZeroPay를 true로 만들지 않습니다.
+ * 제로페이 여부는 반드시 대한민국 제로페이 공식 서버(zeropay.or.kr) 조회 또는 사내 사용자 투표(thumbs up)로만 결정됩니다.
  */
 export async function enrichRestaurantById(
   companyCode: string,
@@ -46,32 +54,77 @@ export async function enrichRestaurantById(
   const address: string = storeData.address ?? "";
   const rawCategory: string | null = storeData.category ?? null;
 
+  const existingPlaceId: string = storeData.naverPlaceId ?? "";
+  const existingPlaceUrl: string = storeData.naverPlaceUrl ?? "";
+
   const update: Record<string, unknown> = {
     isEnriched: true,
     enrichedAt: new Date().toISOString(),
   };
   const enrichedSummary: EnrichResult["enrichedFields"] = {};
 
-  // 1. 네이버 Place 검색 및 상세 수집 시도
-  try {
-    const naverDetail = await lookupNaverPlaceDetail(name, { districtKeyword });
-    if (naverDetail?.naverPlaceId) {
-      update.naverPlaceId = naverDetail.naverPlaceId;
-      update.naverPlaceUrl = `https://map.naver.com/p/entry/place/${naverDetail.naverPlaceId}`;
-      update.naverMatchedName = naverDetail.matchedName;
-      enrichedSummary.naverPlaceId = naverDetail.naverPlaceId;
-      enrichedSummary.naverPlaceUrl = update.naverPlaceUrl as string;
+  // 1. 네이버 Place ID 파싱 또는 검색
+  let placeId = existingPlaceId || (await resolveNaverPlaceId(existingPlaceUrl));
 
-      if (naverDetail.phone) {
-        update.phone = naverDetail.phone;
-        enrichedSummary.phone = naverDetail.phone;
+  if (!placeId) {
+    try {
+      const naverDetail = await lookupNaverPlaceDetail(name, { districtKeyword });
+      if (naverDetail?.naverPlaceId) {
+        placeId = naverDetail.naverPlaceId;
       }
+    } catch (naverErr) {
+      console.warn(`[enrich-server] "${name}" 네이버 Place 검색 예외:`, naverErr);
     }
-  } catch (naverErr) {
-    console.warn(`[enrich-server] "${name}" 네이버 검색 예외:`, naverErr);
   }
 
-  // 2. 제로페이 공식 DB (zeropay.or.kr) 다변화 조회 (skipZeroPay가 아닐 때만 실행)
+  // 2. 네이버 Place 상세 정보(메뉴, 영업시간, 전화번호, 편의시설 등) 수집
+  if (placeId) {
+    try {
+      const fullDetails = await fetchNaverPlaceFullDetails(placeId);
+      if (fullDetails) {
+        update.naverPlaceId = fullDetails.naverPlaceId;
+        update.naverPlaceUrl = fullDetails.naverPlaceUrl;
+        update.naverMatchedName = fullDetails.matchedName || name;
+        update.naverMatchedAddress = fullDetails.matchedAddress || address;
+        enrichedSummary.naverPlaceId = fullDetails.naverPlaceId;
+        enrichedSummary.naverPlaceUrl = fullDetails.naverPlaceUrl;
+
+        if (fullDetails.phone) {
+          update.phone = fullDetails.phone;
+          enrichedSummary.phone = fullDetails.phone;
+        }
+
+        if (fullDetails.businessHours) {
+          update.businessHours = fullDetails.businessHours;
+        }
+
+        if (fullDetails.facilities && fullDetails.facilities.length > 0) {
+          update.facilities = fullDetails.facilities;
+        }
+
+        if (fullDetails.paymentMethods && fullDetails.paymentMethods.length > 0) {
+          update.paymentMethods = fullDetails.paymentMethods;
+        }
+
+        if (fullDetails.menus && fullDetails.menus.length > 0) {
+          update.menus = fullDetails.menus;
+          enrichedSummary.menusCount = fullDetails.menus.length;
+        }
+
+        if (fullDetails.aiBriefing) {
+          update.aiBriefing = fullDetails.aiBriefing;
+        }
+
+        if (fullDetails.mainImage) {
+          update.mainImage = fullDetails.mainImage;
+        }
+      }
+    } catch (fullDetailErr) {
+      console.warn(`[enrich-server] "${name}" 네이버 상세 수집 예외:`, fullDetailErr);
+    }
+  }
+
+  // 3. 제로페이 공식 DB (zeropay.or.kr) 교차 검증 (skipZeroPay가 아닐 때만 실행)
   if (!options.skipZeroPay) {
     try {
       const officialZeroPay = await checkZeroPayOfficial(name, address);
@@ -90,7 +143,7 @@ export async function enrichRestaurantById(
     }
   }
 
-  // 3. Gemini 카테고리 AI 자동 분류
+  // 4. Gemini 카테고리 AI 자동 분류
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {

@@ -37,6 +37,19 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
 
-  const restaurant = await updateRestaurantAdminFields(companyCode, restaurantId, update);
+  let restaurant = await updateRestaurantAdminFields(companyCode, restaurantId, update);
+
+  // 관리자가 네이버지도 링크(naverPlaceUrl)를 수동으로 입력하거나 수정한 경우
+  // 해당 링크의 placeId를 추출하여 전화번호, 영업시간, 메뉴, 제로페이 여부 등을 자동으로 불러와 반영한다.
+  if (update.naverPlaceUrl && update.naverPlaceUrl.trim()) {
+    try {
+      const { enrichRestaurantById } = await import("@/lib/enrich-server");
+      const enriched = await enrichRestaurantById(companyCode, restaurantId);
+      restaurant = enriched.restaurant;
+    } catch (enrichErr) {
+      console.warn(`[admin/restaurants PATCH] naverPlaceUrl 수동 입력 수집 실패:`, enrichErr);
+    }
+  }
+
   return NextResponse.json({ restaurant });
 }
