@@ -496,6 +496,13 @@ export default function CompanyHome({
     );
   }
 
+  function handleUpdateRestaurant(updated: RestaurantSummary) {
+    setRestaurants((prev) =>
+      prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r))
+    );
+    setSelectedRestaurant((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+  }
+
   async function handleLogout() {
     await fetch("/api/auth", { method: "DELETE" });
     router.refresh();
@@ -659,12 +666,14 @@ export default function CompanyHome({
         restaurant={selectedRestaurant}
         companyCode={companyCode}
         nickname={nickname}
+        isAdmin={isAdmin}
         isFavorite={selectedRestaurant ? favoriteIds.has(selectedRestaurant.id) : false}
         onToggleFavorite={() => selectedRestaurant && toggleFavorite(selectedRestaurant)}
         onClose={() => setSelectedRestaurant(null)}
         onZeroPayStatusChange={handleZeroPayStatusChange}
         onNotify={setToastMessage}
         onMealLogged={handleMealLogged}
+        onUpdateRestaurant={handleUpdateRestaurant}
       />
 
       <FriendsModal
