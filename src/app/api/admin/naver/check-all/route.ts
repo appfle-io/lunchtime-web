@@ -5,6 +5,7 @@ import { isAdminUser } from "@/lib/admin-server";
 import { db } from "@/lib/firebase";
 import { searchNaverLocal, stripHtmlTags } from "@/lib/naver-local-search";
 import { validateBrandMatch } from "@/lib/zeropay-official";
+import { enrichRestaurantById } from "@/lib/enrich-server";
 
 async function requireAdmin(companyCode: string) {
   const sessionToken = cookies().get(SESSION_COOKIE_NAME)?.value;
@@ -118,8 +119,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 2단계: 전화번호나 네이버 정보가 없는 대상 네이버 실시간 조회 갱신 (5개씩 병렬 수행)
-    const BATCH_SIZE = 5;
+    // 2단계: 대상 가맹점들의 네이버 플레이스 상세 수집기(enrichRestaurantById) 실시간 실행 (3개씩 병렬)
+    // 💡 수동수집 버튼과 동일한 고성능 수집 엔진을 사용하여 메뉴, 영업시간, 전화번호, 제로페이, 플레이스 링크까지 완벽하게 수집합니다.
+    const BATCH_SIZE = 3;
     for (let i = 0; i < docsToProcess.length; i += BATCH_SIZE) {
       const chunk = docsToProcess.slice(i, i + BATCH_SIZE);
 
@@ -132,54 +134,72 @@ export async function POST(request: NextRequest) {
           const currentPhone = (data.phone as string) ?? null;
           const currentNaverMatchedName = (data.naverMatchedName as string) ?? null;
           const currentNaverMatchedAddress = (data.naverMatchedAddress as string) ?? null;
+          const currentMenus = Array.isArray(data.menus) ? data.menus : [];
+          const currentZeroPay = Boolean(data.isZeroPay);
 
           try {
-            const query = `${districtKeyword} ${name}`.trim();
-            const items = await searchNaverLocal(query, 3, "random");
+            const enrichRes = await enrichRestaurantById(companyCode, id);
+            const newRest = enrichRes.restaurant;
 
-            if (items && items.length > 0) {
-              const item = items[0];
-              const matchedName = stripHtmlTags(item.title);
-              const matchedAddress = item.roadAddress || item.address;
-              const phone = item.telephone || null;
+            const proposedPhone = newRest.phone ?? null;
+            const proposedNaverMatchedName = newRest.naverMatchedName ?? null;
+            const proposedNaverMatchedAddress = (data.naverMatchedAddress as string) ?? null;
+            const proposedMenus = newRest.menus ?? [];
 
-              const patch: Record<string, any> = {
-                naverEnrichedAt: new Date().toISOString(),
-              };
-              const changes: string[] = [];
+            const changes: string[] = [];
 
-              if (phone && phone !== currentPhone) {
-                patch.phone = phone;
-                changes.push(`전화번호: ${currentPhone ?? "(없음)"} ➔ ${phone}`);
-              }
-
-              if (matchedName && matchedName !== currentNaverMatchedName) {
-                patch.naverMatchedName = matchedName;
-                changes.push(`네이버 검색 상호: ${currentNaverMatchedName ?? "(없음)"} ➔ ${matchedName}`);
-              }
-
-              if (matchedAddress && matchedAddress !== currentNaverMatchedAddress) {
-                patch.naverMatchedAddress = matchedAddress;
-                changes.push(`네이버 주소: ${currentNaverMatchedAddress ?? "(없음)"} ➔ ${matchedAddress}`);
-              }
-
-              if (changes.length > 0) {
-                diffs.push({
-                  id,
-                  name,
-                  address,
-                  currentPhone,
-                  proposedPhone: phone,
-                  currentNaverMatchedName,
-                  proposedNaverMatchedName: matchedName,
-                  currentNaverMatchedAddress,
-                  proposedNaverMatchedAddress: matchedAddress,
-                  patch,
-                  reason: changes.join(", "),
-                });
-              }
+            if (proposedPhone && proposedPhone !== currentPhone) {
+              changes.push(`전화번호: ${currentPhone ?? "(없음)"} ➔ ${proposedPhone}`);
             }
-          } catch (_) {}
+
+            if (proposedNaverMatchedName && proposedNaverMatchedName !== currentNaverMatchedName) {
+              changes.push(`네이버상호: ${currentNaverMatchedName ?? "(없음)"} ➔ ${proposedNaverMatchedName}`);
+            }
+
+            if (proposedMenus.length !== currentMenus.length) {
+              changes.push(`메뉴: ${currentMenus.length}개 ➔ ${proposedMenus.length}개 수집`);
+            }
+
+            if (newRest.isZeroPay !== currentZeroPay) {
+              changes.push(`제로페이: ${currentZeroPay ? "가능" : "불가"} ➔ ${newRest.isZeroPay ? "가능" : "불가"}`);
+            }
+
+            if (newRest.naverPlaceUrl && !data.naverPlaceUrl) {
+              changes.push(`네이버지도 링크 연동 완료`);
+            }
+
+            const patch: Record<string, any> = {
+              phone: proposedPhone,
+              naverMatchedName: proposedNaverMatchedName,
+              naverPlaceUrl: newRest.naverPlaceUrl ?? null,
+              categoryLabel: newRest.categoryLabel ?? null,
+              businessHours: newRest.businessHours ?? null,
+              facilities: newRest.facilities ?? [],
+              paymentMethods: newRest.paymentMethods ?? [],
+              menus: proposedMenus,
+              isZeroPay: newRest.isZeroPay,
+              naverEnrichedAt: new Date().toISOString(),
+            };
+
+            // 선택 수집이거나 변경사항이 있는 경우 diff 목록에 추가
+            if (changes.length > 0 || targetSet) {
+              diffs.push({
+                id,
+                name,
+                address,
+                currentPhone,
+                proposedPhone,
+                currentNaverMatchedName,
+                proposedNaverMatchedName,
+                currentNaverMatchedAddress,
+                proposedNaverMatchedAddress: currentNaverMatchedAddress,
+                patch,
+                reason: changes.length > 0 ? changes.join(", ") : "네이버 플레이스 최신 정보 수집 완료",
+              });
+            }
+          } catch (enrichErr) {
+            console.warn(`[check-all] "${name}" 수동수집 엔진 실행 실패:`, enrichErr);
+          }
         })
       );
     }
