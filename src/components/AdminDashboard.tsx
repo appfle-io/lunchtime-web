@@ -66,14 +66,67 @@ export default function AdminDashboard({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [filterCategory, setFilterCategory] = useState<string>("");
+  const [filterZeroPay, setFilterZeroPay] = useState<"all" | "Y" | "N">("all");
+  const [filterIsActive, setFilterIsActive] = useState<"all" | "Y" | "N">("all");
   const [page, setPage] = useState(0);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
   const [enrichingId, setEnrichingId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   // 2026-08-10 신규: 표 정렬 상태. sortColumn===null이면 "기본(가나다순)" - 아래 sortedRows에서
   // 항상 이름 오름차순으로 fallback한다.
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  const detailRestaurant = useMemo(() => rows.find((r) => r.id === detailId) ?? null, [rows, detailId]);
+
+  const filteredRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase().replace(/\s/g, "");
+
+    return rows.filter((r) => {
+      // 1. 검색어 필터 (이름, 주소, 메모, 메뉴)
+      if (q) {
+        const names = [
+          r.name,
+          r.displayName,
+          r.naverMatchedName,
+          r.zeroPayOfficialName,
+          r.businessName,
+        ].filter(Boolean) as string[];
+
+        const nameMatch = names.some((n) => n.toLowerCase().replace(/\s/g, "").includes(q));
+        const addrMatch = (r.address ?? "").toLowerCase().replace(/\s/g, "").includes(q);
+        const memoMatch = (r.adminMemo ?? "").toLowerCase().includes(q);
+        const menuMatch = Array.isArray(r.menus) && r.menus.some((m) =>
+          (m.name ?? "").toLowerCase().replace(/\s/g, "").includes(q) ||
+          (m.description ?? "").toLowerCase().replace(/\s/g, "").includes(q)
+        );
+        if (!nameMatch && !addrMatch && !memoMatch && !menuMatch) {
+          return false;
+        }
+      }
+
+      // 2. 카테고리 필터
+      if (filterCategory) {
+        const visual = getCategoryVisual(r.category, r.categoryLabel);
+        if (visual.label !== filterCategory && r.categoryLabel !== filterCategory) {
+          return false;
+        }
+      }
+
+      // 3. 제로페이 필터 (all / Y / N)
+      if (filterZeroPay === "Y" && !r.isZeroPay) return false;
+      if (filterZeroPay === "N" && r.isZeroPay) return false;
+
+      // 4. 사용여부 필터 (all / Y / N)
+      const isActive = r.isActive !== false;
+      if (filterIsActive === "Y" && !isActive) return false;
+      if (filterIsActive === "N" && isActive) return false;
+
+      return true;
+    });
+  }, [rows, searchQuery, filterCategory, filterZeroPay, filterIsActive]);
 
   // 점검 및 일괄 업데이트 모달 상태
   const [isAuditing, setIsAuditing] = useState(false);
@@ -314,7 +367,6 @@ export default function AdminDashboard({
   // 상세편집 모달 상태 - 주소/영업시간/편의시설/결제수단/네이버링크/메뉴처럼 표 칸에 넣기엔
   // 긴 필드들을 여기서 한꺼번에 다룬다. 이름/카테고리/전화/제로페이도 여기 다시 포함해서,
   // 표 저장이든 모달 저장이든 항상 전체 필드가 같이 반영되게 한다(둘이 따로 놀지 않도록).
-  const [detailId, setDetailId] = useState<string | null>(null);
   const [savingDetail, setSavingDetail] = useState(false);
   const [formName, setFormName] = useState("");
   const [formAddress, setFormAddress] = useState("");
@@ -332,31 +384,6 @@ export default function AdminDashboard({
   const [formDiscountNote, setFormDiscountNote] = useState("");
   const [formAdminMemo, setFormAdminMemo] = useState("");
   const [formMenus, setFormMenus] = useState<RestaurantMenuItem[]>([]);
-
-  const detailRestaurant = useMemo(() => rows.find((r) => r.id === detailId) ?? null, [rows, detailId]);
-
-  const filteredRows = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase().replace(/\s/g, "");
-    if (!q) return rows;
-    return rows.filter((r) => {
-      const names = [
-        r.name,
-        r.displayName,
-        r.naverMatchedName,
-        r.zeroPayOfficialName,
-        r.businessName,
-      ].filter(Boolean) as string[];
-
-      const nameMatch = names.some((n) => n.toLowerCase().replace(/\s/g, "").includes(q));
-      const addrMatch = (r.address ?? "").toLowerCase().replace(/\s/g, "").includes(q);
-      const memoMatch = (r.adminMemo ?? "").toLowerCase().includes(q);
-      const menuMatch = Array.isArray(r.menus) && r.menus.some((m) =>
-        (m.name ?? "").toLowerCase().replace(/\s/g, "").includes(q) ||
-        (m.description ?? "").toLowerCase().replace(/\s/g, "").includes(q)
-      );
-      return nameMatch || addrMatch || memoMatch || menuMatch;
-    });
-  }, [rows, searchQuery]);
 
   // 2026-08-10 신규: sortColumn이 없으면(기본 상태) 항상 이름 가나다순으로 보여준다 - 컬럼
   // 헤더를 클릭해서 명시적으로 정렬을 걸었을 때만 그 컬럼/방향을 따른다.
@@ -664,16 +691,85 @@ export default function AdminDashboard({
 
         {tab === "restaurants" && (
           <section className="rounded-xl2 bg-surface p-4 shadow-soft">
-            <input
-              value={searchQuery}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              placeholder="이름, 주소 또는 메뉴명으로 필터"
-              className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
-            />
-            <div className="mt-1.5 flex items-center justify-between gap-2">
-              <p className="text-xs text-ink-soft">
-                총 {filteredRows.length}개 {searchQuery && `(전체 ${rows.length}개 중 필터됨)`}
-              </p>
+            {/* 검색 및 상단 필터 컨트롤 바 */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+              <input
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="🔍 이름, 주소, 메모, 메뉴 검색"
+                className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary bg-white"
+              />
+
+              {/* 카테고리 필터 */}
+              <select
+                value={filterCategory}
+                onChange={(e) => {
+                  setFilterCategory(e.target.value);
+                  setPage(0);
+                }}
+                className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary bg-white font-medium cursor-pointer"
+              >
+                <option value="">🍽️ 카테고리: 전체보기</option>
+                {CATEGORY_LABELS.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+
+              {/* 제로페이 필터 */}
+              <select
+                value={filterZeroPay}
+                onChange={(e) => {
+                  setFilterZeroPay(e.target.value as "all" | "Y" | "N");
+                  setPage(0);
+                }}
+                className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary bg-white font-medium cursor-pointer"
+              >
+                <option value="all">💚 제로페이: 전체보기</option>
+                <option value="Y">💚 제로페이: Y (가능만)</option>
+                <option value="N">❌ 제로페이: N (불가만)</option>
+              </select>
+
+              {/* 사용여부 필터 */}
+              <select
+                value={filterIsActive}
+                onChange={(e) => {
+                  setFilterIsActive(e.target.value as "all" | "Y" | "N");
+                  setPage(0);
+                }}
+                className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary bg-white font-medium cursor-pointer"
+              >
+                <option value="all">👁️ 사용여부: 전체보기</option>
+                <option value="Y">✅ 사용여부: Y (사용중)</option>
+                <option value="N">🚫 사용여부: N (미사용)</option>
+              </select>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-ink-soft">
+                  총 <span className="font-bold text-ink">{filteredRows.length}개</span>
+                  {(searchQuery || filterCategory || filterZeroPay !== "all" || filterIsActive !== "all") && (
+                    <span className="ml-1 font-semibold text-primary">(전체 {rows.length}개 중 필터됨)</span>
+                  )}
+                </p>
+                {(searchQuery || filterCategory || filterZeroPay !== "all" || filterIsActive !== "all") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setFilterCategory("");
+                      setFilterZeroPay("all");
+                      setFilterIsActive("all");
+                      setPage(0);
+                    }}
+                    className="text-xs text-rose-600 underline font-semibold hover:text-rose-800"
+                  >
+                    필터 초기화
+                  </button>
+                )}
+              </div>
               {tableSelectedIds.size > 0 && (
                 <div className="flex items-center gap-2 text-xs">
                   <span className="font-semibold text-primary">
