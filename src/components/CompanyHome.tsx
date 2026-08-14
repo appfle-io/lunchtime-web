@@ -197,6 +197,7 @@ export default function CompanyHome({
   const [showRecommend, setShowRecommend] = useState(false);
   // 2026-08-08 신규: 돋보기(🔍) 가맹점 검색 모달 상태.
   const [showSearch, setShowSearch] = useState(false);
+  const [openedFromSearch, setOpenedFromSearch] = useState(false);
   // 2026-08-12 신규: "🎮 미니게임"(제비뽑기/룰렛/사다리타기/팀나누기) 모달 상태.
   const [showMiniGame, setShowMiniGame] = useState(false);
   // 2026-08-06 3차 신규: 닉네임 드롭다운의 "비밀번호 변경" 버튼을 눌렀을 때 띄우는 모달 상태.
@@ -668,8 +669,17 @@ export default function CompanyHome({
         nickname={nickname}
         isAdmin={isAdmin}
         isFavorite={selectedRestaurant ? favoriteIds.has(selectedRestaurant.id) : false}
+        openedFromSearch={openedFromSearch}
+        onBackToSearch={() => {
+          setSelectedRestaurant(null);
+          setOpenedFromSearch(false);
+          setShowSearch(true);
+        }}
         onToggleFavorite={() => selectedRestaurant && toggleFavorite(selectedRestaurant)}
-        onClose={() => setSelectedRestaurant(null)}
+        onClose={() => {
+          setSelectedRestaurant(null);
+          setOpenedFromSearch(false);
+        }}
         onZeroPayStatusChange={handleZeroPayStatusChange}
         onNotify={setToastMessage}
         onMealLogged={handleMealLogged}
@@ -729,7 +739,10 @@ export default function CompanyHome({
         allRestaurants={restaurants}
         onClose={() => setShowSearch(false)}
         onFocusRestaurant={focusRestaurant}
-        onSelectRestaurant={handleSelectRestaurant}
+        onSelectRestaurant={(restaurant) => {
+          setOpenedFromSearch(true);
+          handleSelectRestaurant(restaurant);
+        }}
       />
 
       {/* 2026-08-12 신규: 미니게임(제비뽑기/룰렛/사다리타기/팀나누기) - 점심 먹고 후식 내기 등에

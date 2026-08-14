@@ -282,7 +282,7 @@ export default function LunchRouletteModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex w-full items-center justify-between">
-          <h3 className="text-base font-bold text-ink">🎲 오늘 뭐 먹지?</h3>
+          <h3 className="text-base font-bold text-ink">오늘 뭐 먹지?</h3>
           <button
             onClick={onClose}
             aria-label="닫기"
@@ -319,7 +319,6 @@ export default function LunchRouletteModal({
                 </label>
                 <div className="flex flex-wrap gap-1.5">
                   {availableCategoryLabels.map((label) => {
-                    const emoji = getCategoryVisual(null, label).emoji;
                     const active = categoryLabels.has(label);
                     return (
                       <button
@@ -333,7 +332,7 @@ export default function LunchRouletteModal({
                             : "bg-surface text-ink-soft ring-1 ring-inset ring-black/10 hover:bg-primary-light",
                         ].join(" ")}
                       >
-                        {emoji} {label}
+                        {label}
                       </button>
                     );
                   })}
@@ -370,7 +369,7 @@ export default function LunchRouletteModal({
             {/* 함께 먹을 사람 카드 - 초대된 사람들의 최근 방문 이력도 같이 고려해서 추천한다. */}
             <div className="rounded-2xl border border-black/5 bg-surface-muted/50 p-3.5">
               <div className="mb-2 flex items-baseline justify-between">
-                <p className="text-sm font-semibold text-ink">👥 함께 먹을 사람</p>
+                <p className="text-sm font-semibold text-ink">함께 먹을 사람</p>
                 <p className="text-[11px] text-ink-soft">초대 안 하면 나 혼자</p>
               </div>
 
@@ -465,14 +464,13 @@ export default function LunchRouletteModal({
               disabled={filteredCandidates.length === 0}
               className="w-full rounded-xl2 bg-ink px-4 py-3 text-sm font-semibold text-white transition hover:bg-black disabled:opacity-40"
             >
-              {filteredCandidates.length === 0 ? "조건에 맞는 식당이 없어요" : "🎲 룰렛 돌리기"}
+              {filteredCandidates.length === 0 ? "조건에 맞는 식당이 없어요" : "룰렛 돌리기"}
             </button>
           </div>
         )}
 
         {phase === "spinning" && (
           <div className="flex w-full flex-col items-center gap-3 py-6">
-            <div className="text-4xl">🍽️</div>
             <p className="w-full truncate text-lg font-bold text-ink">{spinName || "고르는 중..."}</p>
             <p className="text-xs text-ink-soft">오늘의 메뉴를 고민하는 중이에요...</p>
           </div>
@@ -502,7 +500,6 @@ export default function LunchRouletteModal({
 
         {phase === "result" && result && visual && (
           <div className="flex w-full flex-col items-center gap-3">
-            <div className="text-5xl">{visual.emoji}</div>
             <div>
               <p className="text-xl font-bold text-ink">{result.restaurant.name}</p>
               <p className="mt-0.5 text-xs text-ink-soft">{result.restaurant.address}</p>
@@ -524,14 +521,13 @@ export default function LunchRouletteModal({
               )}
               {participantCount > 1 && (
                 <span className="rounded-full bg-surface-muted px-2 py-0.5 text-xs text-ink-soft">
-                  👥 {participantCount}명
+                  {participantCount}명
                 </span>
               )}
             </div>
 
             <div className="w-full rounded-xl2 bg-surface-muted p-3">
               <p className="text-sm text-ink">
-                {result.isFallback ? "🎲 " : "💬 "}
                 {result.reason}
               </p>
             </div>
@@ -541,7 +537,7 @@ export default function LunchRouletteModal({
                 onClick={handleRetry}
                 className="flex-1 rounded-xl2 border border-black/10 px-3 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
               >
-                🔄 다시 추천
+                다시 추천
               </button>
               <button
                 onClick={handleViewOnMap}

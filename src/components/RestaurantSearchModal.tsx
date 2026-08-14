@@ -30,12 +30,7 @@ export default function RestaurantSearchModal({
 }: RestaurantSearchModalProps) {
   const [query, setQuery] = useState("");
 
-  // 모달을 열 때마다 이전 검색어를 지운다.
-  useEffect(() => {
-    if (open) setQuery("");
-  }, [open]);
-
-  // 상호명 우선, 그 다음 메뉴명 매칭, 그 다음 주소 매칭 순으로 검색 결과를 보여준다.
+  // 검색결과는 항상 가장 가까운 거리(도보/직선거리) 순으로 정렬하여 보여준다.
   const results = useMemo(() => {
     const q = query.trim().toLowerCase().replace(/\s/g, "");
     if (!q) return [];
@@ -73,28 +68,24 @@ export default function RestaurantSearchModal({
       return undefined;
     };
 
-    const nameMatches: { restaurant: RestaurantSummary; matchedMenu?: string }[] = [];
-    const menuMatches: { restaurant: RestaurantSummary; matchedMenu?: string }[] = [];
-    const addressMatches: { restaurant: RestaurantSummary; matchedMenu?: string }[] = [];
+    const allMatches: { restaurant: RestaurantSummary; matchedMenu?: string }[] = [];
 
     for (const r of allRestaurants) {
       if (matchesName(r)) {
-        nameMatches.push({ restaurant: r, matchedMenu: getMatchedMenu(r) });
+        allMatches.push({ restaurant: r, matchedMenu: getMatchedMenu(r) });
       } else {
         const matchedMenu = getMatchedMenu(r);
         if (matchedMenu) {
-          menuMatches.push({ restaurant: r, matchedMenu });
+          allMatches.push({ restaurant: r, matchedMenu });
         } else if (r.address.toLowerCase().replace(/\s/g, "").includes(q)) {
-          addressMatches.push({ restaurant: r });
+          allMatches.push({ restaurant: r });
         }
       }
     }
 
-    nameMatches.sort(byDistance);
-    menuMatches.sort(byDistance);
-    addressMatches.sort(byDistance);
+    allMatches.sort(byDistance);
 
-    return [...nameMatches, ...menuMatches, ...addressMatches].slice(0, MAX_RESULTS);
+    return allMatches.slice(0, MAX_RESULTS);
   }, [query, allRestaurants]);
 
   if (!open) return null;
@@ -115,7 +106,7 @@ export default function RestaurantSearchModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-ink">🔍 가맹점 & 메뉴 검색</h3>
+          <h3 className="text-base font-bold text-ink">가맹점 & 메뉴 검색</h3>
           <button
             onClick={onClose}
             aria-label="닫기"

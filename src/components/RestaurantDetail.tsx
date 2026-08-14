@@ -147,6 +147,8 @@ interface RestaurantDetailProps {
   nickname: string;
   isAdmin?: boolean;
   isFavorite: boolean;
+  openedFromSearch?: boolean;
+  onBackToSearch?: () => void;
   onToggleFavorite: () => void;
   onClose: () => void;
   onZeroPayStatusChange?: (restaurantId: string, status: ZeroPayStatus) => void;
@@ -163,6 +165,8 @@ export default function RestaurantDetail({
   nickname,
   isAdmin = false,
   isFavorite,
+  openedFromSearch = false,
+  onBackToSearch,
   onToggleFavorite,
   onClose,
   onZeroPayStatusChange,
@@ -472,6 +476,15 @@ export default function RestaurantDetail({
         onClick={(e) => e.stopPropagation()}
         className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-surface p-6 sm:p-7 shadow-soft"
       >
+        {openedFromSearch && onBackToSearch && (
+          <button
+            type="button"
+            onClick={onBackToSearch}
+            className="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-primary-light px-2.5 py-1 text-xs font-semibold text-primary-dark transition hover:bg-primary/20"
+          >
+            ← 검색 결과로 되돌아가기
+          </button>
+        )}
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
