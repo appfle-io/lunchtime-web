@@ -259,7 +259,11 @@ export default function AdminDashboard({
 
       const nameMatch = names.some((n) => n.toLowerCase().replace(/\s/g, "").includes(q));
       const addrMatch = (r.address ?? "").toLowerCase().replace(/\s/g, "").includes(q);
-      return nameMatch || addrMatch;
+      const menuMatch = Array.isArray(r.menus) && r.menus.some((m) =>
+        (m.name ?? "").toLowerCase().replace(/\s/g, "").includes(q) ||
+        (m.description ?? "").toLowerCase().replace(/\s/g, "").includes(q)
+      );
+      return nameMatch || addrMatch || menuMatch;
     });
   }, [rows, searchQuery]);
 
@@ -570,7 +574,7 @@ export default function AdminDashboard({
             <input
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              placeholder="이름 또는 주소로 필터"
+              placeholder="이름, 주소 또는 메뉴명으로 필터"
               className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
             />
             <p className="mt-1.5 text-xs text-ink-soft">

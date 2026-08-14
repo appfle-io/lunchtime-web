@@ -136,7 +136,11 @@ function RestaurantRow({ index, style, data }: ListChildComponentProps<Restauran
               {favoriteIds.has(r.id) ? "❤️" : "🤍"}
             </button>
             {typeof r.distanceMeters === "number" && (
-              <span className="whitespace-nowrap text-xs text-ink-soft">{r.distanceMeters}m</span>
+              <span className="whitespace-nowrap text-xs text-ink-soft">
+                {r.walkingMinutes
+                  ? `도보 ${r.walkingMinutes}분 (${r.walkingMeters}m)`
+                  : `${Math.round(r.distanceMeters * 1.35)}m`}
+              </span>
             )}
           </div>
         </div>

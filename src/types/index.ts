@@ -52,6 +52,8 @@ export interface RestaurantSummary {
   // 필요하다"는 별도 신호로 둔다 (lib/zeropay-server.ts 참고).
   isZeroPayNeedsReview?: boolean;
   distanceMeters?: number;
+  walkingMeters?: number;
+  walkingMinutes?: number;
 
   // 2026-08-09 신규: scripts/enrich-naver-details.ts(및 최종 버전 enrich-official-final.ts)가
   // 네이버 지도 상세페이지(Playwright)에서 수집해 restaurants 문서에 update()해두고 있던 필드들.

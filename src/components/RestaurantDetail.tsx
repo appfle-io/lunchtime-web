@@ -527,7 +527,9 @@ export default function RestaurantDetail({
           </span>
           {typeof currentRestaurant.distanceMeters === "number" && (
             <span className="rounded-full bg-surface-muted px-2 py-0.5 text-xs text-ink-soft">
-              {currentRestaurant.distanceMeters}m
+              {currentRestaurant.walkingMinutes
+                ? `🚶 도보 약 ${currentRestaurant.walkingMinutes}분 (${currentRestaurant.walkingMeters}m)`
+                : `🚶 도보 약 ${Math.max(1, Math.round((currentRestaurant.distanceMeters * 1.35) / 67))}분 (${Math.round(currentRestaurant.distanceMeters * 1.35)}m)`}
             </span>
           )}
           {currentRestaurant.discountInfo?.benefit && (

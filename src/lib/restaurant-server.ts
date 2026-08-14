@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { db } from "@/lib/firebase";
 import { getCompanyByCode } from "@/lib/company-server";
 import { searchNaverLocal, stripHtmlTags, parseNaverCoords } from "@/lib/naver-local-search";
-import { haversineMeters } from "@/lib/geo";
+import { haversineMeters, calculateEstimatedWalkingMeters, calculateWalkingMinutes } from "@/lib/geo";
 import type { RestaurantSummary } from "@/types";
 
 export function normalizeName(name: string): string {
@@ -85,6 +85,10 @@ export function toRestaurantSummary(id: string, data: Record<string, unknown>): 
   // 메인 화면 표시 상호명: naverMatchedName이 존재하면 최우선 사용, 없으면 원본 상호명
   const displayName = naverMatchedName || rawName;
 
+  const distanceMeters = typeof data.distanceMeters === "number" ? data.distanceMeters : undefined;
+  const walkingMeters = typeof distanceMeters === "number" ? calculateEstimatedWalkingMeters(distanceMeters) : undefined;
+  const walkingMinutes = typeof walkingMeters === "number" ? calculateWalkingMinutes(walkingMeters) : undefined;
+
   return {
     id,
     name: displayName, // 기존 UI 호환성 보장
@@ -101,7 +105,9 @@ export function toRestaurantSummary(id: string, data: Record<string, unknown>): 
     isZeroPay: Boolean(data.isZeroPay),
     // 2026-08-06 신규: 제로페이 엄지척 투표에서 계산되어 캐시된 값 (lib/zeropay-server.ts 참고).
     isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
-    distanceMeters: data.distanceMeters,
+    distanceMeters,
+    walkingMeters,
+    walkingMinutes,
     // 2026-08-09 신규: scripts/enrich-naver-details.ts 수집분(전화/영업시간/메뉴 등) 노출.
     ...pickEnrichedFields(data),
     // 2026-08-10 신규: 관리자 페이지 "사용여부". 필드가 없는(기존) 문서는 true로 취급 -
