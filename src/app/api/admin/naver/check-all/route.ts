@@ -4,6 +4,7 @@ import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth-server";
 import { isAdminUser } from "@/lib/admin-server";
 import { db } from "@/lib/firebase";
 import { searchNaverLocal, stripHtmlTags } from "@/lib/naver-local-search";
+import { validateBrandMatch } from "@/lib/zeropay-official";
 
 async function requireAdmin(companyCode: string) {
   const sessionToken = cookies().get(SESSION_COOKIE_NAME)?.value;
@@ -26,8 +27,8 @@ export interface NaverRefreshDiffItem {
   proposedNaverMatchedAddress: string | null;
   patch: {
     phone?: string;
-    naverMatchedName?: string;
-    naverMatchedAddress?: string;
+    naverMatchedName?: string | null;
+    naverMatchedAddress?: string | null;
     category?: string;
     naverEnrichedAt?: string;
   };
@@ -75,7 +76,47 @@ export async function POST(request: NextRequest) {
 
     const diffs: NaverRefreshDiffItem[] = [];
 
-    // 5개씩 병렬 배치 수행 (Vercel 타임아웃 방지 & 빠르게 처리)
+    // 1단계: 기존 DB에 남아있는 네이버 오매칭(주소/상호 불일치 - 예: 영중로8길 vs 여의서로43) 전수 감지 및 정리
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      const id = doc.id;
+      const name = (data.name as string) ?? "";
+      const address = (data.address as string) ?? "";
+      const currentNaverMatchedName = (data.naverMatchedName as string) ?? null;
+      const currentNaverMatchedAddress = (data.naverMatchedAddress as string) ?? null;
+
+      if (currentNaverMatchedName || currentNaverMatchedAddress) {
+        // 브랜드 상호 검증
+        const isBrandValid = currentNaverMatchedName ? validateBrandMatch(name, currentNaverMatchedName) : true;
+        
+        // 주소 도로명 주요 키워드 불일치 검사 (예: '영중로' vs '여의서로')
+        const dbRoadMatch = address.match(/([가-힗0-9]+[로|길])/);
+        const naverRoadMatch = currentNaverMatchedAddress?.match(/([가-힗0-9]+[로|길])/);
+        const isRoadDifferent = dbRoadMatch && naverRoadMatch && dbRoadMatch[1] !== naverRoadMatch[1];
+
+        if (!isBrandValid || isRoadDifferent) {
+          diffs.push({
+            id,
+            name,
+            address,
+            currentPhone: (data.phone as string) ?? null,
+            proposedPhone: (data.phone as string) ?? null,
+            currentNaverMatchedName,
+            proposedNaverMatchedName: null,
+            currentNaverMatchedAddress,
+            proposedNaverMatchedAddress: null,
+            patch: {
+              naverMatchedName: null,
+              naverMatchedAddress: null,
+              naverEnrichedAt: new Date().toISOString(),
+            },
+            reason: `네이버 오매칭 감지 (DB: '${address}' != 네이버: '${currentNaverMatchedAddress ?? currentNaverMatchedName}') ➔ 오매칭 초기화`,
+          });
+        }
+      }
+    }
+
+    // 2단계: 전화번호나 네이버 정보가 없는 대상 네이버 실시간 조회 갱신 (5개씩 병렬 수행)
     const BATCH_SIZE = 5;
     for (let i = 0; i < docsToProcess.length; i += BATCH_SIZE) {
       const chunk = docsToProcess.slice(i, i + BATCH_SIZE);
@@ -141,7 +182,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ diffs, totalChecked: docsToProcess.length, totalCount: snap.size });
+    return NextResponse.json({ diffs, totalChecked: snap.size, totalCount: snap.size });
   } catch (err) {
     console.error("[admin/naver/check-all] 갱신 점검 실패:", err);
     return NextResponse.json({ error: "네이버 정보 갱신 점검 중 오류가 발생했습니다." }, { status: 500 });
