@@ -84,6 +84,9 @@ export interface RestaurantSummary {
   // "모든 기존 가맹점은 기본 TRUE"가 별도 마이그레이션 없이 자동으로 보장된다. 관리자가 이 값을
   // false(=N)로 바꾸면 메인 화면(지도/리스트)에서 제외된다(app/[companyCode]/page.tsx에서 필터).
   isActive?: boolean;
+
+  // 관리자 전용 메모 (언제, 어떤 상태값을 왜 변경했는지 내역 기록)
+  adminMemo?: string | null;
 }
 
 export interface ReviewSummary {

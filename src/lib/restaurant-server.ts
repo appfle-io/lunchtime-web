@@ -113,6 +113,7 @@ export function toRestaurantSummary(id: string, data: Record<string, unknown>): 
     // 2026-08-10 신규: 관리자 페이지 "사용여부". 필드가 없는(기존) 문서는 true로 취급 -
     // 그래야 지금까지 등록된 1000+건이 마이그레이션 없이 전부 "사용중"으로 보인다.
     isActive: data.isActive !== false,
+    adminMemo: (data.adminMemo as string | null | undefined) ?? null,
   } as RestaurantSummary;
 }
 

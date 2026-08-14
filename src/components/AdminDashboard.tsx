@@ -330,6 +330,7 @@ export default function AdminDashboard({
   const [formBusinessName, setFormBusinessName] = useState("");
   const [formDiscountBenefit, setFormDiscountBenefit] = useState("");
   const [formDiscountNote, setFormDiscountNote] = useState("");
+  const [formAdminMemo, setFormAdminMemo] = useState("");
   const [formMenus, setFormMenus] = useState<RestaurantMenuItem[]>([]);
 
   const detailRestaurant = useMemo(() => rows.find((r) => r.id === detailId) ?? null, [rows, detailId]);
@@ -348,11 +349,12 @@ export default function AdminDashboard({
 
       const nameMatch = names.some((n) => n.toLowerCase().replace(/\s/g, "").includes(q));
       const addrMatch = (r.address ?? "").toLowerCase().replace(/\s/g, "").includes(q);
+      const memoMatch = (r.adminMemo ?? "").toLowerCase().includes(q);
       const menuMatch = Array.isArray(r.menus) && r.menus.some((m) =>
         (m.name ?? "").toLowerCase().replace(/\s/g, "").includes(q) ||
         (m.description ?? "").toLowerCase().replace(/\s/g, "").includes(q)
       );
-      return nameMatch || addrMatch || menuMatch;
+      return nameMatch || addrMatch || memoMatch || menuMatch;
     });
   }, [rows, searchQuery]);
 
@@ -434,6 +436,7 @@ export default function AdminDashboard({
     setFormBusinessName(restaurant.businessName ?? "");
     setFormDiscountBenefit(restaurant.discountInfo?.benefit ?? "");
     setFormDiscountNote(restaurant.discountInfo?.note ?? "");
+    setFormAdminMemo(restaurant.adminMemo ?? "");
     setFormMenus(restaurant.menus ?? []);
   }
 
@@ -543,6 +546,7 @@ export default function AdminDashboard({
                     note: formDiscountNote.trim() || null,
                   }
                 : null,
+            adminMemo: formAdminMemo.trim() || null,
             menus: formMenus.filter((m) => m.name.trim().length > 0),
           },
         }),
@@ -785,14 +789,26 @@ export default function AdminDashboard({
                             onChange={(e) => updateRow(r.id, { name: e.target.value })}
                             className="w-full min-w-[120px] rounded-lg border border-transparent bg-transparent px-1.5 py-1 font-medium text-ink outline-none transition focus:border-primary focus:bg-surface-muted"
                           />
-                          {(r.zeroPayOfficialName || r.businessName) && (
-                            <p className="px-1.5 text-[10px] text-emerald-700 truncate max-w-[180px]" title={`제로페이명: ${r.zeroPayOfficialName ?? '-'} / 사업자명: ${r.businessName ?? '-'}`}>
-                              {r.zeroPayOfficialName && r.zeroPayOfficialName !== r.name
-                                ? `[제로페이: ${r.zeroPayOfficialName}]`
-                                : r.businessName && r.businessName !== r.name
-                                ? `[사업자: ${r.businessName}]`
-                                : ""}
-                            </p>
+                          {(r.zeroPayOfficialName || r.businessName || r.adminMemo) && (
+                            <div className="flex items-center gap-1 flex-wrap px-1.5 mt-0.5">
+                              {(r.zeroPayOfficialName || r.businessName) && (
+                                <p className="text-[10px] text-emerald-700 truncate max-w-[180px]" title={`제로페이명: ${r.zeroPayOfficialName ?? '-'} / 사업자명: ${r.businessName ?? '-'}`}>
+                                  {r.zeroPayOfficialName && r.zeroPayOfficialName !== r.name
+                                    ? `[제로페이: ${r.zeroPayOfficialName}]`
+                                    : r.businessName && r.businessName !== r.name
+                                    ? `[사업자: ${r.businessName}]`
+                                    : ""}
+                                </p>
+                              )}
+                              {r.adminMemo && (
+                                <span
+                                  className="inline-flex items-center rounded bg-amber-100 border border-amber-300 px-1 py-0.5 text-[10px] font-bold text-amber-800 cursor-help shrink-0"
+                                  title={`[🔒 관리자 메모]\n${r.adminMemo}`}
+                                >
+                                  📝 메모
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td className="px-2 py-1.5">
@@ -1113,6 +1129,17 @@ export default function AdminDashboard({
                   />
                 </label>
               </div>
+
+              <label className="flex flex-col gap-1 text-xs font-semibold text-amber-900 bg-amber-50/80 p-3.5 rounded-xl border border-amber-200 shadow-sm">
+                🔒 관리자 전용 메모 (변경 일시, 상태값, 사유 기록)
+                <textarea
+                  value={formAdminMemo}
+                  onChange={(e) => setFormAdminMemo(e.target.value)}
+                  rows={3}
+                  placeholder="예: [2026-08-14 12:38] isZeroPay(true➔false), isActive(true➔false / N) 변경 / 사유: 비외식 업종 가맹점 정돈"
+                  className="rounded-lg border border-amber-300 px-3 py-2 text-xs text-ink outline-none focus:border-amber-500 bg-white font-sans whitespace-pre-wrap"
+                />
+              </label>
 
               <div className="flex flex-col gap-1.5">
                 <p className="text-xs font-medium text-ink-soft">메뉴</p>
