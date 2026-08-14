@@ -76,14 +76,19 @@ export default function AdminDashboard({
   // 점검 및 일괄 업데이트 모달 상태
   const [isAuditing, setIsAuditing] = useState(false);
   const [auditModalType, setAuditModalType] = useState<"zeropay" | "naver" | null>(null);
+  interface DiffDetailRow {
+    label: string;
+    before: string;
+    after: string;
+    isChanged?: boolean;
+  }
   interface DiffItem {
     id: string;
     name: string;
     address: string;
     patch: Record<string, any>;
     reason: string;
-    currentView: string;
-    proposedView: string;
+    details: DiffDetailRow[];
   }
   const [diffItems, setDiffItems] = useState<DiffItem[]>([]);
   const [selectedDiffIds, setSelectedDiffIds] = useState<Set<string>>(new Set());
@@ -107,19 +112,43 @@ export default function AdminDashboard({
         setToastMessage("모든 가맹점의 제로페이 정보가 정합성에 부합하며 변경할 항목이 없습니다.");
         return;
       }
-      const formatted: DiffItem[] = data.diffs.map((d: any) => ({
-        id: d.id,
-        name: d.name,
-        address: d.address,
-        patch: d.patch,
-        reason: d.reason,
-        currentView: `isZeroPay: ${d.currentIsZeroPay ? "true (됨)" : "false (안됨)"}${
-          d.currentOfficialName ? `\n공식상호: ${d.currentOfficialName}` : ""
-        }`,
-        proposedView: `isZeroPay: ${d.proposedIsZeroPay ? "true (됨)" : "false (안됨)"}${
-          d.proposedOfficialName ? `\n공식상호: ${d.proposedOfficialName}` : ""
-        }`,
-      }));
+      const formatted: DiffItem[] = data.diffs.map((d: any) => {
+        const details: DiffDetailRow[] = [
+          {
+            label: "제로페이 지원 여부",
+            before: d.currentIsZeroPay ? "✅ 사용 가능 (true)" : "❌ 미지원 (false)",
+            after: d.proposedIsZeroPay ? "✅ 사용 가능 (true)" : "❌ 미지원 (false)",
+            isChanged: d.currentIsZeroPay !== d.proposedIsZeroPay,
+          },
+        ];
+
+        if (d.currentOfficialName || d.proposedOfficialName) {
+          details.push({
+            label: "공식 등록 상호명",
+            before: d.currentOfficialName ?? "(없음)",
+            after: d.proposedOfficialName ?? "(없음/삭제)",
+            isChanged: d.currentOfficialName !== d.proposedOfficialName,
+          });
+        }
+
+        if (d.currentOfficialAddress || d.proposedOfficialAddress) {
+          details.push({
+            label: "공식 등록 주소",
+            before: d.currentOfficialAddress ?? "(없음)",
+            after: d.proposedOfficialAddress ?? "(없음/삭제)",
+            isChanged: d.currentOfficialAddress !== d.proposedOfficialAddress,
+          });
+        }
+
+        return {
+          id: d.id,
+          name: d.name,
+          address: d.address,
+          patch: d.patch,
+          reason: d.reason,
+          details,
+        };
+      });
       setDiffItems(formatted);
       setSelectedDiffIds(new Set(formatted.map((f) => f.id)));
       setModalFilterQuery("");
@@ -148,15 +177,45 @@ export default function AdminDashboard({
         setToastMessage("모든 가맹점의 네이버 정보가 최신 상태입니다.");
         return;
       }
-      const formatted: DiffItem[] = data.diffs.map((d: any) => ({
-        id: d.id,
-        name: d.name,
-        address: d.address,
-        patch: d.patch,
-        reason: d.reason,
-        currentView: `전화: ${d.currentPhone ?? "(없음)"}\n상호: ${d.currentNaverMatchedName ?? "(없음)"}`,
-        proposedView: `전화: ${d.proposedPhone ?? "(없음)"}\n상호: ${d.proposedNaverMatchedName ?? "(없음)"}`,
-      }));
+      const formatted: DiffItem[] = data.diffs.map((d: any) => {
+        const details: DiffDetailRow[] = [];
+
+        if (d.currentPhone !== d.proposedPhone) {
+          details.push({
+            label: "전화번호",
+            before: d.currentPhone ?? "(없음)",
+            after: d.proposedPhone ?? "(없음)",
+            isChanged: true,
+          });
+        }
+
+        if (d.currentNaverMatchedName !== d.proposedNaverMatchedName) {
+          details.push({
+            label: "네이버 검색 상호명",
+            before: d.currentNaverMatchedName ?? "(없음)",
+            after: d.proposedNaverMatchedName ?? "(없음)",
+            isChanged: true,
+          });
+        }
+
+        if (d.currentNaverMatchedAddress !== d.proposedNaverMatchedAddress) {
+          details.push({
+            label: "네이버 검색 주소",
+            before: d.currentNaverMatchedAddress ?? "(없음)",
+            after: d.proposedNaverMatchedAddress ?? "(없음)",
+            isChanged: true,
+          });
+        }
+
+        return {
+          id: d.id,
+          name: d.name,
+          address: d.address,
+          patch: d.patch,
+          reason: d.reason,
+          details,
+        };
+      });
       setDiffItems(formatted);
       setSelectedDiffIds(new Set(formatted.map((f) => f.id)));
       setModalFilterQuery("");
@@ -1023,54 +1082,91 @@ export default function AdminDashboard({
 
       {/* 제로페이 / 네이버 정보 점검 변경 내역 프리뷰 및 선택 모달 */}
       {auditModalType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm p-4">
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl overflow-hidden border border-black/10">
+            {/* 상단 액센트 바 */}
+            <div className="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-primary to-amber-500" />
+
             {/* 모달 헤더 */}
-            <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 bg-surface-muted">
-              <div>
-                <h3 className="text-lg font-bold text-ink">
-                  {auditModalType === "zeropay" ? "🛡️ 제로페이 가맹점 전체 점검 결과" : "🔄 네이버 정보 갱신 점검 결과"}
-                </h3>
-                <p className="text-xs text-ink-soft mt-0.5">
-                  총 {diffItems.length}개 가맹점에서 변경 사항이 발견되었습니다. 반영할 항목을 선택해주세요.
-                </p>
+            <div className="flex items-center justify-between border-b border-black/10 px-6 py-4 bg-surface-muted/60">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-light text-xl">
+                  {auditModalType === "zeropay" ? "🛡️" : "🔄"}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-ink flex items-center gap-2">
+                    {auditModalType === "zeropay" ? "제로페이 가맹점 전체 점검 결과" : "네이버 정보 갱신 점검 결과"}
+                    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary-dark">
+                      총 {diffItems.length}건 변경 대상
+                    </span>
+                  </h3>
+                  <p className="text-xs text-ink-soft mt-0.5">
+                    기존 정보와 변경 예정 정보를 대조해 보세요. DB에 실제로 반영할 항목만 체크해주시면 됩니다.
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setAuditModalType(null)}
-                className="rounded-full p-1.5 text-ink-soft hover:bg-black/5 hover:text-ink transition"
+                className="rounded-full p-2 text-ink-soft hover:bg-black/5 hover:text-ink transition"
+                aria-label="닫기"
               >
                 ✕
               </button>
             </div>
 
             {/* 필터 및 전체 선택 컨트롤 바 */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 px-5 py-3 bg-surface">
-              <label className="flex items-center gap-2 text-sm font-semibold text-ink cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={selectedDiffIds.size === diffItems.length && diffItems.length > 0}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedDiffIds(new Set(diffItems.map((d) => d.id)));
-                    } else {
-                      setSelectedDiffIds(new Set());
-                    }
-                  }}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                전체 선택 ({selectedDiffIds.size}/{diffItems.length}개 선택됨)
-              </label>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 px-6 py-3 bg-surface">
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm font-bold text-ink cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={selectedDiffIds.size === diffItems.length && diffItems.length > 0}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedDiffIds(new Set(diffItems.map((d) => d.id)));
+                      } else {
+                        setSelectedDiffIds(new Set());
+                      }
+                    }}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                  />
+                  전체 선택
+                </label>
 
-              <input
-                value={modalFilterQuery}
-                onChange={(e) => setModalFilterQuery(e.target.value)}
-                placeholder="결과 내 검색 (이름/주소)"
-                className="w-64 rounded-lg border border-black/10 px-3 py-1.5 text-xs outline-none focus:border-primary"
-              />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDiffIds(new Set(diffItems.map((d) => d.id)))}
+                    className="text-xs text-primary font-medium hover:underline"
+                  >
+                    전체 체크
+                  </button>
+                  <span className="text-black/20 text-xs">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDiffIds(new Set())}
+                    className="text-xs text-ink-soft font-medium hover:underline"
+                  >
+                    전체 해제
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-full border border-emerald-200">
+                  선택됨: {selectedDiffIds.size} / {diffItems.length}개
+                </span>
+                <input
+                  value={modalFilterQuery}
+                  onChange={(e) => setModalFilterQuery(e.target.value)}
+                  placeholder="식당명/주소로 결과 검색"
+                  className="w-60 rounded-xl border border-black/10 px-3 py-1.5 text-xs outline-none focus:border-primary"
+                />
+              </div>
             </div>
 
             {/* 변경 항목 목록 */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50/50">
               {diffItems
                 .filter((item) => {
                   const q = modalFilterQuery.trim().toLowerCase();
@@ -1079,6 +1175,14 @@ export default function AdminDashboard({
                 })
                 .map((item) => {
                   const isSelected = selectedDiffIds.has(item.id);
+
+                  let badgeBg = "bg-amber-100 border-amber-200 text-amber-800";
+                  if (item.reason.includes("오매칭") || item.reason.includes("삭제") || item.reason.includes("초기화")) {
+                    badgeBg = "bg-rose-100 border-rose-200 text-rose-800";
+                  } else if (item.reason.includes("성공") || item.reason.includes("매칭")) {
+                    badgeBg = "bg-emerald-100 border-emerald-200 text-emerald-800";
+                  }
+
                   return (
                     <div
                       key={item.id}
@@ -1091,41 +1195,73 @@ export default function AdminDashboard({
                         });
                       }}
                       className={[
-                        "flex cursor-pointer flex-col gap-2 rounded-xl border p-4 transition",
-                        isSelected ? "border-primary bg-primary-light/10 shadow-sm" : "border-black/10 bg-surface hover:bg-surface-muted",
+                        "flex cursor-pointer flex-col gap-3 rounded-2xl border p-4 transition shadow-sm",
+                        isSelected ? "border-primary bg-white ring-2 ring-primary/20" : "border-black/10 bg-white/80 opacity-75 hover:opacity-100",
                       ].join(" ")}
                     >
+                      {/* 가맹점 이름 & 사유 태그 헤더 */}
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
                           <input
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => {}}
-                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                            className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary shrink-0 cursor-pointer"
                           />
                           <div>
-                            <h4 className="font-bold text-ink text-sm">{item.name}</h4>
-                            <p className="text-xs text-ink-soft">{item.address}</p>
+                            <h4 className="text-base font-bold text-ink">{item.name}</h4>
+                            <p className="text-xs text-ink-soft mt-0.5">{item.address}</p>
                           </div>
                         </div>
-                        <span className="rounded-md bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 shrink-0">
+                        <span className={`rounded-full border px-3 py-1 text-xs font-bold shrink-0 ${badgeBg}`}>
                           {item.reason}
                         </span>
                       </div>
 
-                      {/* Diff Before ➔ After */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1 rounded-lg bg-surface-muted p-2.5 text-xs">
-                        <div className="flex flex-col gap-0.5 border-r border-black/10 pr-2">
-                          <span className="font-bold text-red-600">기존 (Before)</span>
-                          <pre className="whitespace-pre-wrap font-sans text-ink-soft text-[11px]">
-                            {item.currentView}
-                          </pre>
+                      {/* 1:1 대조 Diff 카드 (Before ➔ After) */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1 text-xs">
+                        {/* 기존 Before Box */}
+                        <div className="rounded-xl border border-rose-100 bg-rose-50/50 p-3">
+                          <div className="flex items-center justify-between border-b border-rose-100 pb-1.5 mb-2">
+                            <span className="font-bold text-rose-800 text-xs flex items-center gap-1">
+                              🔴 기존 정보 (Before)
+                            </span>
+                            <span className="text-[10px] font-semibold text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded">
+                              -[변경전]
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {item.details.map((detail, idx) => (
+                              <div key={idx} className="flex items-start justify-between gap-2">
+                                <span className="font-medium text-ink-soft shrink-0 text-[11px]">{detail.label}:</span>
+                                <span className={detail.isChanged ? "font-semibold text-rose-700 bg-rose-100/80 px-1.5 py-0.5 rounded text-[11px] text-right" : "text-ink-soft text-right text-[11px]"}>
+                                  {detail.before}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex flex-col gap-0.5 pl-2">
-                          <span className="font-bold text-emerald-600">변경 예정 (After)</span>
-                          <pre className="whitespace-pre-wrap font-sans text-ink font-medium text-[11px]">
-                            {item.proposedView}
-                          </pre>
+
+                        {/* 변경 예정 After Box */}
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+                          <div className="flex items-center justify-between border-b border-emerald-200 pb-1.5 mb-2">
+                            <span className="font-bold text-emerald-800 text-xs flex items-center gap-1">
+                              🟢 변경 예정 (After)
+                            </span>
+                            <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-200/80 px-1.5 py-0.5 rounded">
+                              +[변경후]
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {item.details.map((detail, idx) => (
+                              <div key={idx} className="flex items-start justify-between gap-2">
+                                <span className="font-medium text-ink-soft shrink-0 text-[11px]">{detail.label}:</span>
+                                <span className={detail.isChanged ? "font-bold text-emerald-900 bg-emerald-200/90 px-1.5 py-0.5 rounded text-[11px] text-right" : "text-ink text-right text-[11px]"}>
+                                  {detail.after}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1134,22 +1270,27 @@ export default function AdminDashboard({
             </div>
 
             {/* 모달 하단 버튼 */}
-            <div className="flex items-center justify-end gap-2 border-t border-black/10 px-5 py-3 bg-surface-muted">
-              <button
-                onClick={() => setAuditModalType(null)}
-                className="rounded-xl px-4 py-2 text-xs font-semibold text-ink-soft hover:bg-black/5 transition"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleApplyBatchUpdate}
-                disabled={isApplyingBatch || selectedDiffIds.size === 0}
-                className="rounded-xl bg-primary px-5 py-2 text-xs font-bold text-white transition hover:bg-primary-dark disabled:opacity-50"
-              >
-                {isApplyingBatch
-                  ? "DB 반영 중..."
-                  : `선택한 ${selectedDiffIds.size}개 항목 DB 반영하기`}
-              </button>
+            <div className="flex items-center justify-between border-t border-black/10 px-6 py-4 bg-surface-muted">
+              <span className="text-xs text-ink-soft font-medium">
+                체크 해제된 항목은 DB에 반영되지 않으며 기존 상태가 유지됩니다.
+              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setAuditModalType(null)}
+                  className="rounded-xl border border-black/10 bg-white px-4 py-2 text-xs font-semibold text-ink-soft hover:bg-surface-muted transition"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleApplyBatchUpdate}
+                  disabled={isApplyingBatch || selectedDiffIds.size === 0}
+                  className="rounded-xl bg-primary px-6 py-2.5 text-xs font-bold text-white shadow-soft transition hover:bg-primary-dark disabled:opacity-50"
+                >
+                  {isApplyingBatch
+                    ? "DB에 반영하는 중..."
+                    : `선택한 ${selectedDiffIds.size}개 항목 DB 반영하기`}
+                </button>
+              </div>
             </div>
           </div>
         </div>

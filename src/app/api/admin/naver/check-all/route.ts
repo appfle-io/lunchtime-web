@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     const diffs: NaverRefreshDiffItem[] = [];
 
-    // 1단계: 기존 DB에 남아있는 네이버 오매칭(주소/상호 불일치 - 예: 영중로8길 vs 여의서로43) 전수 감지 및 정리
+    // 1단계: 기존 DB에 남아있는 네이버 브랜드 오매칭(예: 스타벅스 ➔ 강창구찹쌀진순대 오탐) 감지 및 정리
     for (const doc of snap.docs) {
       const data = doc.data();
       const id = doc.id;
@@ -85,16 +85,11 @@ export async function POST(request: NextRequest) {
       const currentNaverMatchedName = (data.naverMatchedName as string) ?? null;
       const currentNaverMatchedAddress = (data.naverMatchedAddress as string) ?? null;
 
-      if (currentNaverMatchedName || currentNaverMatchedAddress) {
-        // 브랜드 상호 검증
-        const isBrandValid = currentNaverMatchedName ? validateBrandMatch(name, currentNaverMatchedName) : true;
-        
-        // 주소 도로명 주요 키워드 불일치 검사 (예: '영중로' vs '여의서로')
-        const dbRoadMatch = address.match(/([가-힗0-9]+[로|길])/);
-        const naverRoadMatch = currentNaverMatchedAddress?.match(/([가-힗0-9]+[로|길])/);
-        const isRoadDifferent = dbRoadMatch && naverRoadMatch && dbRoadMatch[1] !== naverRoadMatch[1];
+      if (currentNaverMatchedName) {
+        // 브랜드 상호 정합성 검증 (서해쭈꾸미 ↔ 서해쭈꾸미처럼 동일 브랜드인 경우는 정상 매칭으로 취급)
+        const isBrandValid = validateBrandMatch(name, currentNaverMatchedName);
 
-        if (!isBrandValid || isRoadDifferent) {
+        if (!isBrandValid) {
           diffs.push({
             id,
             name,
@@ -110,7 +105,7 @@ export async function POST(request: NextRequest) {
               naverMatchedAddress: null,
               naverEnrichedAt: new Date().toISOString(),
             },
-            reason: `네이버 오매칭 감지 (DB: '${address}' != 네이버: '${currentNaverMatchedAddress ?? currentNaverMatchedName}') ➔ 오매칭 초기화`,
+            reason: `네이버 브랜드 상호 불일치 오매칭 (DB: '${name}' != 네이버: '${currentNaverMatchedName}') ➔ 오매칭 초기화`,
           });
         }
       }
