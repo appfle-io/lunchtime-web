@@ -35,14 +35,14 @@ export interface ZeroPayAuditDiffItem {
 }
 
 export async function POST(request: NextRequest) {
-  let body: { companyCode?: string };
+  let body: { companyCode?: string; targetIds?: string[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "요청 본문이 올바른 JSON이 아닙니다." }, { status: 400 });
   }
 
-  const { companyCode } = body;
+  const { companyCode, targetIds } = body;
   if (!companyCode) {
     return NextResponse.json({ error: "companyCode가 필요합니다." }, { status: 400 });
   }
@@ -60,9 +60,11 @@ export async function POST(request: NextRequest) {
       .get();
 
     const diffs: ZeroPayAuditDiffItem[] = [];
+    const targetSet = targetIds && targetIds.length > 0 ? new Set(targetIds) : null;
+    const docsToScan = targetSet ? snap.docs.filter((d) => targetSet.has(d.id)) : snap.docs;
 
     // 1단계: 기존 DB 정합성 전수 스캔 (브랜드 불일치 오매칭 즉시 감지)
-    for (const doc of snap.docs) {
+    for (const doc of docsToScan) {
       const data = doc.data();
       const id = doc.id;
       const name = (data.name as string) ?? "";

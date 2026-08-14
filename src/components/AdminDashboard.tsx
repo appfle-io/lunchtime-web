@@ -29,7 +29,7 @@ type Tab = "restaurants" | "requests";
 // 여기 나열한다 - "메뉴"/"상세"/"저장"은 동작/표시용 칸이라 정렬 의미가 없어서 제외.
 // 상태는 (컬럼, 방향) 두 개만 두고, null(컬럼 없음) = "기본(가나다순)"으로 취급해서 클릭 3번째에
 // 다시 null로 돌아가면 "원래대로"가 자연스럽게 재현된다.
-type SortColumn = "name" | "category" | "phone" | "isZeroPay" | "isActive";
+type SortColumn = "name" | "category" | "phone" | "isZeroPay" | "isActive" | "menus";
 type SortDirection = "asc" | "desc";
 
 function getSortValue(r: RestaurantSummary, column: SortColumn): string | number {
@@ -44,6 +44,8 @@ function getSortValue(r: RestaurantSummary, column: SortColumn): string | number
       return r.isZeroPay ? 1 : 0;
     case "isActive":
       return r.isActive === false ? 0 : 1;
+    case "menus":
+      return Array.isArray(r.menus) ? r.menus.length : 0;
   }
 }
 
@@ -95,13 +97,25 @@ export default function AdminDashboard({
   const [isApplyingBatch, setIsApplyingBatch] = useState(false);
   const [modalFilterQuery, setModalFilterQuery] = useState("");
 
+  // 메인 테이블 체크박스 및 갱신 완료 상태 관리
+  const [tableSelectedIds, setTableSelectedIds] = useState<Set<string>>(new Set());
+  const [completedStoreIds, setCompletedStoreIds] = useState<Set<string>>(new Set());
+
   async function handleCheckZeroPayAll() {
     setIsAuditing(true);
+    const targetIds = tableSelectedIds.size > 0 ? Array.from(tableSelectedIds) : undefined;
+    if (targetIds) {
+      setCompletedStoreIds((prev) => {
+        const next = new Set(prev);
+        targetIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    }
     try {
       const res = await fetch("/api/admin/zeropay/check-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyCode }),
+        body: JSON.stringify({ companyCode, targetIds }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -109,7 +123,10 @@ export default function AdminDashboard({
         return;
       }
       if (!data.diffs || data.diffs.length === 0) {
-        setToastMessage("모든 가맹점의 제로페이 정보가 정합성에 부합하며 변경할 항목이 없습니다.");
+        setToastMessage("선택한 가맹점의 제로페이 정보가 정합성에 부합하며 변경할 항목이 없습니다.");
+        if (targetIds) {
+          setCompletedStoreIds((prev) => new Set([...Array.from(prev), ...targetIds]));
+        }
         return;
       }
       const formatted: DiffItem[] = data.diffs.map((d: any) => {
@@ -162,11 +179,19 @@ export default function AdminDashboard({
 
   async function handleCheckNaverAll() {
     setIsAuditing(true);
+    const targetIds = tableSelectedIds.size > 0 ? Array.from(tableSelectedIds) : undefined;
+    if (targetIds) {
+      setCompletedStoreIds((prev) => {
+        const next = new Set(prev);
+        targetIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    }
     try {
       const res = await fetch("/api/admin/naver/check-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyCode }),
+        body: JSON.stringify({ companyCode, targetIds }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -174,7 +199,10 @@ export default function AdminDashboard({
         return;
       }
       if (!data.diffs || data.diffs.length === 0) {
-        setToastMessage("모든 가맹점의 네이버 정보가 최신 상태입니다.");
+        setToastMessage("선택한 가맹점의 네이버 정보가 최신 상태입니다.");
+        if (targetIds) {
+          setCompletedStoreIds((prev) => new Set([...Array.from(prev), ...targetIds]));
+        }
         return;
       }
       const formatted: DiffItem[] = data.diffs.map((d: any) => {
@@ -248,6 +276,7 @@ export default function AdminDashboard({
         setToastMessage(data.error ?? "업데이트 반영에 실패했습니다.");
         return;
       }
+      const updatedIds = selectedList.map((s) => s.id);
       setRows((prev) =>
         prev.map((r) => {
           const matched = selectedList.find((s) => s.id === r.id);
@@ -257,6 +286,7 @@ export default function AdminDashboard({
           return r;
         })
       );
+      setCompletedStoreIds((prev) => new Set([...Array.from(prev), ...updatedIds]));
       setToastMessage(`선택한 ${data.updatedCount ?? selectedList.length}개 가맹점 정보가 DB에 반영되었습니다.`);
       setAuditModalType(null);
     } catch {
@@ -615,14 +645,14 @@ export default function AdminDashboard({
                 disabled={isAuditing}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50 shadow-sm"
               >
-                🛡️ 제로페이 가맹점 전체 점검
+                🛡️ 제로페이 가맹점 {tableSelectedIds.size > 0 ? `선택 점검 (${tableSelectedIds.size}개)` : "전체 점검"}
               </button>
               <button
                 onClick={handleCheckNaverAll}
                 disabled={isAuditing}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
               >
-                🔄 네이버 정보 갱신
+                🔄 네이버 정보 {tableSelectedIds.size > 0 ? `선택 갱신 (${tableSelectedIds.size}개)` : "전체 갱신"}
               </button>
             </div>
           )}
@@ -636,14 +666,45 @@ export default function AdminDashboard({
               placeholder="이름, 주소 또는 메뉴명으로 필터"
               className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
             />
-            <p className="mt-1.5 text-xs text-ink-soft">
-              총 {filteredRows.length}개 {searchQuery && `(전체 ${rows.length}개 중 필터됨)`}
-            </p>
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <p className="text-xs text-ink-soft">
+                총 {filteredRows.length}개 {searchQuery && `(전체 ${rows.length}개 중 필터됨)`}
+              </p>
+              {tableSelectedIds.size > 0 && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="font-semibold text-primary">
+                    선택된 가맹점: {tableSelectedIds.size}개
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setTableSelectedIds(new Set())}
+                    className="text-ink-soft hover:underline"
+                  >
+                    선택 해제
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="mt-3 overflow-x-auto rounded-xl border border-black/10">
-              <table className="w-full min-w-[820px] text-sm">
+              <table className="w-full min-w-[850px] text-sm">
                 <thead>
                   <tr className="border-b border-black/10 bg-surface-muted text-left text-xs text-ink-soft">
+                    <th className="px-2 py-2 text-center font-medium w-14">
+                      <input
+                        type="checkbox"
+                        checked={tableSelectedIds.size === filteredRows.length && filteredRows.length > 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setTableSelectedIds(new Set(filteredRows.map((r) => r.id)));
+                          } else {
+                            setTableSelectedIds(new Set());
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                        title="전체 선택 / 해제"
+                      />
+                    </th>
                     {(
                       [
                         { column: "name" as const, label: "이름", className: "px-2 py-2 font-medium" },
@@ -657,6 +718,11 @@ export default function AdminDashboard({
                         {
                           column: "isActive" as const,
                           label: "사용여부",
+                          className: "px-2 py-2 text-center font-medium",
+                        },
+                        {
+                          column: "menus" as const,
+                          label: "메뉴",
                           className: "px-2 py-2 text-center font-medium",
                         },
                       ] satisfies { column: SortColumn; label: string; className: string }[]
@@ -673,7 +739,6 @@ export default function AdminDashboard({
                         </span>
                       </th>
                     ))}
-                    <th className="px-2 py-2 text-center font-medium">메뉴</th>
                     <th className="px-2 py-2 text-center font-medium">정보수집</th>
                     <th className="px-2 py-2 text-center font-medium">상세</th>
                     <th className="px-2 py-2 text-center font-medium">저장</th>
@@ -683,14 +748,37 @@ export default function AdminDashboard({
                   {pagedRows.map((r) => {
                     const visual = getCategoryVisual(r.category, r.categoryLabel);
                     const isActive = r.isActive !== false;
+                    const isTableChecked = tableSelectedIds.has(r.id);
+                    const isCompleted = completedStoreIds.has(r.id);
+
                     return (
                       <tr
                         key={r.id}
                         className={[
                           "border-b border-black/5 last:border-0",
-                          isActive ? "" : "bg-black/[0.03] opacity-60",
+                          isTableChecked ? "bg-primary-light/10" : isActive ? "" : "bg-black/[0.03] opacity-60",
                         ].join(" ")}
                       >
+                        <td className="px-2 py-1.5 text-center shrink-0">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <input
+                              type="checkbox"
+                              checked={isTableChecked}
+                              onChange={(e) => {
+                                const next = new Set(tableSelectedIds);
+                                if (e.target.checked) next.add(r.id);
+                                else next.delete(r.id);
+                                setTableSelectedIds(next);
+                              }}
+                              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer shrink-0"
+                            />
+                            {isCompleted && (
+                              <span className="rounded bg-emerald-100 border border-emerald-300 px-1 py-0.5 text-[10px] font-bold text-emerald-800 shrink-0">
+                                완료
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-2 py-1.5">
                           <input
                             value={r.name}

@@ -36,14 +36,14 @@ export interface NaverRefreshDiffItem {
 }
 
 export async function POST(request: NextRequest) {
-  let body: { companyCode?: string; limit?: number };
+  let body: { companyCode?: string; limit?: number; targetIds?: string[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "요청 본문이 올바른 JSON이 아닙니다." }, { status: 400 });
   }
 
-  const { companyCode, limit = 30 } = body;
+  const { companyCode, limit = 30, targetIds } = body;
   if (!companyCode) {
     return NextResponse.json({ error: "companyCode가 필요합니다." }, { status: 400 });
   }
@@ -60,15 +60,22 @@ export async function POST(request: NextRequest) {
       .collection("restaurants")
       .get();
 
+    const targetSet = targetIds && targetIds.length > 0 ? new Set(targetIds) : null;
+    const docsToScan = targetSet ? snap.docs.filter((d) => targetSet.has(d.id)) : snap.docs;
+
     // 갱신 우선순위: 전화번호나 네이버 정보가 없거나 갱신 필요 대상 우선, 최대 limit건
-    const pendingDocs = snap.docs
+    const pendingDocs = docsToScan
       .filter((d) => {
         const data = d.data();
         return !data.phone || !data.naverMatchedName || !data.naverEnrichedAt;
       })
       .slice(0, limit);
 
-    const docsToProcess = pendingDocs.length > 0 ? pendingDocs : snap.docs.slice(0, limit);
+    const docsToProcess = targetSet
+      ? docsToScan
+      : pendingDocs.length > 0
+      ? pendingDocs
+      : snap.docs.slice(0, limit);
 
     const companySnap = await db.collection("companies").doc(companyCode).get();
     const districtCode = companySnap.data()?.districtCode ?? "";
@@ -77,7 +84,7 @@ export async function POST(request: NextRequest) {
     const diffs: NaverRefreshDiffItem[] = [];
 
     // 1단계: 기존 DB에 남아있는 네이버 브랜드 오매칭(예: 스타벅스 ➔ 강창구찹쌀진순대 오탐) 감지 및 정리
-    for (const doc of snap.docs) {
+    for (const doc of docsToScan) {
       const data = doc.data();
       const id = doc.id;
       const name = (data.name as string) ?? "";
