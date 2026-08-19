@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "밥시간 | lunchtime",
   description: "회사 동료들과 함께 쓰는 점심 메뉴 추천 서비스",
+  icons: {
+    icon: "/apple-touch-icon.png",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
