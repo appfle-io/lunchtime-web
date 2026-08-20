@@ -69,11 +69,81 @@ function pickEnrichedFields(data: Record<string, unknown>) {
 // 되는 시점(addRestaurantFromCandidate, updateRestaurantAdminFields, zeropay-server의
 // setZeroPayVote)에 invalidateRestaurantsCache()로 즉시 무효화해서 최신 데이터가 바로 반영되게
 // 한다. TTL은 그 사이(다른 서버 인스턴스에서의 쓰기 등)를 대비한 안전망일 뿐이다.
-const RESTAURANTS_CACHE_TTL_MS = 30_000;
-const restaurantsCache = new Map<string, { data: RestaurantSummary[]; expiresAt: number }>();
+// 2026-08-20 신규: Firestore 읽기 비용 극단적 최적화 (방안 1 + 방안 2 결합)
+// 1. globalThis 싱글톤으로 Node.js 모듈 재로드 시 인메모리 캐시 유지 (방안 1)
+// 2. TTL을 5분(300,000ms)으로 연장
+// 3. companies/{code}/cache/restaurants_all 단일 통합 문서 우선 읽기로 1,500회 -> 1회 Read 축소 (방안 2)
+
+declare global {
+  var __restaurantsCache: Map<string, { data: RestaurantSummary[]; expiresAt: number }> | undefined;
+}
+
+const RESTAURANTS_CACHE_TTL_MS = 300_000; // 5분
+const restaurantsCache =
+  globalThis.__restaurantsCache ??
+  (globalThis.__restaurantsCache = new Map<string, { data: RestaurantSummary[]; expiresAt: number }>());
+
+const CHUNK_SIZE = 350; // Firestore 단일 문서 1MB 용량 제한 조회를 위한 분할 크기 (청크당 약 350~450KB)
+
+/**
+ * Firestore 서브컬렉션 전체를 1회 읽어 청크별 캐시 문서(companies/{companyCode}/cache/restaurants_partX) 및 인덱스를 갱신
+ */
+export async function rebuildAggregatedRestaurantsDoc(companyCode: string): Promise<RestaurantSummary[]> {
+  const snapshot = await db
+    .collection("companies")
+    .doc(companyCode)
+    .collection("restaurants")
+    .get();
+
+  const restaurants = snapshot.docs.map((doc) => toRestaurantSummary(doc.id, doc.data()));
+
+  try {
+    const chunks: RestaurantSummary[][] = [];
+    for (let i = 0; i < restaurants.length; i += CHUNK_SIZE) {
+      chunks.push(restaurants.slice(i, i + CHUNK_SIZE));
+    }
+
+    const batch = db.batch();
+    chunks.forEach((chunkItems, index) => {
+      const chunkRef = db
+        .collection("companies")
+        .doc(companyCode)
+        .collection("cache")
+        .doc(`restaurants_part${index}`);
+      batch.set(chunkRef, { items: chunkItems, index });
+    });
+
+    const indexRef = db
+      .collection("companies")
+      .doc(companyCode)
+      .collection("cache")
+      .doc("restaurants_all");
+
+    batch.set(indexRef, {
+      chunkCount: chunks.length,
+      updatedAt: new Date().toISOString(),
+      totalCount: restaurants.length,
+    });
+
+    await batch.commit();
+  } catch (cacheErr) {
+    console.warn(`[restaurantsCache] "${companyCode}" 통합 캐시 문서 저장 실패:`, cacheErr);
+  }
+
+  restaurantsCache.set(companyCode, {
+    data: restaurants,
+    expiresAt: Date.now() + RESTAURANTS_CACHE_TTL_MS,
+  });
+
+  return restaurants;
+}
 
 export function invalidateRestaurantsCache(companyCode: string): void {
   restaurantsCache.delete(companyCode);
+  // 백그라운드로 Firestore 통합 문서 갱신
+  rebuildAggregatedRestaurantsDoc(companyCode).catch((err) =>
+    console.error(`[restaurantsCache] "${companyCode}" 통합 문서 백그라운드 갱신 실패:`, err)
+  );
 }
 
 export function toRestaurantSummary(id: string, data: Record<string, unknown>): RestaurantSummary {
@@ -119,7 +189,7 @@ export function toRestaurantSummary(id: string, data: Record<string, unknown>): 
 
 // 2026-08-11 신규(RestaurantDetail 재오픈 캐시 개선): 식당 문서에서 lastActivityAt 필드 하나만
 // 확인한다(리뷰/제로페이 투표 아무거나 있으면 갱신되는 필드 - review-server.ts addReview,
-// zeropay-server.ts setZeroPayVote 참고). 문서 1건 읍기라 저렴하고, 이 값이 클라이언트가 캐시해둔
+// zeropay-server.ts setZeroPayVote 참고). 문서 1건 읽기라 저렴하고, 이 값이 클라이언트가 캐시해둔
 // 값과 같으면 reviews/제로페이 전체를 다시 안 불러와도 된다는 뜻이다.
 export async function getRestaurantActivity(
   companyCode: string,
@@ -134,22 +204,60 @@ export async function getRestaurantActivity(
   return (snapshot.data()?.lastActivityAt as string | undefined) ?? null;
 }
 
-// companies/{code}/restaurants 서브컬렉션 전체를 읽어온다. 서버(Server Component / API route)에서만 사용.
+// companies/{code}/cache/restaurants_all 인덱스 및 청크 문서를 우선 읽고(청크 개수만큼 Read), 없으면 서브컬렉션 전수 읽기로 폴백
 export async function listRestaurants(companyCode: string): Promise<RestaurantSummary[]> {
   const cached = restaurantsCache.get(companyCode);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
   }
 
-  const snapshot = await db
-    .collection("companies")
-    .doc(companyCode)
-    .collection("restaurants")
-    .get();
+  // 1. 단일 인덱스 문서 및 청크 캐시 문서 읽기 시도
+  try {
+    const indexRef = db
+      .collection("companies")
+      .doc(companyCode)
+      .collection("cache")
+      .doc("restaurants_all");
 
-  const restaurants = snapshot.docs.map((doc) => toRestaurantSummary(doc.id, doc.data()));
-  restaurantsCache.set(companyCode, { data: restaurants, expiresAt: Date.now() + RESTAURANTS_CACHE_TTL_MS });
-  return restaurants;
+    const indexSnap = await indexRef.get();
+    if (indexSnap.exists) {
+      const data = indexSnap.data();
+      const chunkCount = typeof data?.chunkCount === "number" ? data.chunkCount : 0;
+
+      if (chunkCount > 0) {
+        const chunkPromises = Array.from({ length: chunkCount }, (_, i) =>
+          db
+            .collection("companies")
+            .doc(companyCode)
+            .collection("cache")
+            .doc(`restaurants_part${i}`)
+            .get()
+        );
+
+        const chunkSnaps = await Promise.all(chunkPromises);
+        const allItems: RestaurantSummary[] = [];
+
+        for (const snap of chunkSnaps) {
+          if (snap.exists && Array.isArray(snap.data()?.items)) {
+            allItems.push(...(snap.data()!.items as RestaurantSummary[]));
+          }
+        }
+
+        if (allItems.length > 0) {
+          restaurantsCache.set(companyCode, {
+            data: allItems,
+            expiresAt: Date.now() + RESTAURANTS_CACHE_TTL_MS,
+          });
+          return allItems;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[listRestaurants] "${companyCode}" 통합 캐시 문서 읽기 실패, 전체 수집 폴백:`, err);
+  }
+
+  // 2. 통합 문서가 없거나 에러 시 폴백: 서브컬렉션 전체 읽기 후 청크 캐시 문서 자동 생성
+  return await rebuildAggregatedRestaurantsDoc(companyCode);
 }
 
 export interface DuplicateWarning {
