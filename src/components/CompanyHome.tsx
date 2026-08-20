@@ -556,6 +556,7 @@ export default function CompanyHome({
         disableClustering={clusterFilterIds !== null}
         homeSignal={homeSignal}
         onVisibleRestaurantsChange={setMapVisibleIds}
+        onClearFocus={() => setFocusTarget(null)}
         onHomeStateChange={setIsMapAtHome}
       />
 

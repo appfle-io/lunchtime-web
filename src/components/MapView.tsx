@@ -39,6 +39,8 @@ interface MapViewProps {
   // null이면 "제한 없음"(전체를 그대로 보여줘도 됨) - 지도가 아직 준비 안 됐거나, 컬링을
   // 건너뛰는 상태(disableClustering, 클러스터 클릭 직후)일 때 그렇다.
   onVisibleRestaurantsChange?: (ids: Set<string> | null) => void;
+  // 2026-08-20 신규: 사용자가 지도를 직접 드래그/줌해서 움직였을 때 포커스 해제를 위해 부모에게 알림.
+  onClearFocus?: () => void;
   // 2026-08-08 신규: 지도 중심/줌이 "홈" 위치(회사 중심, HOME_ZOOM)에서 조금이라도 벗어났는지를
   // 보고한다. 클러스터 확대/포커스 이동과는 별개로, 사용자가 지도를 직접 드래그/줌해서 조금이라도
   // 움직였을 때도 "전체 지도로 돌아가기" 버튼을 띄우기 위함 - idle마다(즉 boundsVersion이 바뀔
@@ -288,12 +290,19 @@ export default function MapView({
   disableClustering = false,
   homeSignal = 0,
   onVisibleRestaurantsChange,
+  onClearFocus,
   onHomeStateChange,
 }: MapViewProps) {
   const mapElRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const companyMarkerRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
+  // 2026-08-20 신규: 포커스 이동/홈 신호로 인한 자동 지도 이동과 사용자의 직접 조작(드래그/줌)을 구분하기 위한 플래그
+  const isProgrammaticMoveRef = useRef(false);
+  const onClearFocusRef = useRef(onClearFocus);
+  useEffect(() => {
+    onClearFocusRef.current = onClearFocus;
+  }, [onClearFocus]);
   // 2026-08-10 신규: 창 크기 변경(resize)에 반응해 지도를 재조정할 때 쓰는 디바운스 타이머.
   // 아래 resize 이벤트 effect 참고.
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -390,6 +399,19 @@ export default function MapView({
       setBoundsVersion((v) => v + 1);
     });
 
+    // 2026-08-20 신규: 사용자가 직접 지도를 드래그하거나 줌(확대/축소)해서 움직이는 순간
+    // 현재 포커스되어 있던 가맹점을 해제해달라는 요청 반영.
+    window.naver.maps.Event.addListener(mapRef.current, "dragstart", () => {
+      if (!isProgrammaticMoveRef.current) {
+        onClearFocusRef.current?.();
+      }
+    });
+    window.naver.maps.Event.addListener(mapRef.current, "zoom_changed", () => {
+      if (!isProgrammaticMoveRef.current) {
+        onClearFocusRef.current?.();
+      }
+    });
+
     // 2026-08-10 신규: 지도는 생성 시점에 컨테이너의 CSS 크기를 한 번 측정해서 내부 렌더링
     // 크기를 잡는데, 그 시점에 레이아웃이 아직 완전히 자리잡지 않았을 수 있다(스크롤바 유무,
     // 사이드바 폭 계산 등). 다음 프레임에서 한 번 더 실제 크기를 재확인시켜서, "회사 기본
@@ -444,10 +466,15 @@ export default function MapView({
   // 중심/줌으로 되돌린다. 초기 마운트 시(homeSignal===0)에는 실행하지 않는다.
   useEffect(() => {
     if (!homeSignal || !mapRef.current || !window.naver?.maps) return;
+    isProgrammaticMoveRef.current = true;
     const resolvedLat = centerLat ?? FALLBACK_CENTER.lat;
     const resolvedLng = centerLng ?? FALLBACK_CENTER.lng;
     mapRef.current.setCenter(new window.naver.maps.LatLng(resolvedLat, resolvedLng));
     mapRef.current.setZoom(HOME_ZOOM);
+    const timerId = setTimeout(() => {
+      isProgrammaticMoveRef.current = false;
+    }, 400);
+    return () => clearTimeout(timerId);
   }, [homeSignal, centerLat, centerLng]);
 
   // 식당 마커는 별도 effect로 분리 - restaurants가 바뀔 때(예: 직접 추가 후 새로고침, 또는 클러스터
@@ -643,9 +670,14 @@ export default function MapView({
   useEffect(() => {
     if (!mapRef.current || !focusTarget || !window.naver?.maps) return;
 
+    isProgrammaticMoveRef.current = true;
     const target = new window.naver.maps.LatLng(focusTarget.lat, focusTarget.lng);
     mapRef.current.setCenter(target);
     mapRef.current.setZoom(18);
+
+    const timerId = setTimeout(() => {
+      isProgrammaticMoveRef.current = false;
+    }, 400);
 
     // focusTarget으로 이동한 곳이 방금까지의 뷰포트 컬링 범위 밖이었을 수 있으므로(예: 리스트에서
     // 멀리 있는 식당을 클릭), 해당 위치의 마커가 아직 markersRef에 없을 수 있다. setCenter/setZoom은
@@ -656,8 +688,13 @@ export default function MapView({
     if (marker && window.naver.maps.Animation) {
       marker.setAnimation(window.naver.maps.Animation.BOUNCE);
       const timer = setTimeout(() => marker.setAnimation(null), 1500);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timerId);
+        clearTimeout(timer);
+      };
     }
+
+    return () => clearTimeout(timerId);
   }, [focusTarget]);
 
   return (

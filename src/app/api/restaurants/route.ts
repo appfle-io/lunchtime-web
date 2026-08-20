@@ -35,11 +35,18 @@ export async function POST(req: Request) {
 
     const result = await addRestaurantFromCandidate(companyCode, candidate);
 
-    // 새로 만들어진 경우에만 백그라운드로 공식 제로페이 검증 및 정보 보완
+    // 새로 만들어진 경우 공식 제로페이 검증 및 네이버 플레이스 상세 정보(전화번호, 영업시간, 메뉴 등)를 동기 수집
     if (!result.existing) {
-      import("@/lib/enrich-server")
-        .then(({ enrichRestaurantById }) => enrichRestaurantById(companyCode, result.restaurant.id))
-        .catch((err) => console.error(`[enrich] "${candidate.title}" 백그라운드 수집 실패:`, err));
+      try {
+        const { enrichRestaurantById } = await import("@/lib/enrich-server");
+        const enrichResult = await enrichRestaurantById(companyCode, result.restaurant.id);
+        return NextResponse.json({
+          ...result,
+          restaurant: enrichResult.restaurant,
+        });
+      } catch (enrichErr) {
+        console.error(`[enrich] "${candidate.title}" 동기 수집 실패 (기존 후보 정보 반환):`, enrichErr);
+      }
     }
 
     return NextResponse.json(result);

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { useRouter } from "next/navigation";
 import { FixedSizeList, type ListChildComponentProps } from "react-window";
 import BottomSheet from "./BottomSheet";
+import LoadingOverlay from "./LoadingOverlay";
 import type { RestaurantSummary } from "@/types";
 
 // 2026-08-06 밤 신규: 식당이 많을 때(공공데이터 시딩으로 1000+건) 전부 <li> DOM으로 그리면
@@ -341,7 +342,7 @@ export default function RestaurantList({
       } else {
         // 깔끔한 신규 등록
         resetAddFlow();
-        onNotify?.(`"${restaurant.name}"을 추가했어요. 제로페이 여부는 잠시 후 자동으로 확인돼요. ⏳`);
+        onNotify?.(`"${restaurant.name}" 가맹점 정보 수집 및 추가가 완료되었어요! 🎉`);
         onFocusRestaurant?.(restaurant);
       }
     } catch {
@@ -632,6 +633,10 @@ export default function RestaurantList({
             )}
           </div>
         </div>
+      )}
+
+      {addingIndex !== null && (
+        <LoadingOverlay message="네이버 가맹점 정보 수집 및 등록 중..." />
       )}
     </>
   );
