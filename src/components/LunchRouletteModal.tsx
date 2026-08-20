@@ -47,10 +47,10 @@ const SPIN_INTERVAL_MS = 90;
 
 // 반경 선택 옵션(미터). null이면 "거리 제한 없음". 메인 필터바의 "도보 5분"(400m) 기준과
 // 맞추고, 그 위로 10분/15분 단계를 더 뒀다.
-const RADIUS_OPTIONS: { value: number | null; label: string }[] = [
-  { value: 400, label: "도보 5분 이내 (400m)" },
-  { value: 800, label: "도보 10분 이내 (800m)" },
-  { value: 1200, label: "도보 15분 이내 (1.2km)" },
+const RADIUS_OPTIONS: { value: number | null; label: string; maxMinutes?: number }[] = [
+  { value: 400, label: "도보 5분 이내 (400m)", maxMinutes: 5 },
+  { value: 800, label: "도보 10분 이내 (800m)", maxMinutes: 10 },
+  { value: 1200, label: "도보 15분 이내 (1.2km)", maxMinutes: 15 },
   { value: null, label: "거리 제한 없음" },
 ];
 
@@ -112,9 +112,20 @@ export default function LunchRouletteModal({
   );
 
   // 지금 조건(반경/카테고리/제로페이)에 맞는 후보 목록.
+  // 2026-08-20 수정: 직선거리(distanceMeters) 대신 실제 도보 시간(walkingMinutes) 기준으로 엄격하게 판정.
+  // 직선거리 280m가 보도 우회율 1.35로 계산되어 "도보 6분"으로 표시되던 버그 방지.
   const filteredCandidates = useMemo(() => {
+    const selectedOpt = RADIUS_OPTIONS.find((opt) => opt.value === radiusMeters);
+    const maxMinutes = selectedOpt?.maxMinutes;
+
     return allRestaurants.filter((r) => {
-      if (radiusMeters !== null && (r.distanceMeters ?? Infinity) > radiusMeters) return false;
+      if (maxMinutes !== undefined) {
+        if (typeof r.walkingMinutes === "number") {
+          if (r.walkingMinutes > maxMinutes) return false;
+        } else if (radiusMeters !== null && (r.distanceMeters ?? Infinity) > radiusMeters) {
+          return false;
+        }
+      }
       if (categoryLabels.size > 0) {
         const visual = getCategoryVisual(r.category, r.categoryLabel);
         if (!categoryLabels.has(visual.label)) return false;

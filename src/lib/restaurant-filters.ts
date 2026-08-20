@@ -32,7 +32,9 @@ function matchesSpecialFilter(
     case "zeropay":
       return restaurant.isZeroPay;
     case "walk5":
-      return (restaurant.distanceMeters ?? Infinity) <= 400;
+      return typeof restaurant.walkingMinutes === "number"
+        ? restaurant.walkingMinutes <= 5
+        : (restaurant.distanceMeters ?? Infinity) <= 250;
     case "favorite":
       return favoriteIds.has(restaurant.id);
     case "groupdining":
