@@ -65,7 +65,7 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   }
 }
 
-function issueToken(companyCode: string, nicknameId: string, nickname: string): string {
+export function issueToken(companyCode: string, nicknameId: string, nickname: string): string {
   const exp = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS;
   return signSessionToken({ companyCode, nicknameId, nickname, exp });
 }

@@ -16,6 +16,7 @@ import RestaurantSearchModal from "./RestaurantSearchModal";
 import MiniGameModal from "./MiniGameModal";
 import UserMenu from "./UserMenu";
 import PinResetModal from "./PinResetModal";
+import NicknameChangeModal from "./NicknameChangeModal";
 import MealLogCalendar from "./MealLogCalendar";
 import CalendarPanel from "./CalendarPanel";
 import Toast from "./Toast";
@@ -180,6 +181,11 @@ export default function CompanyHome({
     setRestaurants(initialRestaurants);
   }, [initialRestaurants]);
 
+  const [currentNickname, setCurrentNickname] = useState(nickname);
+  useEffect(() => {
+    setCurrentNickname(nickname);
+  }, [nickname]);
+
   // 2026-08-11 신규(firestore 과잉사용 분석 반영): 회사 전체 사용자 목록(/api/users)을 예전엔
   // FriendsModal/LunchVoteModal/LunchRouletteModal 세 모달이 각각 열릴 때마다 따로따로
   // 재조회했다 - 세 모달을 순서대로 열면 같은 목록을 3번 반복 조회하는 낭비였다. 이제
@@ -202,6 +208,8 @@ export default function CompanyHome({
   const [showMiniGame, setShowMiniGame] = useState(false);
   // 2026-08-06 3차 신규: 닉네임 드롭다운의 "비밀번호 변경" 버튼을 눌렀을 때 띄우는 모달 상태.
   const [showPasswordChange, setShowPasswordChange] = useState(false);
+  // 닉네임 드롭다운의 "닉네임 변경" 버튼을 눌렀을 때 띄우는 모달 상태.
+  const [showNicknameChange, setShowNicknameChange] = useState(false);
 
   const unreadNotifCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
 
@@ -209,7 +217,7 @@ export default function CompanyHome({
   // nickname을 정규화한 결정론적 값이라(toNicknameId) 서버를 안 거치고 클라이언트에서 그대로
   // 계산할 수 있다(auth-server.ts가 로그인/가입 시 쓰는 것과 동일한 함수) - MiniGameModal이
   // "나 자신"을 기본 참가자로 넣을 때 필요하다.
-  const myNicknameId = useMemo(() => toNicknameId(nickname), [nickname]);
+  const myNicknameId = useMemo(() => toNicknameId(currentNickname), [currentNickname]);
 
   function handleMealLogged() {
     setMealLogVersion((v) => v + 1);
@@ -504,6 +512,44 @@ export default function CompanyHome({
     setSelectedRestaurant((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
   }
 
+  function handleNicknameChanged(newNickname: string) {
+    setCurrentNickname(newNickname);
+    // sessionStorage 캐시 무효화 (새 닉네임이 전체 사용자 목록에 바로 반영되도록)
+    const cacheKey = `lt:companyUsers:${companyCode}`;
+    try {
+      sessionStorage.removeItem(cacheKey);
+    } catch {}
+    // 회사 사용자 목록 다시 불러오기
+    fetch(`/api/users?companyCode=${encodeURIComponent(companyCode)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const users = data.users ?? [];
+        setCompanyUsers(users);
+        writeSessionCache(cacheKey, users);
+      })
+      .catch(() => {});
+  }
+
+  function handleAddRestaurant(newRestaurant: RestaurantSummary) {
+    // 1. 로컬 식당 상태에 즉시 추가 (0초 딜레이)
+    setRestaurants((prev) => [newRestaurant, ...prev.filter((r) => r.id !== newRestaurant.id)]);
+
+    // 2. 만약 제로페이 필터가 켜져 있는데 비(非)제로페이 식당이면, 즉시 보이도록 제로페이 필터 해제
+    if (activeSpecialFilters.has("zeropay") && !newRestaurant.isZeroPay) {
+      setActiveSpecialFilters((prev) => {
+        const next = new Set(prev);
+        next.delete("zeropay");
+        return next;
+      });
+    }
+
+    // 3. 클러스터 확대 필터가 켜져 있으면 해제하여 새 식당이 가려지지 않게 함
+    setClusterFilterIds(null);
+
+    // 4. 새 식당 위치로 지도 포커스
+    focusRestaurant(newRestaurant);
+  }
+
   async function handleLogout() {
     await fetch("/api/auth", { method: "DELETE" });
     router.refresh();
@@ -626,10 +672,12 @@ export default function CompanyHome({
           onOpenMiniGame={() => setShowMiniGame(true)}
           clusterFilterCount={clusterFilterIds ? clusterFilterIds.size : null}
           onClearClusterFilter={handleGoHome}
+          onAddRestaurant={handleAddRestaurant}
           userMenu={
             <UserMenu
-              nickname={nickname}
+              nickname={currentNickname}
               onLogout={handleLogout}
+              onChangeNickname={() => setShowNicknameChange(true)}
               onChangePassword={() => setShowPasswordChange(true)}
               isAdmin={isAdmin}
               onOpenAdmin={() => startAdminTransition(() => router.push(`/${companyCode}/admin`))}
@@ -667,7 +715,7 @@ export default function CompanyHome({
       <RestaurantDetail
         restaurant={selectedRestaurant}
         companyCode={companyCode}
-        nickname={nickname}
+        nickname={currentNickname}
         isAdmin={isAdmin}
         isFavorite={selectedRestaurant ? favoriteIds.has(selectedRestaurant.id) : false}
         openedFromSearch={openedFromSearch}
@@ -707,7 +755,7 @@ export default function CompanyHome({
 
       <LunchVoteModal
         companyCode={companyCode}
-        myNickname={nickname}
+        myNickname={currentNickname}
         restaurants={restaurants}
         open={showVote}
         onClose={() => setShowVote(false)}
@@ -753,7 +801,7 @@ export default function CompanyHome({
         open={showMiniGame}
         companyCode={companyCode}
         myNicknameId={myNicknameId}
-        myNickname={nickname}
+        myNickname={currentNickname}
         companyUsers={companyUsers}
         onClose={() => setShowMiniGame(false)}
         onNotify={setToastMessage}
@@ -763,10 +811,18 @@ export default function CompanyHome({
         companyCode={companyCode}
         open={showPasswordChange}
         mode="change"
-        fixedNickname={nickname}
+        fixedNickname={currentNickname}
         onClose={() => setShowPasswordChange(false)}
         onNotify={setToastMessage}
         onSuccess={() => setShowPasswordChange(false)}
+      />
+
+      <NicknameChangeModal
+        open={showNicknameChange}
+        currentNickname={currentNickname}
+        onClose={() => setShowNicknameChange(false)}
+        onSuccess={handleNicknameChanged}
+        onNotify={setToastMessage}
       />
 
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />

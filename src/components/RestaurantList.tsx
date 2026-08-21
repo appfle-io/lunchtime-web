@@ -55,6 +55,7 @@ interface RestaurantListProps {
   onToggleFavorite: (restaurant: RestaurantSummary) => void;
   onFocusRestaurant?: (restaurant: RestaurantSummary) => void;
   onSelectRestaurant?: (restaurant: RestaurantSummary) => void;
+  onAddRestaurant?: (restaurant: RestaurantSummary) => void;
   onNotify?: (message: string) => void;
   // 2026-08-06 신규: 알림/친구목록/투표 버튼 (BottomSheet header 슬롯에 같이 둔다)
   unreadNotifCount?: number;
@@ -207,6 +208,7 @@ export default function RestaurantList({
   onToggleFavorite,
   onFocusRestaurant,
   onSelectRestaurant,
+  onAddRestaurant,
   onNotify,
   unreadNotifCount = 0,
   onOpenNotifications,
@@ -324,7 +326,8 @@ export default function RestaurantList({
         return;
       }
 
-      // 신규 등록 성공
+      // 신규 등록 성공: 로컬 상태에 즉시 반영 후 백그라운드 서버 동기화
+      onAddRestaurant?.(restaurant);
       router.refresh();
 
       if (warn) {

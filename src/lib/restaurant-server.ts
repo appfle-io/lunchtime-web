@@ -138,6 +138,18 @@ export async function rebuildAggregatedRestaurantsDoc(companyCode: string): Prom
   return restaurants;
 }
 
+export function updateInMemoryRestaurantsCache(companyCode: string, updatedOrNew: RestaurantSummary): void {
+  const cached = restaurantsCache.get(companyCode);
+  if (cached) {
+    const existingIndex = cached.data.findIndex((r) => r.id === updatedOrNew.id);
+    if (existingIndex >= 0) {
+      cached.data[existingIndex] = updatedOrNew;
+    } else {
+      cached.data = [updatedOrNew, ...cached.data];
+    }
+  }
+}
+
 export function invalidateRestaurantsCache(companyCode: string): void {
   restaurantsCache.delete(companyCode);
   // 백그라운드로 Firestore 통합 문서 갱신
