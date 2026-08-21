@@ -8,6 +8,24 @@ export interface ZeroPayOfficialCheckResult {
   isNotFoodBiz?: boolean;
 }
 
+export interface TraceStep {
+  step: string;
+  status: "pass" | "fail" | "skip" | "info";
+  message: string;
+  details?: Record<string, any>;
+}
+
+export interface ZeroPayTraceResult {
+  result: ZeroPayOfficialCheckResult;
+  targetName: string;
+  targetAddress: string;
+  targetDistrict: string;
+  queriesTried: string[];
+  steps: TraceStep[];
+  matchedReason?: string;
+  failedReason?: string;
+}
+
 const FOOD_BIZ_KEYWORDS = [
   "음식점", "육류", "요리", "중식", "일식", "서양식", "제과", "피자", "햄버거",
   "샌드위치", "치킨", "김밥", "간이", "포장", "생맥주", "주점", "커피", "카페",
@@ -165,27 +183,39 @@ const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 /**
- * Pure HTTP fetch를 통한 제로페이 가맹점 직접 조회 (Vercel Serverless 환경 100% 지원)
+ * Pure HTTP fetch를 통한 제로페이 가맹점 상세 추적 및 실시간 검증 (Vercel Serverless 환경 100% 지원)
  */
-async function queryZeroPayPureHttp(
+export async function checkZeroPayOfficialWithTrace(
   merchantName: string,
   dbAddress?: string
-): Promise<ZeroPayOfficialCheckResult | null> {
-  try {
-    const targetDistrict = extractDistrict(dbAddress);
-    const variants = generateQueryVariants(merchantName);
+): Promise<ZeroPayTraceResult> {
+  const targetDistrict = extractDistrict(dbAddress);
+  const variants = generateQueryVariants(merchantName);
+  const steps: TraceStep[] = [];
 
-    for (const queryKey of variants) {
-      const bodyParams = new URLSearchParams({
-        AFLT_ADDR_CITY: "서울특별시",
-        AFLT_ADDR_CITY_SIMPLE: "서울",
-        AFLT_ADDR_GU: targetDistrict,
-        AFLT_NM: queryKey,
-        AFLT_ROAD_ADDR: "",
-        BIZ_TYPE_CD: "",
-        TRX_TP: "01",
-      });
+  steps.push({
+    step: "1. 검색어 변형 생성",
+    status: "info",
+    message: `검색어 변형 ${variants.length}개 생성 (${variants.slice(0, 5).join(", ")}${variants.length > 5 ? " 외..." : ""}), 지역구: '${targetDistrict}'`,
+    details: { targetName: merchantName, targetAddress: dbAddress, targetDistrict, variants },
+  });
 
+  let matchedResult: ZeroPayOfficialCheckResult | null = null;
+  let matchedReason: string | undefined;
+
+  for (let idx = 0; idx < variants.length; idx++) {
+    const queryKey = variants[idx];
+    const bodyParams = new URLSearchParams({
+      AFLT_ADDR_CITY: "서울특별시",
+      AFLT_ADDR_CITY_SIMPLE: "서울",
+      AFLT_ADDR_GU: targetDistrict,
+      AFLT_NM: queryKey,
+      AFLT_ROAD_ADDR: "",
+      BIZ_TYPE_CD: "",
+      TRX_TP: "01",
+    });
+
+    try {
       const res = await fetch("https://www.zeropay.or.kr/UI_HP_009_03.act", {
         method: "POST",
         headers: {
@@ -198,35 +228,126 @@ async function queryZeroPayPureHttp(
         signal: AbortSignal.timeout(4000),
       });
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        steps.push({
+          step: `2. 공식 서버 조회 [${idx + 1}/${variants.length}]`,
+          status: "fail",
+          message: `검색어 '${queryKey}' 조회 HTTP ${res.status} 오류`,
+          details: { queryKey, status: res.status },
+        });
+        continue;
+      }
+
       const json = await res.json().catch(() => null);
       const list = json?.LIST2 ?? [];
 
-      if (Array.isArray(list) && list.length > 0) {
-        const matched = list.find((item: any) => {
-          const itemAddr = item.AFLT_ROAD_ADDR ?? "";
-          const itemNm = item.AFLT_NM ?? "";
-          return isAddressMatched(dbAddress ?? "", itemAddr) && validateBrandMatch(merchantName, itemNm);
+      if (!Array.isArray(list) || list.length === 0) {
+        steps.push({
+          step: `2. 공식 서버 조회 [${idx + 1}/${variants.length}]`,
+          status: "info",
+          message: `검색어 '${queryKey}' 조회 ➔ 검색 결과 0건`,
+          details: { queryKey, resultCount: 0 },
         });
+        continue;
+      }
 
-        if (matched) {
-          const bizType = matched.BIZ_TYPE ?? "";
-          if (!isFoodBizType(bizType)) {
-            return { isZeroPay: false, isNotFoodBiz: true, bizType };
+      steps.push({
+        step: `2. 공식 서버 조회 [${idx + 1}/${variants.length}]`,
+        status: "info",
+        message: `검색어 '${queryKey}' 조회 ➔ ${list.length}건 발견. 후보 가맹점 검증 시작`,
+        details: { queryKey, resultCount: list.length },
+      });
+
+      // 발견된 후보 목록 전수 검증
+      let matchedInList = false;
+      for (const item of list) {
+        const itemAddr = item.AFLT_ROAD_ADDR ?? "";
+        const itemNm = item.AFLT_NM ?? "";
+        const bizType = item.BIZ_TYPE ?? "";
+
+        const addrMatch = isAddressMatched(dbAddress ?? "", itemAddr);
+        const brandMatch = validateBrandMatch(merchantName, itemNm);
+        const foodMatch = isFoodBizType(bizType);
+
+        if (addrMatch && brandMatch) {
+          if (!foodMatch) {
+            steps.push({
+              step: `3. 후보 검증: '${itemNm}'`,
+              status: "fail",
+              message: `❌ 비음식/유통 업종 (${bizType})으로 제외`,
+              details: { itemNm, itemAddr, bizType, addrMatch, brandMatch, foodMatch: false },
+            });
+            continue;
           }
-          return {
+
+          matchedResult = {
             isZeroPay: true,
-            officialName: matched.AFLT_NM,
-            officialAddress: matched.AFLT_ROAD_ADDR,
+            officialName: itemNm,
+            officialAddress: itemAddr,
             bizType,
           };
+
+          matchedReason = `검색어 '${queryKey}'로 공식 가맹점 '${itemNm}' 발견, 주소 일치(DB: '${dbAddress ?? ""}' ↔ 공식: '${itemAddr}'), 브랜드 일치 판정 ➔ 제로페이 가맹점 확정`;
+
+          steps.push({
+            step: `3. 후보 검증: '${itemNm}'`,
+            status: "pass",
+            message: `✅ 매칭 성공! 공식상호: '${itemNm}', 공식주소: '${itemAddr}', 업종: '${bizType}'`,
+            details: { itemNm, itemAddr, bizType, queryKey, addrMatch: true, brandMatch: true },
+          });
+
+          matchedInList = true;
+          break;
+        } else {
+          const failReasons: string[] = [];
+          if (!addrMatch) failReasons.push(`주소 불일치 (DB: '${dbAddress ?? ""}' vs 공식: '${itemAddr}')`);
+          if (!brandMatch) failReasons.push(`브랜드 불일치 (DB: '${merchantName}' vs 공식: '${itemNm}')`);
+
+          steps.push({
+            step: `3. 후보 검증: '${itemNm}'`,
+            status: "fail",
+            message: `❌ 탈락: ${failReasons.join(", ")}`,
+            details: { itemNm, itemAddr, bizType, addrMatch, brandMatch },
+          });
         }
       }
+
+      if (matchedInList) {
+        break;
+      }
+    } catch (err) {
+      steps.push({
+        step: `2. 공식 서버 조회 [${idx + 1}/${variants.length}]`,
+        status: "fail",
+        message: `검색어 '${queryKey}' 조회 중 예외/타임아웃 발생: ${(err as Error).message}`,
+        details: { queryKey },
+      });
     }
-  } catch (_) {
-    // 회사망 차단 또는 타임아웃 발생 시 null 반환하여 다음 처리
   }
-  return null;
+
+  const finalResult = matchedResult ?? { isZeroPay: false };
+  const failedReason = matchedResult
+    ? undefined
+    : `검색어 변형 ${variants.length}개('${variants.slice(0, 3).join("', '")}' 등)를 공식 서버에 모두 질의했으나, 주소/브랜드가 일치하는 제로페이 가맹점을 찾지 못했습니다.`;
+
+  return {
+    result: finalResult,
+    targetName: merchantName,
+    targetAddress: dbAddress ?? "",
+    targetDistrict,
+    queriesTried: variants,
+    steps,
+    matchedReason,
+    failedReason,
+  };
+}
+
+async function queryZeroPayPureHttp(
+  merchantName: string,
+  dbAddress?: string
+): Promise<ZeroPayOfficialCheckResult | null> {
+  const { result } = await checkZeroPayOfficialWithTrace(merchantName, dbAddress);
+  return result;
 }
 
 export async function checkZeroPayOfficial(

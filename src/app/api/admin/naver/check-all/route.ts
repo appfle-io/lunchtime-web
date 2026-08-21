@@ -3,9 +3,8 @@ import { cookies } from "next/headers";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth-server";
 import { isAdminUser } from "@/lib/admin-server";
 import { db } from "@/lib/firebase";
-import { searchNaverLocal, stripHtmlTags } from "@/lib/naver-local-search";
-import { validateBrandMatch } from "@/lib/zeropay-official";
-import { enrichRestaurantById } from "@/lib/enrich-server";
+import { validateBrandMatch, type TraceStep } from "@/lib/zeropay-official";
+import { enrichRestaurantByIdWithTrace } from "@/lib/enrich-server";
 
 async function requireAdmin(companyCode: string) {
   const sessionToken = cookies().get(SESSION_COOKIE_NAME)?.value;
@@ -31,9 +30,26 @@ export interface NaverRefreshDiffItem {
     naverMatchedName?: string | null;
     naverMatchedAddress?: string | null;
     category?: string;
+    categoryLabel?: string | null;
+    naverPlaceUrl?: string | null;
+    businessHours?: string | null;
+    facilities?: string[];
+    paymentMethods?: string[];
+    menus?: any[];
+    isZeroPay?: boolean;
     naverEnrichedAt?: string;
   };
   reason: string;
+}
+
+export interface NaverAuditLogItem {
+  storeId: string;
+  storeName: string;
+  address: string;
+  status: "match_success" | "match_fail" | "mismatch_fixed" | "unchanged" | "error";
+  summary: string;
+  steps: TraceStep[];
+  diff?: NaverRefreshDiffItem;
 }
 
 export async function POST(request: NextRequest) {
@@ -44,7 +60,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "요청 본문이 올바른 JSON이 아닙니다." }, { status: 400 });
   }
 
-  const { companyCode, limit = 30, targetIds } = body;
+  const { companyCode, limit = 50, targetIds } = body;
   if (!companyCode) {
     return NextResponse.json({ error: "companyCode가 필요합니다." }, { status: 400 });
   }
@@ -54,79 +70,49 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
   }
 
-  try {
-    const snap = await db
-      .collection("companies")
-      .doc(companyCode)
-      .collection("restaurants")
-      .get();
+  const encoder = new TextEncoder();
 
-    const targetSet = targetIds && targetIds.length > 0 ? new Set(targetIds) : null;
-    const docsToScan = targetSet ? snap.docs.filter((d) => targetSet.has(d.id)) : snap.docs;
-
-    // 갱신 우선순위: 전화번호나 네이버 정보가 없거나 갱신 필요 대상 우선, 최대 limit건
-    const pendingDocs = docsToScan
-      .filter((d) => {
-        const data = d.data();
-        return !data.phone || !data.naverMatchedName || !data.naverEnrichedAt;
-      })
-      .slice(0, limit);
-
-    const docsToProcess = targetSet
-      ? docsToScan
-      : pendingDocs.length > 0
-      ? pendingDocs
-      : snap.docs.slice(0, limit);
-
-    const companySnap = await db.collection("companies").doc(companyCode).get();
-    const districtCode = companySnap.data()?.districtCode ?? "";
-    const districtKeyword = districtCode.replace(/(구|시|군)$/, "").trim();
-
-    const diffs: NaverRefreshDiffItem[] = [];
-
-    // 1단계: 기존 DB에 남아있는 네이버 브랜드 오매칭(예: 스타벅스 ➔ 강창구찹쌀진순대 오탐) 감지 및 정리
-    for (const doc of docsToScan) {
-      const data = doc.data();
-      const id = doc.id;
-      const name = (data.name as string) ?? "";
-      const address = (data.address as string) ?? "";
-      const currentNaverMatchedName = (data.naverMatchedName as string) ?? null;
-      const currentNaverMatchedAddress = (data.naverMatchedAddress as string) ?? null;
-
-      if (currentNaverMatchedName) {
-        // 브랜드 상호 정합성 검증 (서해쭈꾸미 ↔ 서해쭈꾸미처럼 동일 브랜드인 경우는 정상 매칭으로 취급)
-        const isBrandValid = validateBrandMatch(name, currentNaverMatchedName);
-
-        if (!isBrandValid) {
-          diffs.push({
-            id,
-            name,
-            address,
-            currentPhone: (data.phone as string) ?? null,
-            proposedPhone: (data.phone as string) ?? null,
-            currentNaverMatchedName,
-            proposedNaverMatchedName: null,
-            currentNaverMatchedAddress,
-            proposedNaverMatchedAddress: null,
-            patch: {
-              naverMatchedName: null,
-              naverMatchedAddress: null,
-              naverEnrichedAt: new Date().toISOString(),
-            },
-            reason: `네이버 브랜드 상호 불일치 오매칭 (DB: '${name}' != 네이버: '${currentNaverMatchedName}') ➔ 오매칭 초기화`,
-          });
-        }
+  const stream = new ReadableStream({
+    async start(controller) {
+      function sendEvent(data: Record<string, any>) {
+        controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
       }
-    }
 
-    // 2단계: 대상 가맹점들의 네이버 플레이스 상세 수집기(enrichRestaurantById) 실시간 실행 (3개씩 병렬)
-    // 💡 수동수집 버튼과 동일한 고성능 수집 엔진을 사용하여 메뉴, 영업시간, 전화번호, 제로페이, 플레이스 링크까지 완벽하게 수집합니다.
-    const BATCH_SIZE = 3;
-    for (let i = 0; i < docsToProcess.length; i += BATCH_SIZE) {
-      const chunk = docsToProcess.slice(i, i + BATCH_SIZE);
+      try {
+        const snap = await db
+          .collection("companies")
+          .doc(companyCode)
+          .collection("restaurants")
+          .get();
 
-      await Promise.all(
-        chunk.map(async (doc) => {
+        const targetSet = targetIds && targetIds.length > 0 ? new Set(targetIds) : null;
+        const docsToScan = targetSet ? snap.docs.filter((d) => targetSet.has(d.id)) : snap.docs;
+
+        const pendingDocs = docsToScan
+          .filter((d) => {
+            const data = d.data();
+            return !data.phone || !data.naverMatchedName || !data.naverEnrichedAt;
+          })
+          .slice(0, limit);
+
+        const docsToProcess = targetSet
+          ? docsToScan
+          : pendingDocs.length > 0
+          ? pendingDocs
+          : docsToScan.slice(0, limit);
+
+        const diffs: NaverRefreshDiffItem[] = [];
+        const total = docsToProcess.length;
+
+        sendEvent({
+          type: "start",
+          total,
+          companyCode,
+          message: `네이버 정보 갱신 점검 시작 (총 ${total}개 가맹점 대상)`,
+        });
+
+        for (let i = 0; i < total; i++) {
+          const doc = docsToProcess[i];
           const data = doc.data();
           const id = doc.id;
           const name = (data.name as string) ?? "";
@@ -134,46 +120,68 @@ export async function POST(request: NextRequest) {
           const currentPhone = (data.phone as string) ?? null;
           const currentNaverMatchedName = (data.naverMatchedName as string) ?? null;
           const currentNaverMatchedAddress = (data.naverMatchedAddress as string) ?? null;
-          const currentMenus = Array.isArray(data.menus) ? data.menus : [];
-          const currentZeroPay = Boolean(data.isZeroPay);
 
+          const steps: TraceStep[] = [];
+          let logStatus: NaverAuditLogItem["status"] = "unchanged";
+          let logSummary = "네이버 정보 최신 상태";
+          let diffItem: NaverRefreshDiffItem | undefined;
+
+          // 1. 기존 DB 브랜드 불일치 오매칭 감지
+          let hasExistingMismatch = false;
+          if (currentNaverMatchedName) {
+            const isBrandValid = validateBrandMatch(name, currentNaverMatchedName);
+            if (!isBrandValid) {
+              hasExistingMismatch = true;
+              diffItem = {
+                id,
+                name,
+                address,
+                currentPhone,
+                proposedPhone: currentPhone,
+                currentNaverMatchedName,
+                proposedNaverMatchedName: null,
+                currentNaverMatchedAddress,
+                proposedNaverMatchedAddress: null,
+                patch: {
+                  naverMatchedName: null,
+                  naverMatchedAddress: null,
+                  naverEnrichedAt: new Date().toISOString(),
+                },
+                reason: `네이버 브랜드 상호 불일치 오매칭 (DB: '${name}' != 네이버: '${currentNaverMatchedName}') ➔ 오매칭 초기화`,
+              };
+              logStatus = "mismatch_fixed";
+              logSummary = `⚠️ 기존 네이버 오매칭 감지: '${currentNaverMatchedName}' 불일치 ➔ 초기화`;
+              steps.push({
+                step: "기존 DB 정합성 검증",
+                status: "fail",
+                message: `기존 네이버 매칭명 '${currentNaverMatchedName}'가 DB 상호 '${name}'과 브랜드 불일치하여 오매칭 판정됨`,
+                details: { dbName: name, naverMatchedName: currentNaverMatchedName },
+              });
+            }
+          }
+
+          // 2. 네이버 플레이스 상세 수집기 실행 (saveToDb: false로 점검 모드 실행)
           try {
-            const enrichRes = await enrichRestaurantById(companyCode, id);
-            const newRest = enrichRes.restaurant;
+            const { enrichResult, steps: enrichSteps, changesSummary } = await enrichRestaurantByIdWithTrace(
+              companyCode,
+              id,
+              { saveToDb: false }
+            );
+
+            enrichSteps.forEach((s) => steps.push(s));
+            const newRest = enrichResult.restaurant;
 
             const proposedPhone = newRest.phone ?? null;
             const proposedNaverMatchedName = newRest.naverMatchedName ?? null;
-            const proposedNaverMatchedAddress = (data.naverMatchedAddress as string) ?? null;
+            const proposedNaverMatchedAddress = newRest.address ?? null;
             const proposedMenus = newRest.menus ?? [];
 
-            const changes: string[] = [];
-
-            if (proposedPhone && proposedPhone !== currentPhone) {
-              changes.push(`전화번호: ${currentPhone ?? "(없음)"} ➔ ${proposedPhone}`);
-            }
-
-            if (proposedNaverMatchedName && proposedNaverMatchedName !== currentNaverMatchedName) {
-              changes.push(`네이버상호: ${currentNaverMatchedName ?? "(없음)"} ➔ ${proposedNaverMatchedName}`);
-            }
-
-            if (proposedMenus.length !== currentMenus.length) {
-              changes.push(`메뉴: ${currentMenus.length}개 ➔ ${proposedMenus.length}개 수집`);
-            }
-
-            if (newRest.isZeroPay !== currentZeroPay) {
-              changes.push(`제로페이: ${currentZeroPay ? "가능" : "불가"} ➔ ${newRest.isZeroPay ? "가능" : "불가"}`);
-            }
-
-            if (newRest.naverPlaceUrl && !data.naverPlaceUrl) {
-              changes.push(`네이버지도 링크 연동 완료`);
-            }
-
-            const patch: Record<string, any> = {
-              phone: proposedPhone,
+            const patch: NaverRefreshDiffItem["patch"] = {
+              phone: proposedPhone || undefined,
               naverMatchedName: proposedNaverMatchedName,
               naverPlaceUrl: newRest.naverPlaceUrl ?? null,
               categoryLabel: newRest.categoryLabel ?? null,
-              businessHours: newRest.businessHours ?? null,
+              businessHours: newRest.businessHours ? (typeof newRest.businessHours === "string" ? newRest.businessHours : JSON.stringify(newRest.businessHours)) : null,
               facilities: newRest.facilities ?? [],
               paymentMethods: newRest.paymentMethods ?? [],
               menus: proposedMenus,
@@ -181,9 +189,8 @@ export async function POST(request: NextRequest) {
               naverEnrichedAt: new Date().toISOString(),
             };
 
-            // 선택 수집이거나 변경사항이 있는 경우 diff 목록에 추가
-            if (changes.length > 0 || targetSet) {
-              diffs.push({
+            if (changesSummary.length > 0) {
+              diffItem = {
                 id,
                 name,
                 address,
@@ -192,21 +199,87 @@ export async function POST(request: NextRequest) {
                 currentNaverMatchedName,
                 proposedNaverMatchedName,
                 currentNaverMatchedAddress,
-                proposedNaverMatchedAddress: currentNaverMatchedAddress,
+                proposedNaverMatchedAddress,
                 patch,
-                reason: changes.length > 0 ? changes.join(", ") : "네이버 플레이스 최신 정보 수집 완료",
-              });
+                reason: changesSummary.join(", "),
+              };
+              logStatus = "match_success";
+              logSummary = `✅ 정보 갱신 항목 발견: ${changesSummary.join(", ")}`;
+            } else if (targetSet) {
+              diffItem = {
+                id,
+                name,
+                address,
+                currentPhone,
+                proposedPhone,
+                currentNaverMatchedName,
+                proposedNaverMatchedName,
+                currentNaverMatchedAddress,
+                proposedNaverMatchedAddress,
+                patch,
+                reason: "네이버 플레이스 최신 정보 동기화",
+              };
+              logStatus = "match_success";
+              logSummary = `✅ 네이버 플레이스 최신 정보 확인 완료 (전화번호: ${proposedPhone ?? "없음"}, 메뉴: ${proposedMenus.length}개)`;
+            } else {
+              logStatus = "unchanged";
+              logSummary = `ℹ️ 최신 정보와 일치 (변경 항목 없음)`;
             }
           } catch (enrichErr) {
-            console.warn(`[check-all] "${name}" 수동수집 엔진 실행 실패:`, enrichErr);
+            logStatus = "error";
+            logSummary = `수집 중 오류 발생: ${(enrichErr as Error).message}`;
+            steps.push({
+              step: "네이버 플레이스 수집",
+              status: "fail",
+              message: `수집 실패: ${(enrichErr as Error).message}`,
+            });
           }
-        })
-      );
-    }
 
-    return NextResponse.json({ diffs, totalChecked: snap.size, totalCount: snap.size });
-  } catch (err) {
-    console.error("[admin/naver/check-all] 갱신 점검 실패:", err);
-    return NextResponse.json({ error: "네이버 정보 갱신 점검 중 오류가 발생했습니다." }, { status: 500 });
-  }
+          if (diffItem) {
+            diffs.push(diffItem);
+          }
+
+          const logItem: NaverAuditLogItem = {
+            storeId: id,
+            storeName: name,
+            address,
+            status: logStatus,
+            summary: logSummary,
+            steps,
+            diff: diffItem,
+          };
+
+          sendEvent({
+            type: "progress",
+            current: i + 1,
+            total,
+            log: logItem,
+            diff: diffItem,
+          });
+        }
+
+        sendEvent({
+          type: "done",
+          totalChecked: total,
+          diffs,
+          message: `네이버 정보 갱신 점검 완료 (총 ${total}개 중 ${diffs.length}개 변경 항목 발견)`,
+        });
+      } catch (err) {
+        sendEvent({
+          type: "error",
+          error: (err as Error).message ?? "네이버 정보 갱신 점검 중 오류가 발생했습니다.",
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+    },
+  });
 }
