@@ -17,6 +17,7 @@ import MiniGameModal from "./MiniGameModal";
 import UserMenu from "./UserMenu";
 import PinResetModal from "./PinResetModal";
 import NicknameChangeModal from "./NicknameChangeModal";
+import UserGuideModal from "./UserGuideModal";
 import MealLogCalendar from "./MealLogCalendar";
 import CalendarPanel from "./CalendarPanel";
 import Toast from "./Toast";
@@ -210,6 +211,27 @@ export default function CompanyHome({
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   // 닉네임 드롭다운의 "닉네임 변경" 버튼을 눌렀을 때 띄우는 모달 상태.
   const [showNicknameChange, setShowNicknameChange] = useState(false);
+  // 사용 가이드 모달 상태.
+  const [showGuide, setShowGuide] = useState(false);
+
+  // 최초 진입 시 사용 가이드 자동 노출 여부 확인
+  useEffect(() => {
+    try {
+      const dismissed = localStorage.getItem("lunchtime_guide_dismissed");
+      if (!dismissed) {
+        setShowGuide(true);
+      }
+    } catch {}
+  }, []);
+
+  function handleCloseGuide(dontShowAgain?: boolean) {
+    if (dontShowAgain) {
+      try {
+        localStorage.setItem("lunchtime_guide_dismissed", "true");
+      } catch {}
+    }
+    setShowGuide(false);
+  }
 
   const unreadNotifCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
 
@@ -681,6 +703,7 @@ export default function CompanyHome({
               onChangePassword={() => setShowPasswordChange(true)}
               isAdmin={isAdmin}
               onOpenAdmin={() => startAdminTransition(() => router.push(`/${companyCode}/admin`))}
+              onOpenGuide={() => setShowGuide(true)}
             />
           }
           // 2026-08-06 심야 3번째 개편: 데스크톱에서는 MealLogCalendar를 아래 CalendarPanel(별도
@@ -823,6 +846,11 @@ export default function CompanyHome({
         onClose={() => setShowNicknameChange(false)}
         onSuccess={handleNicknameChanged}
         onNotify={setToastMessage}
+      />
+
+      <UserGuideModal
+        open={showGuide}
+        onClose={handleCloseGuide}
       />
 
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />

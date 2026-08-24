@@ -10,6 +10,7 @@ interface UserMenuProps {
   // 2026-08-09 신규: 관리자(isAdmin)에게만 "관리자 페이지" 항목을 보여주기 위한 값/핸들러.
   isAdmin?: boolean;
   onOpenAdmin?: () => void;
+  onOpenGuide?: () => void;
 }
 
 // 2026-08-06 3차 신규: 예전엔 "{닉네임}님 · 로그아웃" 버튼 하나가 지도 좌상단에 절대좌표로
@@ -25,6 +26,7 @@ export default function UserMenu({
   onChangeNickname,
   isAdmin,
   onOpenAdmin,
+  onOpenGuide,
 }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -39,7 +41,18 @@ export default function UserMenu({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative shrink-0">
+    <div ref={rootRef} className="relative flex shrink-0 items-center gap-1.5">
+      {onOpenGuide && (
+        <button
+          type="button"
+          onClick={onOpenGuide}
+          title="사용 가이드"
+          aria-label="사용 가이드"
+          className="flex h-6 w-6 items-center justify-center rounded-full bg-surface-muted text-xs font-bold text-ink-soft transition hover:bg-black/10 hover:text-ink"
+        >
+          ?
+        </button>
+      )}
       <button
         onClick={() => setOpen((v) => !v)}
         className="whitespace-nowrap rounded-full bg-surface-muted px-2.5 py-1 text-xs font-medium text-ink-soft transition hover:text-primary-dark"
@@ -79,6 +92,17 @@ export default function UserMenu({
           >
             비밀번호 변경
           </button>
+          {onOpenGuide && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                onOpenGuide();
+              }}
+              className="block w-full px-3 py-2 text-left text-xs text-ink transition hover:bg-surface-muted"
+            >
+              사용 가이드
+            </button>
+          )}
           <button
             onClick={() => {
               setOpen(false);
