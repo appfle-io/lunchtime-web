@@ -376,7 +376,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
           <div className="flex h-36 w-full flex-col justify-center gap-2 rounded-xl border border-black/10 bg-slate-50 p-3.5">
             <div className="flex items-center justify-between rounded-lg bg-white p-2 shadow-xs">
               <span className="text-xs font-bold text-ink">❤️ 즐겨찾는 식당 등록됨</span>
-              <span className="text-[10px] text-ink-soft">상단 '즐겨찾기' 필터로 조회</span>
+              <span className="text-[10px] text-ink-soft">상단 즐겨찾기 필터로 조회</span>
             </div>
             <div className="flex items-center justify-between rounded-lg bg-white p-2 shadow-xs">
               <span className="text-xs text-ink-soft">비플페이 되나요?</span>
