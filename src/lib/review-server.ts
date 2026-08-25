@@ -10,6 +10,7 @@ export async function listReviews(companyCode: string, restaurantId: string): Pr
     .doc(restaurantId)
     .collection("reviews")
     .orderBy("createdAt", "desc")
+    .limit(30)
     .get();
 
   return snapshot.docs.map((doc) => {

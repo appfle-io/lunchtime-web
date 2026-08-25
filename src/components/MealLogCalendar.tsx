@@ -18,6 +18,8 @@ export interface MealLogEntry {
 interface MealLogCalendarProps {
   companyCode: string;
   restaurants: RestaurantSummary[]; // 날짜 편집 모달에서 "기존 식당 검색해서 선택"할 때 씀
+  onFocusRestaurant?: (restaurant: RestaurantSummary) => void;
+  onSelectRestaurant?: (restaurant: RestaurantSummary) => void;
   onNotify?: (message: string) => void;
   // 식당 상세모달의 "오늘 여기서 먹었어요" 버튼처럼, 캘린더 바깥에서 기록이 바뀌었을 때
   // 이 값이 바뀌면(=올라가면) 지금 보고 있는 달을 다시 불러온다 - MapView의 homeSignal과
@@ -78,6 +80,8 @@ function buildMonthGrid(monthCursor: Date): (CalendarCell | null)[] {
 export default function MealLogCalendar({
   companyCode,
   restaurants,
+  onFocusRestaurant,
+  onSelectRestaurant,
   onNotify,
   refreshSignal,
 }: MealLogCalendarProps) {
@@ -239,6 +243,8 @@ export default function MealLogCalendar({
           onClose={() => setEditingDate(null)}
           onEntriesChanged={(entries) => handleDateEntriesChanged(editingDate, entries)}
           onNotify={onNotify}
+          onFocusRestaurant={onFocusRestaurant}
+          onSelectRestaurant={onSelectRestaurant}
         />
       )}
     </div>
@@ -253,6 +259,8 @@ interface MealLogDayModalProps {
   onClose: () => void;
   onEntriesChanged: (entries: MealLogEntry[]) => void;
   onNotify?: (message: string) => void;
+  onFocusRestaurant?: (restaurant: RestaurantSummary) => void;
+  onSelectRestaurant?: (restaurant: RestaurantSummary) => void;
 }
 
 // 하루치 기록을 보고/추가하고/고치는 모달. "직접 추가" 모달과 동일한 fixed inset-0 오버레이
@@ -268,6 +276,8 @@ function MealLogDayModal({
   onClose,
   onEntriesChanged,
   onNotify,
+  onFocusRestaurant,
+  onSelectRestaurant,
 }: MealLogDayModalProps) {
   const [localEntries, setLocalEntries] = useState<MealLogEntry[]>(entries);
   const [formOpen, setFormOpen] = useState(entries.length === 0);
@@ -403,6 +413,21 @@ function MealLogDayModal({
     }
   }
 
+  function handleRestaurantClick(entry: MealLogEntry) {
+    const target =
+      (entry.restaurantId ? restaurants.find((r) => r.id === entry.restaurantId) : null) ??
+      restaurants.find((r) => r.name.trim().toLowerCase() === entry.restaurantName.trim().toLowerCase()) ??
+      restaurants.find((r) => r.displayName?.trim().toLowerCase() === entry.restaurantName.trim().toLowerCase());
+
+    if (target) {
+      onFocusRestaurant?.(target);
+      onSelectRestaurant?.(target);
+      onClose();
+    } else {
+      onNotify?.(`"${entry.restaurantName}" 가맹점 상세 정보가 등록되어 있지 않아요.`);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
@@ -424,27 +449,47 @@ function MealLogDayModal({
           <ul className="flex flex-col gap-1.5">
             {localEntries.map((entry) => {
               const visual = getCategoryVisual(entry.category, undefined, entry.restaurantName);
+              const hasMatchingRestaurant = Boolean(
+                (entry.restaurantId ? restaurants.find((r) => r.id === entry.restaurantId) : null) ??
+                  restaurants.find((r) => r.name.trim().toLowerCase() === entry.restaurantName.trim().toLowerCase())
+              );
+
               return (
                 <li
                   key={entry.id}
-                  className="flex items-start justify-between gap-2 rounded-xl border border-black/10 p-2.5"
+                  className="flex items-start justify-between gap-2 rounded-xl border border-black/10 p-2.5 transition hover:border-black/20"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
+                  <div
+                    onClick={() => handleRestaurantClick(entry)}
+                    className="min-w-0 flex-1 cursor-pointer group"
+                    title={hasMatchingRestaurant ? "클릭하여 지도 위치 및 상세 정보 보기" : undefined}
+                  >
+                    <p className="flex items-center gap-1.5 text-sm font-medium text-ink transition group-hover:text-primary">
                       <span>{visual.emoji}</span>
                       <span className="truncate">{entry.restaurantName}</span>
+                      {hasMatchingRestaurant && (
+                        <span className="text-[10px] text-primary-dark opacity-0 transition group-hover:opacity-100 font-semibold">
+                          상세보기 ↗
+                        </span>
+                      )}
                     </p>
                     {entry.memo && <p className="mt-0.5 text-xs text-ink-soft">{entry.memo}</p>}
                   </div>
                   <div className="flex shrink-0 gap-1 text-xs">
                     <button
-                      onClick={() => openEditForm(entry)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditForm(entry);
+                      }}
                       className="rounded-lg px-1.5 py-1 text-ink-soft transition hover:bg-surface-muted"
                     >
                       수정
                     </button>
                     <button
-                      onClick={() => handleDelete(entry.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(entry.id);
+                      }}
                       disabled={deletingId === entry.id}
                       className="rounded-lg px-1.5 py-1 text-primary-dark transition hover:bg-surface-muted disabled:opacity-60"
                     >

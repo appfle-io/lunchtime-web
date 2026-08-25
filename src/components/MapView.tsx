@@ -85,9 +85,10 @@ const VIEWPORT_CULL_MARGIN_RATIO = 0.6;
 // 마커 수 자체를 더 일찍 줄여서, 지도 SDK가 드래그 중 매 프레임 다시 배치해야 하는 마커
 // 개수를 더 공격적으로 줄인다 - 트레이드오프로 클러스터가 조금 더 자주/일찍 나타난다.
 const CLUSTER_ACTIVATION_COUNT = 12;
-// zoom 16 기준 격자 크기(위도/경도 도 단위). zoom이 1 줄어들 때마다(더 축소) 2배씩 커지고,
-// zoom이 1 늘어날 때마다(더 확대) 절반씩 작아진다 - 확대할수록 클러스터가 잘게 쪼개진다.
-const CLUSTER_GRID_DEGREES_AT_ZOOM16 = 0.0025;
+// zoom 16 기준 격자 크기(위도/경도 도 단위).
+// 2026-08-25 개선: 0.0025 -> 0.0038로 확장하여 자잘한 2~3개짜리 클러스터 파편들을
+// 5~10개 단위의 깔끔하고 의미 있는 덩어리로 시원하게 통합한다.
+const CLUSTER_GRID_DEGREES_AT_ZOOM16 = 0.0038;
 const CLUSTER_GRID_REFERENCE_ZOOM = 16;
 
 // "홈" 위치와의 일치 여부를 판단할 때 쓰는 위도/경도 허용 오차(도 단위, 약 5m 수준) - 부동소수점
@@ -839,15 +840,21 @@ function buildClusterMarkerIcon(
   isMobile?: boolean
 ) {
   const count = group.restaurants.length;
-  // 식당 수가 많을수록 살짝 더 크게 - 한눈에 "여기 많이 모여있다"는 걸 알 수 있게.
-  const size = count >= 50 ? 44 : count >= 10 ? 38 : 32;
+  // 식당 수에 따른 크기 및 링 강조 차등
+  const size = count >= 30 ? 44 : count >= 10 ? 38 : 32;
+  const badgeStyle =
+    count >= 30
+      ? "bg-primary-dark text-white font-extrabold text-sm ring-4 ring-primary/35 shadow-lg border border-white/60"
+      : count >= 10
+        ? "bg-primary text-white font-bold text-sm ring-4 ring-primary/25 shadow-md border border-white/50"
+        : "bg-primary text-white font-bold text-xs ring-4 ring-primary/20 shadow-md border border-white/40";
 
   return {
     content: buildMarkerElement(
       `
-      <div class="group relative flex flex-col items-center" style="cursor:pointer;">
+      <div class="group relative flex flex-col items-center select-none" style="cursor:pointer;">
         <div
-          class="flex items-center justify-center rounded-full bg-ink text-sm font-bold text-white ring-2 ring-white transition-transform duration-150 group-hover:scale-110"
+          class="flex items-center justify-center rounded-full ${badgeStyle} transition-all duration-150 group-hover:scale-110 group-active:scale-95"
           style="width:${size}px;height:${size}px;"
         >
           ${count}

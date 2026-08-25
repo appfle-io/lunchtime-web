@@ -10,15 +10,39 @@ import { db } from "@/lib/firebase";
 // 구워두면 나중에 관리자 권한을 회수해도(isAdmin: false로 바꿔도) 그 사람 세션이 만료되기
 // 전까지는 계속 관리자로 인식된다. 이 헬퍼는 관리자 페이지 진입/API 호출마다 Firestore를 한 번
 // 더 읽는 비용을 감수하고, 항상 최신 상태를 보도록 한다.
+declare global {
+  var __adminCheckCache: Map<string, { isAdmin: boolean; expiresAt: number }> | undefined;
+}
+
+const ADMIN_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
+const adminCheckCache =
+  globalThis.__adminCheckCache ??
+  (globalThis.__adminCheckCache = new Map<string, { isAdmin: boolean; expiresAt: number }>());
+
+export function invalidateAdminCache(companyCode: string, nicknameId: string): void {
+  adminCheckCache.delete(`${companyCode}:${nicknameId}`);
+}
+
 export async function isAdminUser(companyCode: string, nicknameId: string): Promise<boolean> {
+  const cacheKey = `${companyCode}:${nicknameId}`;
+  const cached = adminCheckCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.isAdmin;
+  }
+
   const doc = await db
     .collection("companies")
     .doc(companyCode)
     .collection("users")
     .doc(nicknameId)
     .get();
-  if (!doc.exists) return false;
-  return Boolean(doc.data()?.isAdmin);
+  if (!doc.exists) {
+    adminCheckCache.set(cacheKey, { isAdmin: false, expiresAt: Date.now() + ADMIN_CACHE_TTL_MS });
+    return false;
+  }
+  const isAdmin = Boolean(doc.data()?.isAdmin);
+  adminCheckCache.set(cacheKey, { isAdmin, expiresAt: Date.now() + ADMIN_CACHE_TTL_MS });
+  return isAdmin;
 }
 
 // 수정요청이 새로 들어왔을 때 "회사의 모든 관리자"에게 알림을 보내기 위한 목록 조회.

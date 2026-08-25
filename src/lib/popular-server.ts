@@ -17,7 +17,7 @@ export interface PopularEntry {
 // 데이터라, restaurantsCache와 같은 짧은 TTL 인메모리 캐시를 적용한다. limit이 달라도 정렬된
 // 전체 목록 자체는 같으므로, limit별로 따로 캐시하지 않고 companyCode 하나로만 캐시해서
 // slice는 매번 요청받은 limit대로 적용한다.
-const POPULAR_CACHE_TTL_MS = 30_000;
+const POPULAR_CACHE_TTL_MS = 2 * 60 * 1000; // 2분
 const popularCache = new Map<string, { data: PopularEntry[]; expiresAt: number }>();
 
 function hourKey(date: Date): string {

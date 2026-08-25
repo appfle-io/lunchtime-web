@@ -128,46 +128,7 @@ export async function changeUserNickname(
 
   await batch.commit();
 
-  // 2. 다른 사용자의 friends 컬렉션에서 oldNicknameId 참조 마이그레이션
-  try {
-    const allUsersSnap = await usersCol.select().get();
-    const otherUserIds = allUsersSnap.docs
-      .map((d) => d.id)
-      .filter((id) => id !== oldNicknameId && id !== newNicknameId);
-
-    if (otherUserIds.length > 0) {
-      const friendChecks = await Promise.all(
-        otherUserIds.map((uId) => usersCol.doc(uId).collection("friends").doc(oldNicknameId).get())
-      );
-
-      const friendBatch = db.batch();
-      let friendBatchCount = 0;
-
-      for (const fSnap of friendChecks) {
-        if (fSnap.exists) {
-          const fData = fSnap.data()!;
-          const parentUserRef = fSnap.ref.parent.parent;
-          if (parentUserRef) {
-            const newFriendRef = parentUserRef.collection("friends").doc(newNicknameId);
-            friendBatch.set(newFriendRef, {
-              ...fData,
-              nickname: newNickname,
-            });
-            friendBatch.delete(fSnap.ref);
-            friendBatchCount++;
-          }
-        }
-      }
-
-      if (friendBatchCount > 0) {
-        await friendBatch.commit();
-      }
-    }
-  } catch (syncErr) {
-    console.warn(`[changeUserNickname] 친구 목록 동기화 중 경고 (계속 진행):`, syncErr);
-  }
-
-  // 캐시 무효화
+  // 2. 회사 사용자 목록 캐시 무효화 (모든 컴포넌트가 최신 닉네임으로 즉시 동기화)
   invalidateCompanyUsersCache(companyCode);
 
   return { newNicknameId, newNickname };

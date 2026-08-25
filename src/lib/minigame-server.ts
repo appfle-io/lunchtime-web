@@ -1,5 +1,5 @@
+import { FieldValue, type Query } from "firebase-admin/firestore";
 import { db } from "@/lib/firebase";
-import type { Query } from "firebase-admin/firestore";
 import type {
   MiniGameParticipant,
   MiniGameRankingEntry,
@@ -8,12 +8,21 @@ import type {
   MiniGameType,
 } from "@/types";
 
-// 2026-08-12 신규: 미니게임(제비뽑기/룰렛/사다리타기/팀나누기) 결과 저장 + 랭킹 집계.
-// 진행 자체(누가 어떤 라운드에 뭘 냈는지 등)는 전부 클라이언트 로직으로 끝나고, 서버에는
-// "끝난 결과" 1건만 저장한다 - vote-server.ts 등과 달리 여러 사람이 실시간으로 나눠서 진행하는
-// 게임이 아니라 한 사람 폰에서 진행이 끝나기 때문에 서버 부하가 훨씬 적다.
 function miniGamesRef(companyCode: string) {
   return db.collection("companies").doc(companyCode).collection("miniGames");
+}
+
+function statsOverallDocRef(companyCode: string) {
+  return db.collection("companies").doc(companyCode).collection("stats").doc("minigame_overall");
+}
+
+const RANKING_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
+const rankingCache = new Map<string, { data: MiniGameRankingEntry[]; expiresAt: number }>();
+
+export function invalidateMiniGameRankingCache(companyCode: string): void {
+  rankingCache.delete(`${companyCode}:week`);
+  rankingCache.delete(`${companyCode}:month`);
+  rankingCache.delete(`${companyCode}:all`);
 }
 
 export async function saveMiniGameResult(
@@ -31,8 +40,6 @@ export async function saveMiniGameResult(
   }
 ): Promise<MiniGameResult> {
   const createdAt = new Date().toISOString();
-  // Firestore는 undefined 필드를 거부하므로(vote-server.ts의 addVoteOption과 동일한 이유),
-  // 값이 있을 때만 필드를 넣도록 spread로 조립한다.
   const doc = {
     type: input.type,
     participants: input.participants,
@@ -47,13 +54,28 @@ export async function saveMiniGameResult(
   };
 
   const docRef = await miniGamesRef(companyCode).add(doc);
+
+  // 2026-08-25 최적화: 종합 랭킹을 1 Read로 조회할 수 있도록 누적 통계 문서 갱신
+  if (input.winners && input.winners.length > 0) {
+    const statsUpdates: Record<string, unknown> = {};
+    for (const w of input.winners) {
+      if (w.nicknameId) {
+        statsUpdates[`users.${w.nicknameId}.winCount`] = FieldValue.increment(1);
+        statsUpdates[`users.${w.nicknameId}.nickname`] = w.name;
+      }
+    }
+    if (Object.keys(statsUpdates).length > 0) {
+      statsOverallDocRef(companyCode)
+        .set(statsUpdates, { merge: true })
+        .catch(() => {});
+    }
+  }
+
+  // 랭킹 캐시 즉시 무효화 (실시간 반영 보장)
+  invalidateMiniGameRankingCache(companyCode);
+
   return { id: docRef.id, ...doc } as MiniGameResult;
 }
-
-// 랭킹 조회 결과를 짧게 캐시한다(popular-server.ts와 동일한 패턴) - 여러 명이 랭킹 화면을
-// 자주 열어도 매번 전체를 다시 훑지 않게 하기 위함.
-const RANKING_CACHE_TTL_MS = 60 * 1000;
-const rankingCache = new Map<string, { data: MiniGameRankingEntry[]; expiresAt: number }>();
 
 function startOfWeekISO(): string {
   const now = new Date();
@@ -72,11 +94,6 @@ function startOfMonthISO(): string {
 
 export type MiniGameRankingPeriod = "week" | "month" | "all";
 
-// 주간/월간은 createdAt range 쿼리(필드 1개짜리라 복합 인덱스 불필요, vote-server.ts와 동일
-// 방침)로 좁혀서 가져온 뒤 메모리에서 집계한다. 종합(all)은 기간 제한이 없어 컬렉션 전체를
-// 가져오는데, 토이 프로젝트 규모(회사당 하루 몇 건 수준)에서는 전체 스캔도 부담이 없고 여기에
-// 캐시까지 더해 반복 조회 비용을 낮춘다 - 나중에 게임 수가 크게 늘면(수천 건 이상) 누적 카운터
-// 문서 방식으로 바꾸는 걸 고려하면 된다.
 export async function getMiniGameRanking(
   companyCode: string,
   period: MiniGameRankingPeriod
@@ -84,6 +101,31 @@ export async function getMiniGameRanking(
   const cacheKey = `${companyCode}:${period}`;
   const cached = rankingCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
+
+  // 2026-08-25 최적화: 종합(all) 랭킹은 누적 집계 문서 1개(1 Read)만 읽는다
+  if (period === "all") {
+    try {
+      const statsSnap = await statsOverallDocRef(companyCode).get();
+      if (statsSnap.exists) {
+        const data = statsSnap.data();
+        const users = (data?.users ?? {}) as Record<string, { winCount?: number; nickname?: string }>;
+        const result: MiniGameRankingEntry[] = Object.entries(users)
+          .map(([nicknameId, v]) => ({
+            nicknameId,
+            nickname: v.nickname ?? nicknameId,
+            winCount: typeof v.winCount === "number" ? v.winCount : 0,
+          }))
+          .filter((entry) => entry.winCount > 0)
+          .sort((a, b) => b.winCount - a.winCount)
+          .slice(0, 50);
+
+        rankingCache.set(cacheKey, { data: result, expiresAt: Date.now() + RANKING_CACHE_TTL_MS });
+        return result;
+      }
+    } catch {
+      // 누적 문서 조회 실패 시 아래 기존 쿼리로 폴백
+    }
+  }
 
   let query: Query = miniGamesRef(companyCode);
   if (period === "week") {
@@ -98,10 +140,8 @@ export async function getMiniGameRanking(
   snapshot.docs.forEach((doc) => {
     const data = doc.data();
     const winners: MiniGameParticipant[] = data.winners ?? [];
-    // 팀나누기(type: "teams")는 winners 필드가 아예 없어서 이 루프가 자동으로 건너뛴다 -
-    // 당첨 개념이 없는 게임은 랭킹 집계 대상이 아니다(설계 문서 참고).
     winners.forEach((w) => {
-      if (!w.nicknameId) return; // 게스트(수기입력)는 동명이인 구분이 안 돼서 랭킹에서 제외
+      if (!w.nicknameId) return;
       const entry = counts.get(w.nicknameId);
       if (entry) {
         entry.count += 1;

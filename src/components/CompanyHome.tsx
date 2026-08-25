@@ -714,6 +714,8 @@ export default function CompanyHome({
               <MealLogCalendar
                 companyCode={companyCode}
                 restaurants={restaurants}
+                onFocusRestaurant={focusRestaurant}
+                onSelectRestaurant={handleSelectRestaurant}
                 onNotify={setToastMessage}
                 refreshSignal={mealLogVersion}
               />
@@ -728,6 +730,8 @@ export default function CompanyHome({
             <MealLogCalendar
               companyCode={companyCode}
               restaurants={restaurants}
+              onFocusRestaurant={focusRestaurant}
+              onSelectRestaurant={handleSelectRestaurant}
               onNotify={setToastMessage}
               refreshSignal={mealLogVersion}
             />
