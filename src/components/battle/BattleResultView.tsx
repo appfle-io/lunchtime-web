@@ -80,39 +80,39 @@ export default function BattleResultView({
   };
 
   return (
-    <div className="flex h-full flex-col items-center justify-center bg-neutral-950 p-6 text-neutral-100 overflow-y-auto">
-      <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/90 p-6 shadow-2xl my-auto">
+    <div className="flex h-full flex-col items-center justify-center bg-surface p-6 text-ink overflow-y-auto">
+      <div className="w-full max-w-md rounded-2xl sm:rounded-3xl border border-black/10 bg-surface p-6 sm:p-7 shadow-soft my-auto">
         {/* 상단 뱃지 */}
         <div className="text-center">
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-400 border border-emerald-500/30">
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3.5 py-1 text-xs font-bold text-emerald-700 border border-emerald-200">
             오늘의 점심 메뉴 확정
           </span>
-          <h2 className="mt-4 text-2xl font-black tracking-tight text-white">{result.winner.name}</h2>
-          <p className="mt-1 text-xs text-neutral-400">
+          <h2 className="mt-4 text-2xl sm:text-3xl font-black tracking-tight text-ink">{result.winner.name}</h2>
+          <p className="mt-1 text-xs text-ink-soft">
             {result.winner.category || "메뉴"} · 추천: {result.winner.addedByNickname}
           </p>
         </div>
 
         {/* 매칭된 식당 상세 카드 */}
         {matchedRestaurant && (
-          <div className="mt-5 rounded-xl border border-neutral-800 bg-neutral-950/70 p-4 text-left">
+          <div className="mt-5 rounded-2xl border border-black/5 bg-surface-muted/60 p-4 text-left shadow-xs">
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-sm text-neutral-200">{matchedRestaurant.name}</span>
+              <span className="font-bold text-sm text-ink">{matchedRestaurant.name}</span>
               {matchedRestaurant.isZeroPay && (
-                <span className="rounded bg-emerald-950/80 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-800/60">
+                <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
                   제로페이 가맹점
                 </span>
               )}
             </div>
             {matchedRestaurant.address && (
-              <p className="mt-1 text-xs text-neutral-400">{matchedRestaurant.address}</p>
+              <p className="mt-1 text-xs text-ink-soft">{matchedRestaurant.address}</p>
             )}
             {matchedRestaurant.naverPlaceUrl && (
               <a
                 href={matchedRestaurant.naverPlaceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-400 hover:text-blue-300"
+                className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-dark"
               >
                 네이버 지도 바로가기
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,13 +124,13 @@ export default function BattleResultView({
         )}
 
         {/* 참여자 정보 */}
-        <div className="mt-5 border-t border-neutral-800/80 pt-4">
-          <div className="text-[11px] font-semibold text-neutral-400 mb-2">참여 인원 ({room.players.length}명)</div>
+        <div className="mt-5 border-t border-black/5 pt-4">
+          <div className="text-xs font-semibold text-ink-soft mb-2">참여 인원 ({room.players.length}명)</div>
           <div className="flex flex-wrap gap-1.5">
             {room.players.map((p) => (
               <span
                 key={p.nicknameId}
-                className="rounded-lg bg-neutral-800 px-2 py-1 text-xs text-neutral-300"
+                className="rounded-lg bg-surface-muted px-2.5 py-1 text-xs text-ink font-medium border border-black/5"
               >
                 {p.nickname}
               </span>
@@ -143,16 +143,16 @@ export default function BattleResultView({
           {/* 공유 버튼 */}
           <button
             onClick={handleCopyResult}
-            className="w-full rounded-xl bg-blue-600 py-2.5 text-xs font-bold text-white transition hover:bg-blue-500 shadow-lg shadow-blue-900/20"
+            className="w-full rounded-xl bg-primary py-2.5 text-xs sm:text-sm font-bold text-white transition hover:bg-primary-dark shadow-xs"
           >
             {copied ? "복사 완료!" : "결과 팀원들에게 공유하기 (클립보드 복사)"}
           </button>
 
-          {/* 다시 하기 (대기실로 복귀) - 방장에게 우선 노출, 참가자도 가능 */}
+          {/* 다시 하기 (대기실로 복귀) */}
           {onReturnToWaitingRoom && (
             <button
               onClick={onReturnToWaitingRoom}
-              className="w-full rounded-xl border border-blue-500/30 bg-blue-950/40 py-2.5 text-xs font-bold text-blue-300 transition hover:bg-blue-900/40 hover:text-white"
+              className="w-full rounded-xl border border-black/10 bg-surface py-2.5 text-xs font-bold text-ink transition hover:bg-surface-muted"
             >
               대기실로 돌아가기 (다음 판 다시 하기)
             </button>
@@ -161,7 +161,7 @@ export default function BattleResultView({
           {/* 방 완전히 나가기 */}
           <button
             onClick={onBackToLobby}
-            className="w-full rounded-xl border border-neutral-800 bg-neutral-800/60 py-2 text-xs font-medium text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+            className="w-full rounded-xl border border-transparent py-2 text-xs font-medium text-ink-soft transition hover:bg-surface-muted hover:text-ink"
           >
             방 나가기 (로비로 이동)
           </button>
