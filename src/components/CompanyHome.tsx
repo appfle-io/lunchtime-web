@@ -12,6 +12,7 @@ import FriendsModal from "./FriendsModal";
 import NotificationsModal, { type NotificationEntry } from "./NotificationsModal";
 import LunchVoteModal from "./LunchVoteModal";
 import LunchRouletteModal from "./LunchRouletteModal";
+import BattleLobbyModal from "./battle/BattleLobbyModal";
 import RestaurantSearchModal from "./RestaurantSearchModal";
 import MiniGameModal from "./MiniGameModal";
 import UserMenu from "./UserMenu";
@@ -199,6 +200,7 @@ export default function CompanyHome({
   const [showFriends, setShowFriends] = useState(false);
   const [friendsPrefillNickname, setFriendsPrefillNickname] = useState<string | null>(null);
   const [showVote, setShowVote] = useState(false);
+  const [showBattle, setShowBattle] = useState(false);
   const [voteFocusId, setVoteFocusId] = useState<string | null>(null);
   // 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛 모달 상태.
   const [showRecommend, setShowRecommend] = useState(false);
@@ -689,6 +691,7 @@ export default function CompanyHome({
             setVoteFocusId(null);
             setShowVote(true);
           }}
+          onOpenBattle={() => setShowBattle(true)}
           onOpenRecommend={() => setShowRecommend(true)}
           onOpenSearch={() => setShowSearch(true)}
           onOpenMiniGame={() => setShowMiniGame(true)}
@@ -789,6 +792,16 @@ export default function CompanyHome({
         onNotify={setToastMessage}
         focusVoteId={voteFocusId}
         companyUsers={companyUsers}
+      />
+
+      <BattleLobbyModal
+        open={showBattle}
+        onClose={() => setShowBattle(false)}
+        companyCode={companyCode}
+        myNicknameId={myNicknameId}
+        myNickname={currentNickname}
+        restaurants={restaurants}
+        onNotify={setToastMessage}
       />
 
       {/* 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛. 2026-08-08 개편으로 이 모달이 반경/카테고리/

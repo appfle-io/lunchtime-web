@@ -62,6 +62,8 @@ interface RestaurantListProps {
   onOpenNotifications?: () => void;
   onOpenFriends?: () => void;
   onOpenVote?: () => void;
+  // 실시간 점심 배틀 대기실 (크아 스타일 방 개설/투표/월드컵)
+  onOpenBattle?: () => void;
   // 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛 버튼 (실제 모달/추천 로직은 CompanyHome이 들고 있는
   // LunchRouletteModal이 담당 - 다른 헤더 버튼들과 동일한 패턴).
   onOpenRecommend?: () => void;
@@ -214,6 +216,7 @@ export default function RestaurantList({
   onOpenNotifications,
   onOpenFriends,
   onOpenVote,
+  onOpenBattle,
   onOpenRecommend,
   onOpenSearch,
   onOpenMiniGame,
@@ -356,8 +359,7 @@ export default function RestaurantList({
 
   const headerButtons = (
     <>
-      {/* 2026-08-06 신규: 알림/친구목록/투표 버튼. 다른 절대위치 버튼처럼 화면 좌표를 새로 잡지 않고,
-          항상 안전한 이 header 슬롯에 같이 둔다(레이아웃 회귀를 또 만들지 않기 위함). */}
+      {/* 2026-08-06 신규: 검색/알림/친구/직원식당 버튼. 투표 버튼 위치에 직관적인 직원식당 링크 배치 */}
       <div className="mb-2 flex gap-1.5">
         <button
           onClick={onOpenSearch}
@@ -380,16 +382,19 @@ export default function RestaurantList({
         </button>
         <button
           onClick={onOpenFriends}
-          className="flex-1 rounded-xl2 border border-black/10 px-2 py-2 text-sm transition hover:border-primary hover:text-primary"
+          className="flex-1 rounded-xl2 border border-black/10 px-2 py-2 text-sm font-medium transition hover:border-primary hover:text-primary"
         >
           친구
         </button>
-        <button
-          onClick={onOpenVote}
-          className="flex-1 rounded-xl2 border border-black/10 px-2 py-2 text-sm transition hover:border-primary hover:text-primary"
+        <a
+          href={EMPLOYEE_CAFETERIA_MENU_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="직원식당 메뉴"
+          className="flex-1 flex items-center justify-center rounded-xl2 border border-black/10 px-2 py-2 text-sm font-medium transition hover:border-primary hover:text-primary text-ink"
         >
-          투표
-        </button>
+          직식
+        </a>
       </div>
 
       {/* 2026-08-06 심야 신규: 모바일 전용 탭 전환("주변식당" / "캘린더"). 데스크톱은 캘린더가
@@ -419,32 +424,34 @@ export default function RestaurantList({
           숨긴다. 데스크톱은 탭 상태와 무관하게 항상 목록 카드이므로 md:block으로 다시 보이게 한다. */}
       <div className={mobileTab === "calendar" ? "hidden md:block" : ""}>
         <button
-          onClick={onOpenRecommend}
-          className="mb-2 w-full rounded-xl2 bg-ink px-4 py-3 font-semibold text-white transition hover:bg-black"
+          onClick={onOpenBattle}
+          className="mb-2 w-full rounded-xl2 bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 font-bold text-white transition hover:from-blue-500 hover:to-indigo-500 shadow-md flex items-center justify-center gap-2 text-sm"
         >
-          🎲 오늘 뭐 먹지?
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+          </svg>
+          같이 밥먹을 사람!
         </button>
-        {/* 2026-08-12 신규: 미니게임(제비뽑기/룰렛/사다리타기/팀나누기) - 점심 먹고 후식 내기
-            등으로 쓰라고 추가. "오늘 뭐 먹지?"와 나란히 눈에 잘 띄게 배치. */}
-        <button
-          onClick={onOpenMiniGame}
-          className="mb-2 w-full rounded-xl2 border border-black/10 px-4 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
-        >
-          미니게임
-        </button>
-        {/* 2026-08-11 신규: 구내식당(직원식당) 매주 메뉴표로 바로가는 링크. 새로운 탭으로 열어서
-            앱 내부 네비게이션을 뜨지 않는다. */}
-        <a
-          href={EMPLOYEE_CAFETERIA_MENU_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-xl2 border border-black/10 px-4 py-2.5 text-sm font-medium text-ink-soft transition hover:border-primary hover:text-primary"
-        >
-          이번주 직원식당 메뉴
-        </a>
+
+        {/* 게임버튼과 뭐먹지 버튼을 5:5 반반 한 줄로 배치 (동일한 서식) */}
+        <div className="mb-2 grid grid-cols-2 gap-2">
+          <button
+            onClick={onOpenRecommend}
+            className="w-full rounded-xl2 border border-black/10 px-3 py-2.5 text-xs sm:text-sm font-semibold text-ink transition hover:border-primary hover:text-primary text-center"
+          >
+            오늘 뭐 먹지?
+          </button>
+          <button
+            onClick={onOpenMiniGame}
+            className="w-full rounded-xl2 border border-black/10 px-3 py-2.5 text-xs sm:text-sm font-semibold text-ink transition hover:border-primary hover:text-primary text-center"
+          >
+            미니게임
+          </button>
+        </div>
+
         <button
           onClick={() => setShowAddModal(true)}
-          className="mb-1 w-full rounded-xl2 border border-dashed border-black/15 px-4 py-2.5 text-sm font-medium text-ink-soft transition hover:border-primary hover:text-primary"
+          className="mb-1 w-full rounded-xl2 border border-dashed border-black/15 px-4 py-2 text-xs sm:text-sm font-medium text-ink-soft transition hover:border-primary hover:text-primary"
         >
           + 여기 없는 식당 직접 추가하기
         </button>
