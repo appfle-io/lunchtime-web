@@ -72,6 +72,14 @@ export async function markNotificationRead(
   await notificationsRef(companyCode, nicknameId).doc(notificationId).set({ read: true }, { merge: true });
 }
 
+export async function deleteNotification(
+  companyCode: string,
+  nicknameId: string,
+  notificationId: string
+): Promise<void> {
+  await notificationsRef(companyCode, nicknameId).doc(notificationId).delete();
+}
+
 export async function getNotification(
   companyCode: string,
   nicknameId: string,

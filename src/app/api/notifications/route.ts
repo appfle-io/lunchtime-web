@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth-server";
-import { listNotifications, markNotificationRead } from "@/lib/notification-server";
+import { listNotifications, markNotificationRead, deleteNotification } from "@/lib/notification-server";
 
 function getSession(request: NextRequest, companyCode: string | null) {
   const sessionToken = cookies().get(SESSION_COOKIE_NAME)?.value;
@@ -41,5 +41,30 @@ export async function POST(request: NextRequest) {
   }
 
   await markNotificationRead(companyCode, session.nicknameId, notificationId);
+  return NextResponse.json({ status: "ok" });
+}
+
+// DELETE /api/notifications - body: { companyCode, notificationId } 또는 쿼리스트링 - 개별 알림 삭제.
+export async function DELETE(request: NextRequest) {
+  let companyCode = request.nextUrl.searchParams.get("companyCode");
+  let notificationId = request.nextUrl.searchParams.get("notificationId");
+
+  if (!companyCode || !notificationId) {
+    try {
+      const body = await request.json();
+      companyCode = companyCode || body.companyCode;
+      notificationId = notificationId || body.notificationId;
+    } catch {}
+  }
+
+  const session = getSession(request, companyCode ?? null);
+  if (!session || !companyCode) {
+    return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  }
+  if (!notificationId) {
+    return NextResponse.json({ error: "notificationId가 필요합니다." }, { status: 400 });
+  }
+
+  await deleteNotification(companyCode, session.nicknameId, notificationId);
   return NextResponse.json({ status: "ok" });
 }

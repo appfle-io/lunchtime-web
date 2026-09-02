@@ -598,6 +598,19 @@ export default function CompanyHome({
     }
   }
 
+  async function handleDeleteNotification(notificationId: string) {
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    try {
+      await fetch("/api/notifications", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyCode, notificationId }),
+      });
+    } catch {
+      // 삭제 실패 시 조용히 무시
+    }
+  }
+
   // 알림함의 "나도 추가하기" - 알림함을 닫고 그 닉네임이 미리 채워진 친구목록 모달을 연다.
   function handleAddBackFromNotification(nickname: string) {
     setShowNotifications(false);
@@ -779,6 +792,7 @@ export default function CompanyHome({
         notifications={notifications}
         onClose={() => setShowNotifications(false)}
         onMarkRead={markNotificationRead}
+        onDeleteNotification={handleDeleteNotification}
         onAddBack={handleAddBackFromNotification}
         onOpenVote={handleOpenVoteFromNotification}
       />
