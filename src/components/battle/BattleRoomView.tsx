@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import type { BattleCandidate, BattleChatMessage, BattlePlayer, BattleRoomDetail } from "@/types/battle";
+import type { BattleCandidate, BattleChatMessage, BattleGameMode, BattlePlayer, BattleRoomDetail } from "@/types/battle";
 import type { RestaurantSummary } from "@/types";
 import BattleRestaurantPickerModal from "./BattleRestaurantPickerModal";
 
@@ -12,6 +12,7 @@ interface BattleRoomViewProps {
   restaurants: RestaurantSummary[];
   onLeave: () => void;
   onTransferHost?: (targetNicknameId: string) => void;
+  onChangeGameMode?: (mode: BattleGameMode) => void;
   onToggleReady: () => void;
   onPickRestaurant: (restaurant: {
     id?: string;
@@ -35,6 +36,7 @@ export default function BattleRoomView({
   restaurants,
   onLeave,
   onTransferHost,
+  onChangeGameMode,
   onToggleReady,
   onPickRestaurant,
   onSelectCandidateAsMyPick,
@@ -135,25 +137,44 @@ export default function BattleRoomView({
   return (
     <div className="flex h-full flex-col bg-surface text-ink overflow-hidden">
       {/* 상단 룸 헤더 바 */}
-      <div className="flex shrink-0 items-center justify-between border-b border-black/5 bg-surface px-5 py-3.5">
-        <div className="flex items-center gap-2.5">
+      <div className="flex shrink-0 items-center justify-between border-b border-black/5 bg-surface px-4 sm:px-5 py-3.5">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-md bg-surface-muted px-2 py-0.5 font-mono text-xs font-semibold text-ink-soft">
             #{room.id}
           </span>
-          <h2 className="text-base sm:text-lg font-bold text-ink tracking-tight truncate max-w-[280px] sm:max-w-none">
+          <h2 className="text-base sm:text-lg font-bold text-ink tracking-tight truncate max-w-[200px] sm:max-w-[320px]">
             {room.title}
           </h2>
-          <span className="rounded-md bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-primary border border-primary/20">
-            {getModeLabel(room.gameMode)}
-          </span>
+
+          {/* 게임 모드 뱃지 또는 방장 전용 모드 변경 드롭다운 */}
+          {isHost && onChangeGameMode ? (
+            <div className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2 py-1">
+              <span className="text-[11px] font-semibold text-primary">게임:</span>
+              <select
+                value={room.gameMode}
+                onChange={(e) => onChangeGameMode(e.target.value as BattleGameMode)}
+                className="bg-transparent text-xs font-bold text-primary focus:outline-none cursor-pointer"
+                title="게임 모드 변경"
+              >
+                <option value="speed-vote">스피드 투표 (60초)</option>
+                <option value="worldcup">메뉴 월드컵</option>
+                <option value="roulette">운명의 룰렛</option>
+              </select>
+            </div>
+          ) : (
+            <span className="rounded-md bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-primary border border-primary/20">
+              {getModeLabel(room.gameMode)}
+            </span>
+          )}
+
           <span className="text-xs text-ink-soft font-medium">
-            참여 인원 {room.players.length}/{room.maxPlayers}명
+            인원 {room.players.length}/{room.maxPlayers}명
           </span>
         </div>
 
         <button
           onClick={() => setIsLeaveModalOpen(true)}
-          className="flex items-center gap-1.5 rounded-xl border border-black/10 bg-surface px-3 py-1.5 text-xs font-medium text-ink-soft transition hover:bg-surface-muted hover:text-ink"
+          className="flex items-center gap-1.5 rounded-xl border border-black/10 bg-surface px-3 py-1.5 text-xs font-medium text-ink-soft transition hover:bg-surface-muted hover:text-ink shrink-0"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

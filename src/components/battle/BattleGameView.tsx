@@ -11,6 +11,29 @@ interface BattleGameViewProps {
   onCastVote: (candidateId: string) => void;
 }
 
+const ROULETTE_PALETTE = [
+  "#ffe8b3",
+  "#ffd27a",
+  "#ffc4a3",
+  "#ffb3c6",
+  "#c9e4ff",
+  "#c8f4de",
+  "#e1d4fc",
+  "#fed7aa",
+];
+
+function polarToCartesian(cx: number, cy: number, r: number, angleFromTopDeg: number) {
+  const rad = ((angleFromTopDeg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function describeSlice(cx: number, cy: number, r: number, startDeg: number, endDeg: number): string {
+  const start = polarToCartesian(cx, cy, r, startDeg);
+  const end = polarToCartesian(cx, cy, r, endDeg);
+  const largeArcFlag = endDeg - startDeg > 180 ? 1 : 0;
+  return `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${largeArcFlag} 1 ${end.x} ${end.y} Z`;
+}
+
 export default function BattleGameView({
   room,
   myNicknameId,
@@ -18,9 +41,9 @@ export default function BattleGameView({
   worldcupMatch,
   onCastVote,
 }: BattleGameViewProps) {
-  // 타이머 계산
-  const [timeLeft, setTimeLeft] = useState<number>(15);
-  const [rouletteIndex, setRouletteIndex] = useState<number>(0);
+  // 타이머 계산 (기본 60초)
+  const [timeLeft, setTimeLeft] = useState<number>(60);
+  const [rouletteRotation, setRouletteRotation] = useState<number>(0);
 
   const candidatesList: BattleCandidate[] = useMemo(() => {
     if (Array.isArray(room.candidates)) return room.candidates;
@@ -30,37 +53,27 @@ export default function BattleGameView({
     return [];
   }, [room.candidates]);
 
-  // 룰렛 동기화 롤링 애니메이션
+  // 룰렛 회전판 스핀 애니메이션 설정
   useEffect(() => {
     if (room.gameMode === "roulette" && candidatesList.length > 0) {
-      const startedAt = room.rouletteState?.startedAt || Date.now();
-      const durationMs = room.rouletteState?.durationMs || 5000;
       const winnerId = room.rouletteState?.winnerCandidateId;
       const winnerIdx = winnerId
         ? candidatesList.findIndex((c) => c.id === winnerId)
         : 0;
       const targetIdx = winnerIdx >= 0 ? winnerIdx : 0;
 
-      const interval = setInterval(() => {
-        const now = Date.now();
-        const elapsed = now - startedAt;
+      const n = candidatesList.length;
+      const sliceDeg = 360 / n;
+      const centerDeg = targetIdx * sliceDeg + sliceDeg / 2;
+      const extraSpins = 5 * 360; // 5바퀴 회전
+      const targetAngle = extraSpins + (360 - centerDeg);
 
-        if (elapsed >= durationMs) {
-          setRouletteIndex(targetIdx);
-          clearInterval(interval);
-          return;
-        }
+      // 시작 직후 부드럽게 회전 시작
+      const timer = setTimeout(() => {
+        setRouletteRotation(targetAngle);
+      }, 100);
 
-        // 경과 비율 (0 -> 1)
-        const progress = Math.min(Math.max(elapsed / durationMs, 0), 1);
-        // ease-out: 시간이 지날수록 느려짐
-        const totalSteps = 40;
-        const currentStep = Math.floor(Math.sin((progress * Math.PI) / 2) * totalSteps);
-        const idx = (currentStep + targetIdx) % candidatesList.length;
-        setRouletteIndex(idx);
-      }, 50);
-
-      return () => clearInterval(interval);
+      return () => clearTimeout(timer);
     }
   }, [room.gameMode, room.rouletteState, candidatesList]);
 
@@ -69,14 +82,14 @@ export default function BattleGameView({
     if (room.gameMode === "speed-vote" && voteState) {
       const interval = setInterval(() => {
         const elapsed = Math.floor((Date.now() - (voteState.startedAt || Date.now())) / 1000);
-        const remaining = Math.max((voteState.durationSeconds || 15) - elapsed, 0);
+        const remaining = Math.max((voteState.durationSeconds || 60) - elapsed, 0);
         setTimeLeft(remaining);
       }, 200);
       return () => clearInterval(interval);
     } else if (room.gameMode === "worldcup" && worldcupMatch) {
       const interval = setInterval(() => {
         const elapsed = Math.floor((Date.now() - (worldcupMatch.startedAt || Date.now())) / 1000);
-        const remaining = Math.max((worldcupMatch.durationSeconds || 8) - elapsed, 0);
+        const remaining = Math.max((worldcupMatch.durationSeconds || 60) - elapsed, 0);
         setTimeLeft(remaining);
       }, 200);
       return () => clearInterval(interval);
@@ -85,21 +98,25 @@ export default function BattleGameView({
 
   // 1. 스피드 투표 모드
   if (room.gameMode === "speed-vote") {
-    const rawVotes: Record<string, string> = (voteState && typeof voteState.votes === "object" && voteState.votes !== null)
-      ? voteState.votes
-      : {};
+    const rawVotes: Record<string, string> =
+      voteState && typeof voteState.votes === "object" && voteState.votes !== null
+        ? voteState.votes
+        : {};
     const myVoteCandidateId = rawVotes[myNicknameId];
     const totalVotes = Object.keys(rawVotes).length;
+    const maxDuration = voteState?.durationSeconds || 60;
 
     return (
-      <div className="flex h-full flex-col bg-surface p-6 text-ink overflow-hidden">
+      <div className="flex h-full flex-col bg-surface p-5 sm:p-6 text-ink overflow-hidden">
         {/* 상단 헤더 */}
         <div className="mb-4 flex items-center justify-between border-b border-black/5 pb-3.5 shrink-0">
           <div>
             <span className="rounded-md bg-orange-50 px-2 py-0.5 text-xs font-semibold text-primary border border-primary/20">
-              실시간 스피드 투표
+              실시간 스피드 투표 (최대 1분)
             </span>
-            <h2 className="mt-1 text-base sm:text-lg font-bold tracking-tight text-ink">가장 먹고 싶은 메뉴를 선택하세요</h2>
+            <h2 className="mt-1 text-base sm:text-lg font-bold tracking-tight text-ink">
+              가장 먹고 싶은 메뉴를 선택하세요
+            </h2>
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right">
@@ -113,7 +130,7 @@ export default function BattleGameView({
         <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-surface-muted shrink-0">
           <div
             className="h-full bg-primary transition-all duration-300 ease-linear rounded-full"
-            style={{ width: `${(timeLeft / (voteState?.durationSeconds || 15)) * 100}%` }}
+            style={{ width: `${(timeLeft / maxDuration) * 100}%` }}
           />
         </div>
 
@@ -128,7 +145,7 @@ export default function BattleGameView({
               <button
                 key={cand.id}
                 onClick={() => onCastVote(cand.id)}
-                className={`relative w-full overflow-hidden rounded-2xl border p-4 text-left transition ${
+                className={`relative w-full overflow-hidden rounded-2xl border p-3.5 sm:p-4 text-left transition ${
                   isSelected
                     ? "border-primary bg-primary/5 shadow-xs"
                     : "border-black/10 bg-surface hover:border-black/20 hover:bg-surface-muted/50 shadow-xs"
@@ -169,7 +186,7 @@ export default function BattleGameView({
         </div>
 
         <div className="mt-3 border-t border-black/5 pt-3 text-center text-xs text-ink-soft shrink-0">
-          총 {room.players.length}명 중 {totalVotes}명 투표 완료 · 시간이 종료되면 최다 득표 메뉴로 확정됩니다.
+          총 {room.players.length}명 중 {totalVotes}명 투표 완료 · 전원 투표 시 즉시 종료되며, 시간 종료 시 최다 득표 메뉴로 확정됩니다.
         </div>
       </div>
     );
@@ -195,17 +212,31 @@ export default function BattleGameView({
     const isVotedA = candA && (votesA.includes(myNicknameId) || votesA.includes(room.hostNickname));
     const isVotedB = candB && (votesB.includes(myNicknameId) || votesB.includes(room.hostNickname));
     const totalMatchVotes = votesA.length + votesB.length;
+    const maxDuration = worldcupMatch?.durationSeconds || 60;
 
     return (
-      <div className="flex h-full flex-col bg-surface p-6 text-ink overflow-hidden">
+      <div className="flex h-full flex-col bg-surface p-5 sm:p-6 text-ink overflow-hidden">
         <div className="mb-4 flex items-center justify-between border-b border-black/5 pb-3.5 shrink-0">
           <div className="flex items-center gap-2">
             <span className="rounded-md bg-purple-50 px-2.5 py-0.5 text-xs font-semibold text-purple-700 border border-purple-200">
-              메뉴 이상형 월드컵
+              메뉴 이상형 월드컵 (최대 1분)
             </span>
-            <span className="font-bold text-ink text-sm sm:text-base">{worldcupMatch?.roundName || "토너먼트"}</span>
+            <span className="font-bold text-ink text-sm sm:text-base">
+              {worldcupMatch?.roundName || "결승전"}
+            </span>
           </div>
-          <div className="font-mono text-xl font-black text-primary">{timeLeft}초</div>
+          <div className="text-right">
+            <div className="text-[10px] text-ink-soft font-mono">남은 시간</div>
+            <div className="font-mono text-2xl font-black text-primary">{timeLeft}초</div>
+          </div>
+        </div>
+
+        {/* 진행 게이지 바 */}
+        <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-surface-muted shrink-0">
+          <div
+            className="h-full bg-purple-600 transition-all duration-300 ease-linear rounded-full"
+            style={{ width: `${(timeLeft / maxDuration) * 100}%` }}
+          />
         </div>
 
         {/* 1:1 대결 화면 */}
@@ -260,39 +291,84 @@ export default function BattleGameView({
         </div>
 
         <div className="mt-3 text-center text-xs text-ink-soft shrink-0">
-          더 먹고 싶은 메뉴를 선택하세요 · 다수결로 다음 라운드에 진출합니다 ({totalMatchVotes}/{room.players.length}명 참여)
+          더 먹고 싶은 메뉴를 선택하세요 · 전원 투표 시 즉시 다음 단계로 넘어가며 다수결로 승자가 결정됩니다 ({totalMatchVotes}/{room.players.length}명 참여)
         </div>
       </div>
     );
   }
 
-  // 3. 룰렛 모드 (롤링 애니메이션)
-  const currentRouletteCand = candidatesList[rouletteIndex] || candidatesList[0];
+  // 3. 운명의 룰렛 모드 (원형 룰렛 돌림판)
+  const n = Math.max(candidatesList.length, 1);
+  const sliceDeg = 360 / n;
 
   return (
-    <div className="flex h-full flex-col items-center justify-center bg-surface p-6 text-center text-ink">
-      <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200 mb-3">
+    <div className="flex h-full flex-col items-center justify-center bg-surface p-4 sm:p-6 text-center text-ink overflow-hidden">
+      <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200 mb-2 shrink-0">
         운명의 룰렛 추첨 중
       </div>
-      <h2 className="text-xl font-bold text-ink mb-6">오늘의 점심 메뉴를 고르고 있습니다...</h2>
+      <h2 className="text-lg sm:text-xl font-bold text-ink mb-4 shrink-0">
+        오늘의 점심 메뉴를 고르고 있습니다...
+      </h2>
 
-      <div className="w-full max-w-sm rounded-2xl border border-black/10 bg-surface-muted/50 p-8 shadow-soft">
-        {currentRouletteCand ? (
-          <div>
-            <div className="font-mono text-2xl font-black text-primary transition-all duration-100">
-              {currentRouletteCand.name}
-            </div>
-            <div className="mt-2 text-xs text-ink-soft">
-              {currentRouletteCand.category || "식당"} · 추천: {currentRouletteCand.addedByNickname}
-            </div>
+      {/* 원형 룰렛 컨테이너 */}
+      <div className="relative flex items-center justify-center my-auto">
+        {/* 상단 인디케이터 화살표 핀 */}
+        <div className="absolute top-[-10px] left-1/2 -translate-x-1/2 z-20 text-2xl font-bold text-primary drop-shadow-md">
+          ▼
+        </div>
+
+        {/* 회전하는 룰렛 원판 */}
+        <div
+          className="relative h-64 w-64 sm:h-72 sm:w-72 rounded-full border-4 border-white shadow-xl overflow-hidden"
+          style={{
+            transform: `rotate(${rouletteRotation}deg)`,
+            transition: "transform 4.8s cubic-bezier(0.12, 0.8, 0.32, 1)",
+          }}
+        >
+          <svg viewBox="0 0 200 200" className="h-full w-full">
+            {candidatesList.map((cand, i) => {
+              const startAngle = i * sliceDeg;
+              const endAngle = (i + 1) * sliceDeg;
+              const midAngle = startAngle + sliceDeg / 2;
+              const textPos = polarToCartesian(100, 100, 62, midAngle);
+
+              return (
+                <g key={cand.id || i}>
+                  <path
+                    d={describeSlice(100, 100, 98, startAngle, endAngle)}
+                    fill={ROULETTE_PALETTE[i % ROULETTE_PALETTE.length]}
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                  />
+                  {/* 슬라이스 텍스트 */}
+                  <text
+                    x={textPos.x}
+                    y={textPos.y}
+                    fill="#1f2937"
+                    fontSize={n > 6 ? "7.5" : "9.5"}
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    transform={`rotate(${midAngle + 90}, ${textPos.x}, ${textPos.y})`}
+                  >
+                    {cand.name.length > 6 ? cand.name.slice(0, 5) + "…" : cand.name}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* 룰렛 중앙 허브 캡 */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white border-2 border-primary shadow-md flex items-center justify-center z-10">
+            <div className="h-3 w-3 rounded-full bg-primary" />
           </div>
-        ) : (
-          <div className="animate-pulse font-mono text-xl font-bold text-primary">
-            [ 메뉴 추첨 중 ]
-          </div>
-        )}
-        <p className="mt-5 text-xs text-ink-soft">등록된 후보 중 하나가 무작위로 선정됩니다.</p>
+        </div>
       </div>
+
+      <p className="mt-4 text-xs text-ink-soft shrink-0">
+        등록된 후보 {candidatesList.length}개 중 하나가 실시간으로 추첨됩니다.
+      </p>
     </div>
   );
 }
+

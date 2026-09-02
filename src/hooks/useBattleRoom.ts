@@ -589,6 +589,124 @@ export function useBattleRoom({
     [companyCode, currentRoomId, myNickname]
   );
 
+  // 5-4. 게임 모드 변경 (방장 전용)
+  const changeGameMode = useCallback(
+    async (newMode: BattleGameMode) => {
+      if (!currentRoomId || !currentRoom) return;
+      const me = currentRoom.players.find(
+        (p) => p.nicknameId === myNicknameId || p.nickname === myNickname
+      );
+      const isHost =
+        me?.isHost ||
+        currentRoom.hostNicknameId === myNicknameId ||
+        currentRoom.hostNickname === myNickname;
+      if (!isHost) return;
+
+      const roomId = currentRoomId;
+      const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
+
+      const modeNames: Record<BattleGameMode, string> = {
+        "speed-vote": "스피드 투표",
+        "worldcup": "메뉴 월드컵",
+        "roulette": "운명의 룰렛",
+      };
+
+      await update(roomRef, { gameMode: newMode });
+
+      const messagesRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/messages`);
+      await push(messagesRef, {
+        id: `sys-${Date.now()}`,
+        senderNickname: "SYSTEM",
+        content: `방장이 게임을 [${modeNames[newMode] || newMode}](으)로 변경했습니다.`,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      });
+    },
+    [companyCode, currentRoom, currentRoomId, myNickname, myNicknameId]
+  );
+
+  // 스피드 투표 결과 확정 공통 함수
+  const finishSpeedVote = useCallback(
+    async (roomId: string) => {
+      const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
+      const snap = await get(roomRef);
+      if (!snap.exists()) return;
+      const currentData = snap.val();
+      if (currentData.status !== "in-game") return;
+
+      const currentVotes: Record<string, string> =
+        currentData.voteState && typeof currentData.voteState.votes === "object"
+          ? currentData.voteState.votes
+          : {};
+      const cands: BattleCandidate[] = Object.values(currentData.candidates || {});
+      if (cands.length === 0) return;
+
+      const counts: Record<string, number> = {};
+      cands.forEach((c) => (counts[c.id] = 0));
+      Object.values(currentVotes).forEach((candId) => {
+        if (candId && counts[candId] !== undefined) counts[candId] = (counts[candId] || 0) + 1;
+      });
+
+      let max = -1;
+      let top: BattleCandidate[] = [];
+      cands.forEach((c) => {
+        const v = counts[c.id] || 0;
+        if (v > max) {
+          max = v;
+          top = [c];
+        } else if (v === max) {
+          top.push(c);
+        }
+      });
+
+      const winner = top[Math.floor(Math.random() * top.length)] || cands[0];
+      const result: BattleResult = {
+        winner,
+        gameMode: "speed-vote",
+        totalParticipants: Object.keys(currentData.players || {}).length,
+        finishedAt: new Date().toISOString(),
+      };
+
+      await update(roomRef, {
+        status: "finished",
+        result,
+      });
+    },
+    [companyCode]
+  );
+
+  // 월드컵 결과 확정 공통 함수
+  const finishWorldcup = useCallback(
+    async (roomId: string) => {
+      const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
+      const snap = await get(roomRef);
+      if (!snap.exists()) return;
+      const currentData = snap.val();
+      if (currentData.status !== "in-game") return;
+
+      const curMatch = currentData.worldcupMatch || {};
+      const countA = curMatch.votesA ? Object.keys(curMatch.votesA).length : 0;
+      const countB = curMatch.votesB ? Object.keys(curMatch.votesB).length : 0;
+
+      const cands: BattleCandidate[] = Object.values(currentData.candidates || {});
+      const candA = curMatch.candidateA || cands[0];
+      const candB = curMatch.candidateB || cands[1] || cands[0];
+      const winner = countA >= countB ? candA : candB;
+
+      const result: BattleResult = {
+        winner,
+        gameMode: "worldcup",
+        totalParticipants: Object.keys(currentData.players || {}).length,
+        finishedAt: new Date().toISOString(),
+      };
+      await update(roomRef, {
+        status: "finished",
+        result,
+      });
+    },
+    [companyCode]
+  );
+
   // 10. 게임 시작 (방장 전용 - 모든 클라이언트 실시간 동기화)
   const startGame = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     if (!currentRoomId || !currentRoom) {
@@ -617,9 +735,10 @@ export function useBattleRoom({
     const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
 
     if (currentRoom.gameMode === "speed-vote") {
+      // 참여형 게임 최대 60초(1분) 제한
       const voteState: BattleVoteState = {
         startedAt: Date.now(),
-        durationSeconds: 15,
+        durationSeconds: 60,
         votes: {},
       };
       await update(roomRef, {
@@ -627,49 +746,10 @@ export function useBattleRoom({
         voteState,
       });
 
-      // 15초 후 모든 참가자 화면이 동시에 승자 결과 화면으로 전환
-      setTimeout(async () => {
-        const snap = await get(roomRef);
-        if (!snap.exists()) return;
-        const currentData = snap.val();
-        if (currentData.status !== "in-game") return;
-
-        const currentVotes: Record<string, string> =
-          currentData.voteState && typeof currentData.voteState.votes === "object"
-            ? currentData.voteState.votes
-            : {};
-        const cands: BattleCandidate[] = Object.values(currentData.candidates || {});
-        const counts: Record<string, number> = {};
-        cands.forEach((c) => (counts[c.id] = 0));
-        Object.values(currentVotes).forEach((candId) => {
-          if (candId) counts[candId] = (counts[candId] || 0) + 1;
-        });
-
-        let max = -1;
-        let top: BattleCandidate[] = [];
-        cands.forEach((c) => {
-          const v = counts[c.id] || 0;
-          if (v > max) {
-            max = v;
-            top = [c];
-          } else if (v === max) {
-            top.push(c);
-          }
-        });
-
-        const winner = top[Math.floor(Math.random() * top.length)] || cands[0];
-        const result: BattleResult = {
-          winner,
-          gameMode: "speed-vote",
-          totalParticipants: Object.keys(currentData.players || {}).length,
-          finishedAt: new Date().toISOString(),
-        };
-
-        await update(roomRef, {
-          status: "finished",
-          result,
-        });
-      }, 15000);
+      // 60초 후 미투표 인원 제외하고 자동 확정 (만약 전원 조기 투표 시 즉시 종료됨)
+      setTimeout(() => {
+        finishSpeedVote(roomId);
+      }, 60000);
     } else if (currentRoom.gameMode === "roulette") {
       const cands: BattleCandidate[] = Object.values(currentRoom.candidates || {});
       const winner = cands[Math.floor(Math.random() * cands.length)] || cands[0];
@@ -684,7 +764,7 @@ export function useBattleRoom({
         rouletteState,
       });
 
-      // 5초 동안 전원 동일한 감속 롤링 애니메이션 후 동시에 결과 전환
+      // 5초 동안 전원 동일한 원형 룰렛 스핀 애니메이션 후 결과 전환
       setTimeout(async () => {
         const snap = await get(roomRef);
         if (!snap.exists()) return;
@@ -711,7 +791,7 @@ export function useBattleRoom({
         candidateB: shuffled[1],
         votesA: {},
         votesB: {},
-        durationSeconds: 8,
+        durationSeconds: 60,
         startedAt: Date.now(),
       };
 
@@ -720,38 +800,16 @@ export function useBattleRoom({
         worldcupMatch: match,
       });
 
-      // 8초 후 다수결 승자 판정 및 결과 전환 (전원 동시)
-      setTimeout(async () => {
-        const snap = await get(roomRef);
-        if (!snap.exists()) return;
-        const currentData = snap.val();
-        if (currentData.status !== "in-game") return;
-
-        const curMatch = currentData.worldcupMatch || {};
-        const countA = curMatch.votesA ? Object.keys(curMatch.votesA).length : 0;
-        const countB = curMatch.votesB ? Object.keys(curMatch.votesB).length : 0;
-
-        const candA = curMatch.candidateA || shuffled[0];
-        const candB = curMatch.candidateB || shuffled[1];
-        const winner = countA >= countB ? candA : candB;
-
-        const result: BattleResult = {
-          winner,
-          gameMode: "worldcup",
-          totalParticipants: Object.keys(currentData.players || {}).length,
-          finishedAt: new Date().toISOString(),
-        };
-        await update(roomRef, {
-          status: "finished",
-          result,
-        });
-      }, 8000);
+      // 60초 후 다수결 승자 판정 및 결과 전환 (전원 투표 완료 시 조기 종료)
+      setTimeout(() => {
+        finishWorldcup(roomId);
+      }, 60000);
     }
 
     return { success: true };
-  }, [companyCode, currentRoom, currentRoomId, myNickname, myNicknameId]);
+  }, [companyCode, currentRoom, currentRoomId, finishSpeedVote, finishWorldcup, myNickname, myNicknameId]);
 
-  // 11. 투표하기
+  // 11. 투표하기 (전원 참여 시 즉시 조기 종료 처리)
   const castVote = useCallback(
     async (candidateId: string) => {
       if (!currentRoomId || !currentRoom) return;
@@ -763,6 +821,20 @@ export function useBattleRoom({
           `battles/${companyCode}/rooms/${roomId}/voteState/votes/${myNicknameId}`
         );
         await set(voteRef, candidateId);
+
+        // 최신 투표 수 확인하여 방의 모든 플레이어가 참여했는지 체크
+        const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
+        const snap = await get(roomRef);
+        if (snap.exists()) {
+          const data = snap.val();
+          const playersCount = data.players ? Object.keys(data.players).length : 0;
+          const votesCount = data.voteState?.votes ? Object.keys(data.voteState.votes).length : 0;
+
+          if (playersCount > 0 && votesCount >= playersCount) {
+            // 모든 참가자가 투표 완료했으므로 즉시 조기 종료
+            await finishSpeedVote(roomId);
+          }
+        }
       } else if (currentRoom.gameMode === "worldcup" && currentRoom.worldcupMatch) {
         const match = currentRoom.worldcupMatch;
         const candAId = match.candidateA?.id;
@@ -791,9 +863,25 @@ export function useBattleRoom({
           await set(voteBRef, true);
           await remove(voteARef);
         }
+
+        // 최신 월드컵 투표 수 확인
+        const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
+        const snap = await get(roomRef);
+        if (snap.exists()) {
+          const data = snap.val();
+          const playersCount = data.players ? Object.keys(data.players).length : 0;
+          const curMatch = data.worldcupMatch;
+          const countA = curMatch?.votesA ? Object.keys(curMatch.votesA).length : 0;
+          const countB = curMatch?.votesB ? Object.keys(curMatch.votesB).length : 0;
+
+          if (playersCount > 0 && (countA + countB) >= playersCount) {
+            // 모든 참가자가 투표 완료했으므로 즉시 조기 종료
+            await finishWorldcup(roomId);
+          }
+        }
       }
     },
-    [companyCode, currentRoom, currentRoomId, myNicknameId]
+    [companyCode, currentRoom, currentRoomId, finishSpeedVote, finishWorldcup, myNicknameId]
   );
 
   // 12. 게임 종료 후 대기실로 복귀 (방장/참가자 공유)
@@ -859,6 +947,7 @@ export function useBattleRoom({
     leaveRoom,
     transferHost,
     deleteRoomFromLobby,
+    changeGameMode,
     toggleReady,
     pickRestaurant,
     setMyPickedCandidate,

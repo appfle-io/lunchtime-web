@@ -41,6 +41,7 @@ export default function BattleLobbyModal({
     leaveRoom,
     transferHost,
     deleteRoomFromLobby,
+    changeGameMode,
     toggleReady,
     pickRestaurant,
     setMyPickedCandidate,
@@ -161,6 +162,7 @@ export default function BattleLobbyModal({
               restaurants={restaurants}
               onLeave={leaveRoom}
               onTransferHost={transferHost}
+              onChangeGameMode={changeGameMode}
               onToggleReady={toggleReady}
               onPickRestaurant={pickRestaurant}
               onSelectCandidateAsMyPick={setMyPickedCandidate}
