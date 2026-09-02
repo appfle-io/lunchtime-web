@@ -268,23 +268,44 @@ const GUIDE_SECTIONS: GuideSection[] = [
         description: "참가자와 당첨 항목(예: 커피 쏘기, 밥값 내기 등)을 설정하고 사다리를 타고 내려가 결과를 확인합니다.",
         renderPreview: () => (
           <div className="flex h-36 w-full flex-col justify-between rounded-xl border border-black/10 bg-slate-50 p-3">
-            <div className="flex justify-around text-xs font-bold text-ink">
+            {/* 상단 참가자 이름 */}
+            <div className="grid grid-cols-3 text-center text-xs font-bold text-ink">
               <span>철수</span>
-              <span>영희</span>
+              <span className="text-primary-dark">영희 (선택)</span>
               <span>민수</span>
             </div>
-            <div className="flex justify-around py-1">
-              <div className="relative h-12 w-0.5 bg-slate-300">
-                <div className="absolute left-0 top-3 h-0.5 w-14 bg-slate-300" />
-              </div>
-              <div className="relative h-12 w-0.5 bg-slate-300">
-                <div className="absolute left-0 top-7 h-0.5 w-14 bg-slate-300" />
-              </div>
-              <div className="h-12 w-0.5 bg-slate-300" />
+
+            {/* 사다리 SVG 그래픽 */}
+            <div className="relative h-14 w-full px-2">
+              <svg viewBox="0 0 240 56" className="h-full w-full">
+                {/* 3개의 세로 기둥선 */}
+                <line x1="40" y1="2" x2="40" y2="54" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" />
+                <line x1="120" y1="2" x2="120" y2="54" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" />
+                <line x1="200" y1="2" x2="200" y2="54" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" />
+
+                {/* 가로 연결 다리 */}
+                <line x1="40" y1="18" x2="120" y2="18" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" />
+                <line x1="120" y1="38" x2="200" y2="38" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" />
+
+                {/* 영희 -> 커피 당첨 추적 하이라이트 경로 */}
+                <polyline
+                  points="120,2 120,18 40,18 40,54"
+                  fill="none"
+                  stroke="#ff6b00"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {/* 시작점과 끝점 마커 닷 */}
+                <circle cx="120" cy="4" r="3.5" fill="#ff6b00" />
+                <circle cx="40" cy="52" r="3.5" fill="#ff6b00" />
+              </svg>
             </div>
-            <div className="flex justify-around text-xs font-semibold">
-              <span className="text-ink-soft">통과</span>
+
+            {/* 하단 결과 항목 */}
+            <div className="grid grid-cols-3 text-center text-xs font-semibold">
               <span className="font-bold text-primary-dark">커피 당첨</span>
+              <span className="text-ink-soft">통과</span>
               <span className="text-ink-soft">통과</span>
             </div>
           </div>
