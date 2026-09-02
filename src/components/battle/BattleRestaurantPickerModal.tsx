@@ -48,7 +48,7 @@ export default function BattleRestaurantPickerModal({
       .slice(0, 50);
   }, [restaurants, searchQuery]);
 
-  // 지도 초기화 및 마커 렌더링
+  // 지도 초기화 및 클러스터링 마커 렌더링 (뷰포트 컬링 + 클러스터링으로 렉 완전 해소)
   useEffect(() => {
     if (!open || activeTab !== "map" || !mapContainerRef.current) return;
     if (typeof window === "undefined" || !window.naver?.maps) return;
@@ -69,31 +69,124 @@ export default function BattleRestaurantPickerModal({
     });
     mapInstanceRef.current = map;
 
-    // 기존 마커 정리
-    markersRef.current.forEach((m) => m.setMap(null));
-    markersRef.current = [];
-
-    // 유효한 좌표를 가진 식당 마커 생성
-    restaurants.forEach((restaurant) => {
-      if (!restaurant.lat || !restaurant.lng) return;
-
-      const marker = new window.naver.maps.Marker({
-        position: new window.naver.maps.LatLng(restaurant.lat, restaurant.lng),
-        map,
-        title: restaurant.name,
-      });
-
-      window.naver.maps.Event.addListener(marker, "click", () => {
-        setSelectedMapRestaurant(restaurant);
-        map.panTo(new window.naver.maps.LatLng(restaurant.lat, restaurant.lng));
-      });
-
-      markersRef.current.push(marker);
-    });
-
-    return () => {
+    const clearMarkers = () => {
       markersRef.current.forEach((m) => m.setMap(null));
       markersRef.current = [];
+    };
+
+    // 뷰포트 컬링 + 클러스터링 마커 갱신 함수
+    const updateMarkers = () => {
+      clearMarkers();
+      if (!map) return;
+
+      const bounds = map.getBounds();
+      if (!bounds) return;
+
+      // 1. 뷰포트 컬링 (화면 영역 + 여유 마진 내 식당만 필터)
+      const min = bounds.getMin();
+      const max = bounds.getMax();
+      const latMargin = (max.lat() - min.lat()) * 0.3;
+      const lngMargin = (max.lng() - min.lng()) * 0.3;
+      const visibleBounds = new window.naver.maps.LatLngBounds(
+        new window.naver.maps.LatLng(min.lat() - latMargin, min.lng() - lngMargin),
+        new window.naver.maps.LatLng(max.lat() + latMargin, max.lng() + lngMargin)
+      );
+
+      const inViewRestaurants = restaurants.filter(
+        (r) =>
+          r.lat &&
+          r.lng &&
+          visibleBounds.hasLatLng(new window.naver.maps.LatLng(r.lat, r.lng))
+      );
+
+      const currentZoom = map.getZoom();
+
+      // 2. 12개 초과 시 그리드 기반 클러스터링 적용
+      if (inViewRestaurants.length > 12 && currentZoom <= 17) {
+        const gridDegrees = 0.0038 * Math.pow(2, 16 - currentZoom);
+        const clusterMap = new Map<string, { lat: number; lng: number; list: RestaurantSummary[] }>();
+
+        for (const r of inViewRestaurants) {
+          const cellX = Math.floor(r.lat / gridDegrees);
+          const cellY = Math.floor(r.lng / gridDegrees);
+          const key = `${cellX}_${cellY}`;
+
+          const existing = clusterMap.get(key);
+          if (existing) {
+            existing.list.push(r);
+          } else {
+            clusterMap.set(key, { lat: r.lat, lng: r.lng, list: [r] });
+          }
+        }
+
+        // 클러스터 및 단일 마커 생성
+        for (const group of clusterMap.values()) {
+          if (group.list.length > 1) {
+            // 그룹 평균 좌표
+            const avgLat = group.list.reduce((sum, item) => sum + item.lat, 0) / group.list.length;
+            const avgLng = group.list.reduce((sum, item) => sum + item.lng, 0) / group.list.length;
+
+            const clusterMarker = new window.naver.maps.Marker({
+              position: new window.naver.maps.LatLng(avgLat, avgLng),
+              map,
+              icon: {
+                content: `
+                  <div style="cursor:pointer; display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; background-color:#ff6b00; color:white; font-weight:bold; font-size:12px; box-shadow:0 3px 8px rgba(0,0,0,0.25); border:2.5px solid white;">
+                    ${group.list.length}
+                  </div>
+                `,
+                anchor: new window.naver.maps.Point(18, 18),
+              },
+            });
+
+            window.naver.maps.Event.addListener(clusterMarker, "click", () => {
+              map.panTo(new window.naver.maps.LatLng(avgLat, avgLng));
+              map.setZoom(Math.min(currentZoom + 2, 19));
+            });
+
+            markersRef.current.push(clusterMarker);
+          } else {
+            const singleR = group.list[0];
+            const singleMarker = new window.naver.maps.Marker({
+              position: new window.naver.maps.LatLng(singleR.lat, singleR.lng),
+              map,
+              title: singleR.name,
+            });
+
+            window.naver.maps.Event.addListener(singleMarker, "click", () => {
+              setSelectedMapRestaurant(singleR);
+              map.panTo(new window.naver.maps.LatLng(singleR.lat, singleR.lng));
+            });
+
+            markersRef.current.push(singleMarker);
+          }
+        }
+      } else {
+        // 개별 마커 생성
+        inViewRestaurants.forEach((restaurant) => {
+          const marker = new window.naver.maps.Marker({
+            position: new window.naver.maps.LatLng(restaurant.lat, restaurant.lng),
+            map,
+            title: restaurant.name,
+          });
+
+          window.naver.maps.Event.addListener(marker, "click", () => {
+            setSelectedMapRestaurant(restaurant);
+            map.panTo(new window.naver.maps.LatLng(restaurant.lat, restaurant.lng));
+          });
+
+          markersRef.current.push(marker);
+        });
+      }
+    };
+
+    // 초기 렌더링 및 idle(드래그/줌 완료) 시 갱신
+    updateMarkers();
+    const idleListener = window.naver.maps.Event.addListener(map, "idle", updateMarkers);
+
+    return () => {
+      window.naver.maps.Event.removeListener(idleListener);
+      clearMarkers();
     };
   }, [open, activeTab, restaurants]);
 
