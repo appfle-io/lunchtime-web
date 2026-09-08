@@ -675,34 +675,258 @@ export function useBattleRoom({
     [companyCode]
   );
 
-  // 월드컵 결과 확정 공통 함수
-  const finishWorldcup = useCallback(
-    async (roomId: string) => {
+  // 월드컵 경기 결과 처리 및 다음 경기 / 토너먼트 진행 / 종료
+  const resolveWorldcupMatch = useCallback(
+    async (roomId: string, matchStartedAt?: number) => {
       const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
       const snap = await get(roomRef);
       if (!snap.exists()) return;
       const currentData = snap.val();
       if (currentData.status !== "in-game") return;
 
-      const curMatch = currentData.worldcupMatch || {};
-      const countA = curMatch.votesA ? Object.keys(curMatch.votesA).length : 0;
-      const countB = curMatch.votesB ? Object.keys(curMatch.votesB).length : 0;
+      const curMatch = currentData.worldcupMatch;
+      if (!curMatch) return;
+      // 특정 매치 시작시간이 주어졌는데 이미 다른 매치로 넘어갔다면 무시
+      if (matchStartedAt && curMatch.startedAt !== matchStartedAt) return;
+      if (curMatch.isResolving) return;
 
-      const cands: BattleCandidate[] = Object.values(currentData.candidates || {});
-      const candA = curMatch.candidateA || cands[0];
-      const candB = curMatch.candidateB || cands[1] || cands[0];
-      const winner = countA >= countB ? candA : candB;
-
-      const result: BattleResult = {
-        winner,
-        gameMode: "worldcup",
-        totalParticipants: Object.keys(currentData.players || {}).length,
-        finishedAt: new Date().toISOString(),
-      };
-      await update(roomRef, {
-        status: "finished",
-        result,
+      // 중복 실행 방지 플래그 선점
+      await update(ref(rtdb, `battles/${companyCode}/rooms/${roomId}/worldcupMatch`), {
+        isResolving: true,
       });
+
+      const messagesRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/messages`);
+
+      const votesAObj = curMatch.votesA || {};
+      const votesBObj = curMatch.votesB || {};
+      const countA = Array.isArray(votesAObj) ? votesAObj.length : Object.keys(votesAObj).length;
+      const countB = Array.isArray(votesBObj) ? votesBObj.length : Object.keys(votesBObj).length;
+
+      const candA: BattleCandidate = curMatch.candidateA;
+      const candB: BattleCandidate = curMatch.candidateB;
+      const isFinal = Boolean(curMatch.isFinal);
+
+      let winner: BattleCandidate | null = null;
+      const isTie = countA === countB;
+
+      if (isTie) {
+        if (isFinal) {
+          // 결승전 동점 -> 무승부로 최종 종료!
+          await push(messagesRef, {
+            id: `sys-${Date.now()}`,
+            senderNickname: "SYSTEM",
+            content: `[결승전 결과] [${candA.name}](${countA}표) vs [${candB.name}](${countB}표) - 치열한 접전 끝에 완벽한 무승부(동점)입니다! 두 메뉴 중 함께 잘 협의해보세요!`,
+            createdAt: new Date().toISOString(),
+            isSystem: true,
+          });
+
+          const result: BattleResult = {
+            winner: candA, // 호환성 유지용 (isTie가 true이므로 tiedCandidates가 우선됨)
+            gameMode: "worldcup",
+            totalParticipants: Object.keys(currentData.players || {}).length,
+            finishedAt: new Date().toISOString(),
+            isTie: true,
+            tiedCandidates: [candA, candB],
+            tieMessage: "투표 결과가 동점입니다! 팀원들과 함께 맛있는 점심을 잘 협의해보세요.",
+          };
+
+          await update(roomRef, {
+            status: "finished",
+            result,
+          });
+          return;
+        } else {
+          // 중간 경기 동점 -> 50:50 무작위 추첨으로 진출자 선정
+          winner = Math.random() < 0.5 ? candA : candB;
+          await push(messagesRef, {
+            id: `sys-${Date.now()}`,
+            senderNickname: "SYSTEM",
+            content: `[${curMatch.roundName} 결과] [${candA.name}](${countA}표) vs [${candB.name}](${countB}표) 동점! 무작위 추첨으로 [${winner.name}]이(가) 다음 라운드에 진출합니다!`,
+            createdAt: new Date().toISOString(),
+            isSystem: true,
+          });
+        }
+      } else {
+        winner = countA > countB ? candA : candB;
+        await push(messagesRef, {
+          id: `sys-${Date.now()}`,
+          senderNickname: "SYSTEM",
+          content: `[${curMatch.roundName} 결과] [${candA.name}](${countA}표) vs [${candB.name}](${countB}표) -> [${winner.name}] 승리!`,
+          createdAt: new Date().toISOString(),
+          isSystem: true,
+        });
+      }
+
+      if (!winner) return;
+
+      // 다음 라운드 진출 후보에 승자 추가
+      const rawNext = Array.isArray(curMatch.nextRoundCandidates)
+        ? curMatch.nextRoundCandidates
+        : Object.values(curMatch.nextRoundCandidates || {});
+      const nextRoundCandidates: BattleCandidate[] = [...rawNext, winner];
+
+      // 현재 라운드에서 아직 경기 대기 중인 후보 목록
+      const rawRemaining = Array.isArray(curMatch.remainingCandidates)
+        ? curMatch.remainingCandidates
+        : Object.values(curMatch.remainingCandidates || {});
+      const remainingCandidates: BattleCandidate[] = [...rawRemaining];
+
+      // Case 1: 현재 라운드에 2개 이상 후보가 남아있어 다음 매치 진행
+      if (remainingCandidates.length >= 2) {
+        const nextA = remainingCandidates[0];
+        const nextB = remainingCandidates[1];
+        const newRemaining = remainingCandidates.slice(2);
+
+        // 만약 이번 라운드에 홀수라서 1명만 남게 된다면, 그 1명은 부전승으로 nextRoundCandidates에 미리 추가
+        let byeCand: BattleCandidate | undefined = undefined;
+        if (newRemaining.length === 1) {
+          byeCand = newRemaining[0];
+          nextRoundCandidates.push(byeCand);
+          await push(messagesRef, {
+            id: `sys-${Date.now()}`,
+            senderNickname: "SYSTEM",
+            content: `[부전승 안내] [${byeCand.name}]은(는) 부전승으로 다음 라운드에 직행합니다.`,
+            createdAt: new Date().toISOString(),
+            isSystem: true,
+          });
+        }
+
+        const nextStartedAt = Date.now();
+        const nextMatch: BattleWorldcupMatch = {
+          matchIndex: (curMatch.matchIndex || 1) + 1,
+          totalMatchesInRound: curMatch.totalMatchesInRound || 1,
+          roundName: curMatch.roundName,
+          candidateA: nextA,
+          candidateB: nextB,
+          votesA: {},
+          votesB: {},
+          durationSeconds: 60,
+          startedAt: nextStartedAt,
+          remainingCandidates: newRemaining.length === 1 ? [] : newRemaining,
+          nextRoundCandidates,
+          byeCandidate: byeCand,
+          isFinal: false,
+        };
+
+        await update(roomRef, {
+          worldcupMatch: nextMatch,
+        });
+
+        setTimeout(() => {
+          resolveWorldcupMatch(roomId, nextStartedAt);
+        }, 60000);
+        return;
+      }
+
+      // Case 2: 현재 라운드에 1명만 남은 경우 (부전승)
+      if (remainingCandidates.length === 1) {
+        const byeCand = remainingCandidates[0];
+        nextRoundCandidates.push(byeCand);
+        await push(messagesRef, {
+          id: `sys-${Date.now()}`,
+          senderNickname: "SYSTEM",
+          content: `[부전승 안내] [${byeCand.name}]은(는) 부전승으로 다음 라운드에 직행합니다.`,
+          createdAt: new Date().toISOString(),
+          isSystem: true,
+        });
+      }
+
+      // Case 3: 현재 라운드의 모든 경기가 종료됨
+      // 다음 라운드로 진출한 후보 수에 따라 판단
+      if (nextRoundCandidates.length === 1) {
+        // 단독 최종 우승자 탄생!
+        const finalWinner = nextRoundCandidates[0];
+        await push(messagesRef, {
+          id: `sys-${Date.now()}`,
+          senderNickname: "SYSTEM",
+          content: `[메뉴 월드컵 최종 우승] [${finalWinner.name}]! 오늘의 점심 메뉴로 결정되었습니다!`,
+          createdAt: new Date().toISOString(),
+          isSystem: true,
+        });
+
+        const result: BattleResult = {
+          winner: finalWinner,
+          gameMode: "worldcup",
+          totalParticipants: Object.keys(currentData.players || {}).length,
+          finishedAt: new Date().toISOString(),
+          isTie: false,
+        };
+
+        await update(roomRef, {
+          status: "finished",
+          result,
+        });
+        return;
+      }
+
+      // 다음 라운드 시작 (후보 2명 이상)
+      const isNextFinal = nextRoundCandidates.length === 2;
+      let nextRoundName = "";
+      if (isNextFinal) {
+        nextRoundName = "결승전";
+      } else if (nextRoundCandidates.length <= 4) {
+        nextRoundName = "준결승";
+      } else if (nextRoundCandidates.length <= 8) {
+        nextRoundName = "8강";
+      } else {
+        nextRoundName = `${nextRoundCandidates.length}강`;
+      }
+
+      const nextA = nextRoundCandidates[0];
+      const nextB = nextRoundCandidates[1];
+      const newRemaining = nextRoundCandidates.slice(2);
+
+      let byeCand: BattleCandidate | undefined = undefined;
+      const newNextRound: BattleCandidate[] = [];
+      if (newRemaining.length === 1) {
+        byeCand = newRemaining[0];
+        newNextRound.push(byeCand);
+        await push(messagesRef, {
+          id: `sys-${Date.now()}`,
+          senderNickname: "SYSTEM",
+          content: `[부전승 안내] [${byeCand.name}]은(는) 부전승으로 결승(다음 라운드)에 직행합니다.`,
+          createdAt: new Date().toISOString(),
+          isSystem: true,
+        });
+      }
+
+      const totalMatches = isNextFinal ? 1 : Math.ceil(nextRoundCandidates.length / 2);
+      const displayRoundName = isNextFinal
+        ? "결승전"
+        : `${nextRoundName} 1경기`;
+
+      await push(messagesRef, {
+        id: `sys-${Date.now()}`,
+        senderNickname: "SYSTEM",
+        content: `[${nextRoundName}] 대결이 시작되었습니다! (${nextA.name} vs ${nextB.name})`,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      });
+
+      const nextStartedAt = Date.now();
+      const nextMatch: BattleWorldcupMatch = {
+        matchIndex: 1,
+        totalMatchesInRound: totalMatches,
+        roundName: displayRoundName,
+        candidateA: nextA,
+        candidateB: nextB,
+        votesA: {},
+        votesB: {},
+        durationSeconds: 60,
+        startedAt: nextStartedAt,
+        remainingCandidates: newRemaining.length === 1 ? [] : newRemaining,
+        nextRoundCandidates: newNextRound,
+        byeCandidate: byeCand,
+        isFinal: isNextFinal,
+      };
+
+      await update(roomRef, {
+        worldcupMatch: nextMatch,
+      });
+
+      setTimeout(() => {
+        resolveWorldcupMatch(roomId, nextStartedAt);
+      }, 60000);
     },
     [companyCode]
   );
@@ -723,9 +947,9 @@ export function useBattleRoom({
       return { success: false, error: "방장만 시작할 수 있습니다." };
     }
 
-    const candidatesList = Array.isArray(currentRoom.candidates)
-      ? currentRoom.candidates
-      : Object.values(currentRoom.candidates || {});
+    const candidatesList: BattleCandidate[] = Array.isArray(currentRoom.candidates)
+      ? (currentRoom.candidates as BattleCandidate[])
+      : (Object.values(currentRoom.candidates || {}) as BattleCandidate[]);
 
     if (candidatesList.length < 2) {
       return { success: false, error: "메뉴 후보가 최소 2개 이상 등록되어야 합니다." };
@@ -784,15 +1008,55 @@ export function useBattleRoom({
       }, 5000);
     } else if (currentRoom.gameMode === "worldcup") {
       const shuffled = [...candidatesList].sort(() => Math.random() - 0.5);
-      const match = {
+      const isFinal = shuffled.length === 2;
+
+      let roundName = "";
+      if (isFinal) {
+        roundName = "결승전";
+      } else if (shuffled.length <= 4) {
+        roundName = "준결승 1경기";
+      } else if (shuffled.length <= 8) {
+        roundName = "8강 1경기";
+      } else {
+        roundName = `${shuffled.length}강 1경기`;
+      }
+
+      const candA = shuffled[0];
+      const candB = shuffled[1];
+      const remaining = shuffled.slice(2);
+      const nextRoundCandidates: BattleCandidate[] = [];
+      let byeCandidate: BattleCandidate | undefined = undefined;
+
+      const messagesRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/messages`);
+
+      // 만약 홀수라서 마지막 1명이 남는 경우 (예: 3개일 때 shuffled[2] 부전승)
+      if (remaining.length === 1) {
+        byeCandidate = remaining[0];
+        nextRoundCandidates.push(byeCandidate);
+        await push(messagesRef, {
+          id: `sys-${Date.now()}`,
+          senderNickname: "SYSTEM",
+          content: `[부전승 안내] [${byeCandidate.name}]은(는) 부전승으로 다음 라운드에 직행합니다.`,
+          createdAt: new Date().toISOString(),
+          isSystem: true,
+        });
+      }
+
+      const startedAt = Date.now();
+      const match: BattleWorldcupMatch = {
         matchIndex: 1,
-        roundName: shuffled.length <= 2 ? "결승전" : "토너먼트",
-        candidateA: shuffled[0],
-        candidateB: shuffled[1],
+        totalMatchesInRound: isFinal ? 1 : Math.ceil(shuffled.length / 2),
+        roundName: isFinal ? "결승전" : roundName,
+        candidateA: candA,
+        candidateB: candB,
         votesA: {},
         votesB: {},
         durationSeconds: 60,
-        startedAt: Date.now(),
+        startedAt,
+        remainingCandidates: remaining.length === 1 ? [] : remaining,
+        nextRoundCandidates,
+        byeCandidate,
+        isFinal,
       };
 
       await update(roomRef, {
@@ -800,14 +1064,22 @@ export function useBattleRoom({
         worldcupMatch: match,
       });
 
-      // 60초 후 다수결 승자 판정 및 결과 전환 (전원 투표 완료 시 조기 종료)
+      await push(messagesRef, {
+        id: `sys-${Date.now()}`,
+        senderNickname: "SYSTEM",
+        content: `메뉴 월드컵이 시작되었습니다! (${candA.name} vs ${candB.name})`,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      });
+
+      // 60초 후 다수결 승자 판정 및 다음 매치 진행 (전원 투표 완료 시 조기 진행)
       setTimeout(() => {
-        finishWorldcup(roomId);
+        resolveWorldcupMatch(roomId, startedAt);
       }, 60000);
     }
 
     return { success: true };
-  }, [companyCode, currentRoom, currentRoomId, finishSpeedVote, finishWorldcup, myNickname, myNicknameId]);
+  }, [companyCode, currentRoom, currentRoomId, finishSpeedVote, resolveWorldcupMatch, myNickname, myNicknameId]);
 
   // 11. 투표하기 (전원 참여 시 즉시 조기 종료 처리)
   const castVote = useCallback(
@@ -875,13 +1147,13 @@ export function useBattleRoom({
           const countB = curMatch?.votesB ? Object.keys(curMatch.votesB).length : 0;
 
           if (playersCount > 0 && (countA + countB) >= playersCount) {
-            // 모든 참가자가 투표 완료했으므로 즉시 조기 종료
-            await finishWorldcup(roomId);
+            // 모든 참가자가 투표 완료했으므로 즉시 다음 단계 진행
+            await resolveWorldcupMatch(roomId, curMatch.startedAt);
           }
         }
       }
     },
-    [companyCode, currentRoom, currentRoomId, finishSpeedVote, finishWorldcup, myNicknameId]
+    [companyCode, currentRoom, currentRoomId, finishSpeedVote, resolveWorldcupMatch, myNicknameId]
   );
 
   // 12. 게임 종료 후 대기실로 복귀 (방장/참가자 공유)

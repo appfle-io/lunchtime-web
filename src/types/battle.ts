@@ -45,13 +45,18 @@ export interface BattleVoteState {
 
 export interface BattleWorldcupMatch {
   matchIndex: number;
-  roundName: string; // e.g. "8강 1경기", "4강 1경기", "결승"
+  totalMatchesInRound?: number;
+  roundName: string; // e.g. "8강 1경기", "준결승", "결승전"
   candidateA: BattleCandidate;
   candidateB: BattleCandidate;
-  votesA: string[]; // nicknameIds
-  votesB: string[]; // nicknameIds
+  votesA: Record<string, boolean> | string[]; // nicknameIds
+  votesB: Record<string, boolean> | string[]; // nicknameIds
   durationSeconds: number;
   startedAt: number;
+  remainingCandidates?: BattleCandidate[]; // 현재 라운드에서 경기 대기 중인 후보들
+  nextRoundCandidates?: BattleCandidate[]; // 다음 라운드 진출 확정된 후보들
+  byeCandidate?: BattleCandidate; // 현재 라운드 부전승 진출 후보
+  isFinal?: boolean; // 결승전 여부
 }
 
 export interface BattleRouletteState {
@@ -61,10 +66,13 @@ export interface BattleRouletteState {
 }
 
 export interface BattleResult {
-  winner: BattleCandidate;
+  winner?: BattleCandidate;
   gameMode: BattleGameMode;
   totalParticipants: number;
   finishedAt: string;
+  isTie?: boolean;
+  tiedCandidates?: BattleCandidate[];
+  tieMessage?: string;
 }
 
 export interface BattleRoomSummary {

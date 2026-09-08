@@ -197,13 +197,13 @@ export default function BattleGameView({
     const votesA: string[] = Array.isArray(worldcupMatch?.votesA)
       ? worldcupMatch.votesA
       : typeof worldcupMatch?.votesA === "object" && worldcupMatch?.votesA !== null
-      ? Object.values(worldcupMatch.votesA)
+      ? Object.keys(worldcupMatch.votesA)
       : [];
 
     const votesB: string[] = Array.isArray(worldcupMatch?.votesB)
       ? worldcupMatch.votesB
       : typeof worldcupMatch?.votesB === "object" && worldcupMatch?.votesB !== null
-      ? Object.values(worldcupMatch.votesB)
+      ? Object.keys(worldcupMatch.votesB)
       : [];
 
     const candA = worldcupMatch?.candidateA || candidatesList[0];
@@ -217,13 +217,18 @@ export default function BattleGameView({
     return (
       <div className="flex h-full flex-col bg-surface p-5 sm:p-6 text-ink overflow-hidden">
         <div className="mb-4 flex items-center justify-between border-b border-black/5 pb-3.5 shrink-0">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md bg-purple-50 px-2.5 py-0.5 text-xs font-semibold text-purple-700 border border-purple-200">
-              메뉴 이상형 월드컵 (최대 1분)
+              메뉴 이상형 월드컵
             </span>
             <span className="font-bold text-ink text-sm sm:text-base">
               {worldcupMatch?.roundName || "결승전"}
             </span>
+            {worldcupMatch?.byeCandidate && (
+              <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
+                부전승 대기: {worldcupMatch.byeCandidate.name}
+              </span>
+            )}
           </div>
           <div className="text-right">
             <div className="text-[10px] text-ink-soft font-mono">남은 시간</div>
