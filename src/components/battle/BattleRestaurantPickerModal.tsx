@@ -397,6 +397,7 @@ export default function BattleRestaurantPickerModal({
               className="rounded-xl border border-black/10 bg-surface-muted/50 px-2.5 py-2 text-xs sm:text-sm text-ink focus:border-primary focus:bg-surface focus:outline-none shrink-0"
             >
               <option value="한식">한식</option>
+              <option value="국밥">국밥</option>
               <option value="중식">중식</option>
               <option value="일식">일식</option>
               <option value="양식">양식</option>

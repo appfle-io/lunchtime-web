@@ -73,5 +73,9 @@ export function getAvailableCategoryLabels(restaurants: RestaurantSummary[]): st
   for (const r of restaurants) {
     labels.add(getCategoryVisual(r.category, r.categoryLabel, r.name).label);
   }
-  return Array.from(labels).sort();
+  return Array.from(labels).sort((a, b) => {
+    if (a === "기타") return 1;
+    if (b === "기타") return -1;
+    return a.localeCompare(b, "ko");
+  });
 }

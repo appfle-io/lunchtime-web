@@ -27,8 +27,15 @@ const RULES: { test: RegExp; visual: CategoryVisual }[] = [
     visual: { emoji: "🏪", color: "#10B981", label: "편의점" },
   },
   {
-    // 네이버: 한식, 백반, 국밥 등 / 공공데이터: 한식음식점, 일반음식점(한식 계열)
-    test: /한식|백반|국밥|찌개|한정식|해장국|감자탕|설렁탕|곰탕|매운탕|추어탕|순두부|한식음식점|낙지|해물요리|복어/,
+    // 국밥 계열 (순대국, 돼지국밥, 해장국, 감자탕, 설렁탕, 곰탕, 추어탕, 육개장 등)
+    // 네이버: 국밥, 순대, 순댓국, 해장국, 감자탕, 설렁탕, 곰탕, 추어탕 등
+    test: /국밥|순대국|순댓국|순대,순댓국|해장국|감자탕|뼈다귀|설렁탕|설농탕|곰탕|추어탕|도가니탕|꼬리곰탕|갈비탕|육개장|북엇국|북어국|황탯국|황태국|수육국밥|소머리국밥|콩나물국밥|돼지국밥|순대전문|순대/i,
+    visual: { emoji: "🍲", color: "#C2410C", label: "국밥" },
+  },
+  {
+    // 네이버: 한식, 백반 등 / 공공데이터: 한식음식점, 일반음식점(한식 계열)
+    // 2026-09-18: 국밥 계열(국밥, 해장국, 설렁탕, 곰탕 등)은 독립된 "국밥" 카테고리로 분리됨
+    test: /한식|백반|찌개|한정식|매운탕|순두부|한식음식점|낙지|해물요리|복어/,
     visual: { emoji: "🍚", color: "#F59E0B", label: "한식" },
   },
   {
@@ -102,6 +109,7 @@ const VISUAL_BY_LABEL = new Map<string, CategoryVisual>([
 ]);
 
 // categoryLabel: AI(Gemini)나 사람이 확정한 정확한 라벨이 있으면 최우선으로 신뢰한다.
+//   단, "한식"으로 뭉뚱그려졌던 구버전 데이터는 상호/업종에 국밥 키워드가 있으면 "국밥"으로 보정한다.
 // category: 없거나 모르는 값이면, 기존처럼 네이버/정부 원본 업종 텍스트를 정규식으로 추론한다.
 // name: category만으로 분류가 안 될 때(기타간이음식점 등 뭉뚱그린 업종코드) 식당 이름도
 //   함께 검사해서 "유어보울 영드포점"처럼 지점명에 브랜드 키워드가 있는 경우도 올바른 카테고리로 분류.
@@ -110,21 +118,47 @@ export function getCategoryVisual(
   categoryLabel?: string | null,
   name?: string | null
 ): CategoryVisual {
-  if (categoryLabel) {
+  // 1. "한식"을 제외한 확정된 categoryLabel이 있으면 최우선 신뢰
+  if (categoryLabel && categoryLabel !== "한식") {
     const known = VISUAL_BY_LABEL.get(categoryLabel);
     if (known) return known;
   }
-  // category 단독으로 먼저 시도
+
+  // 2. 국밥 검사: categoryLabel이 "한식"이거나 없더라도, category나 name에 국밥 키워드가 있으면 국밥으로 분류
+  const gukbapRule = RULES.find((r) => r.visual.label === "국밥");
+  if (gukbapRule) {
+    const combined = `${category ?? ""} ${name ?? ""}`;
+    if (gukbapRule.test.test(combined)) {
+      return gukbapRule.visual;
+    }
+  }
+
+  // 3. 국밥이 아닌 확정된 "한식" 라벨인 경우 한식으로 반환
+  if (categoryLabel === "한식") {
+    const known = VISUAL_BY_LABEL.get("한식");
+    if (known) return known;
+  }
+
+  // 4. category 단독으로 먼저 시도 (네이버 구체 카테고리 등)
   if (category) {
+    // 뭉뚱그려진 공공데이터 업종명인 경우 상호명(name)의 구체 키워드(고기, 면류 등)를 우선 확인
+    if (/^(한식음식점|일반음식점|기타\s*간이\s*음식점)$/.test(category.trim()) && name) {
+      const combined = `${category} ${name}`;
+      const ruleByName = RULES.find((r) => r.test.test(combined));
+      if (ruleByName) return ruleByName.visual;
+    }
+
     const ruleByCategory = RULES.find((r) => r.test.test(category));
     if (ruleByCategory) return ruleByCategory.visual;
   }
-  // category로 못 잡으면 name도 포함해서 재시도 (지점명 브랜드 키워드 매칭)
+
+  // 5. category로 못 잡으면 name도 포함해서 재시도 (지점명 브랜드 키워드 매칭)
   if (name) {
     const combined = `${category ?? ""} ${name}`;
     const ruleByName = RULES.find((r) => r.test.test(combined));
     if (ruleByName) return ruleByName.visual;
   }
+
   return DEFAULT_VISUAL;
 }
 

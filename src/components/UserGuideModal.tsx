@@ -65,13 +65,16 @@ const GUIDE_SECTIONS: GuideSection[] = [
       },
       {
         label: "상단 필터 바 (카테고리 & 특수 태그)",
-        description: "한식, 일식 등 음식 카테고리와 제로페이, 도보 5분, 즐겨찾기, 회식, 최근많이찾는 필터를 조합할 수 있습니다.",
+        description: "한식, 국밥, 일식 등 음식 카테고리와 제로페이, 도보 5분, 즐겨찾기, 회식, 최근많이찾는 필터를 조합할 수 있습니다.",
         renderPreview: () => (
           <div className="flex h-36 w-full flex-col justify-center gap-2.5 rounded-xl border border-black/10 bg-slate-50 p-4">
             <div className="text-[11px] font-bold text-ink-soft">실제 필터바 디자인</div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="rounded-full border border-primary bg-primary px-3 py-1 text-xs font-semibold text-white shadow-xs">
                 ✓ 한식
+              </span>
+              <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-ink-soft">
+                국밥
               </span>
               <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-ink-soft">
                 일식
