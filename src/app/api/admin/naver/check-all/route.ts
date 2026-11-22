@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
             const { enrichResult, steps: enrichSteps, changesSummary } = await enrichRestaurantByIdWithTrace(
               companyCode,
               id,
-              { saveToDb: false }
+              { saveToDb: false, skipZeroPay: true }
             );
 
             enrichSteps.forEach((s) => steps.push(s));

@@ -34,6 +34,19 @@ export interface ZeroPayStatus {
   lastActivityAt: string | null;
 }
 
+// 우선순위: 관리자 수동 설정 > 제로페이 공식 사이트 확인 > 사용자 투표.
+// 예전엔 "저장된 isZeroPay || 엄지척 3개"로 계산해서, 투표로 한 번 true가 되면 저장값이 true로 남아
+// 엄지척을 취소해도 돌아오지 않았고(래칫), 관리자가 false로 정한 곳도 투표로 다시 true가 됐다.
+export function isOfficialZeroPaySource(source: string): boolean {
+  return source.startsWith("official_zeropay") || source === "zeropay_official";
+}
+
+function resolveEffectiveZeroPay(source: string, storedIsZeroPay: boolean, votesSayYes: boolean): boolean {
+  if (source === "manual") return storedIsZeroPay;
+  if (isOfficialZeroPaySource(source) && storedIsZeroPay) return true;
+  return votesSayYes;
+}
+
 function restaurantRef(companyCode: string, restaurantId: string) {
   return db.collection("companies").doc(companyCode).collection("restaurants").doc(restaurantId);
 }
@@ -53,7 +66,7 @@ export async function getZeroPayStatus(
   ]);
 
   const restaurantData = restaurantSnap.data();
-  const registeredIsZeroPay = Boolean(restaurantData?.isZeroPay);
+  const source = (restaurantData?.zeroPaySource as string | undefined) ?? "";
   const lastActivityAt = (restaurantData?.lastActivityAt as string | undefined) ?? null;
   const recentCutoffMs = Date.now() - RECENT_DOWN_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
@@ -76,7 +89,11 @@ export async function getZeroPayStatus(
     }
   }
 
-  const effectiveIsZeroPay = registeredIsZeroPay || upCount >= ZERO_PAY_UP_THRESHOLD;
+  const effectiveIsZeroPay = resolveEffectiveZeroPay(
+    source,
+    Boolean(restaurantData?.isZeroPay),
+    upCount >= ZERO_PAY_UP_THRESHOLD
+  );
   const needsReview = effectiveIsZeroPay && recentDownCount >= ZERO_PAY_NEEDS_REVIEW_THRESHOLD;
 
   return { upCount, downCount, needsReview, myVote, effectiveIsZeroPay, lastActivityAt };
@@ -109,11 +126,19 @@ export async function setZeroPayVote(
   const status = await getZeroPayStatus(companyCode, restaurantId, nicknameId);
   const lastActivityAt = new Date().toISOString();
 
-  await restaurantRef(companyCode, restaurantId).set(
-    { isZeroPay: status.effectiveIsZeroPay, isZeroPayNeedsReview: status.needsReview, lastActivityAt },
-    { merge: true }
-  );
-  invalidateRestaurantsCache(companyCode); // 제로페이 상태가 지도/리스트에 바로 반영되도록 캐시 무효화
+  const before = (await restaurantRef(companyCode, restaurantId).get()).data();
+  const beforeSource = (before?.zeroPaySource as string | undefined) ?? "";
+  const update: Record<string, unknown> = {
+    isZeroPay: status.effectiveIsZeroPay,
+    isZeroPayNeedsReview: status.needsReview,
+    lastActivityAt,
+  };
+  // 관리자/공식 확인이 아닌데 투표로 상태가 정해진 경우 출처를 "votes"로 남긴다.
+  if (beforeSource !== "manual" && !(isOfficialZeroPaySource(beforeSource) && before?.isZeroPay)) {
+    update.zeroPaySource = status.effectiveIsZeroPay ? "votes" : beforeSource || null;
+  }
+  await restaurantRef(companyCode, restaurantId).set(update, { merge: true });
+  await invalidateRestaurantsCache(companyCode, [restaurantId]); // 제로페이 상태가 지도/리스트에 바로 반영되도록 캐시 반영
 
   return { ...status, lastActivityAt };
 }

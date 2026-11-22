@@ -42,9 +42,15 @@ export default function AuditLogModal({
   const [filterQuery, setFilterQuery] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [expandedStoreIds, setExpandedStoreIds] = useState<Set<string>>(new Set());
+  // 제로페이 점검에서 "관리자 확인 필요(review)" 제안은 기본으로 반영하지 않고, 체크한 것만 반영한다.
+  const [includedReviewIds, setIncludedReviewIds] = useState<Set<string>>(new Set());
 
   const logListRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // 부모가 렌더링될 때마다 새 배열이 들어와도 점검이 다시 시작되지 않도록 내용 기준 키를 쓴다.
+  const targetIdsRef = useRef(targetIds);
+  targetIdsRef.current = targetIds;
+  const targetIdsKey = targetIds ? targetIds.join(",") : "";
 
   // 모달이 열리면 스트리밍 점검 시작
   useEffect(() => {
@@ -59,76 +65,126 @@ export default function AuditLogModal({
     setFilterTab("all");
     setFilterQuery("");
     setExpandedStoreIds(new Set());
+    setIncludedReviewIds(new Set());
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
     const endpoint = type === "zeropay" ? "/api/admin/zeropay/check-all" : "/api/admin/naver/check-all";
 
-    async function startStream() {
-      try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ companyCode, targetIds }),
-          signal: abortController.signal,
-        });
+    // 스트림 1회 실행. 정상 종료면 서버가 시간 제한으로 처리하지 못한 id 목록을 돌려준다.
+    // isChunked: 제로페이 분할 점검일 때는 진행 개수/변경 목록을 누적하고 완료 처리는 호출부가 한다.
+    async function runStream(
+      requestBody: Record<string, unknown>,
+      isChunked: boolean
+    ): Promise<{ ok: boolean; unprocessedIds: string[] }> {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+        signal: abortController.signal,
+      });
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          setStatus("error");
-          setErrorMessage(errData.error ?? "점검을 시작하지 못했습니다.");
-          return;
-        }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setStatus("error");
+        setErrorMessage(errData.error ?? "점검을 시작하지 못했습니다.");
+        return { ok: false, unprocessedIds: [] };
+      }
 
-        if (!res.body) {
-          setStatus("error");
-          setErrorMessage("응답 스트림을 열 수 없습니다.");
-          return;
-        }
+      if (!res.body) {
+        setStatus("error");
+        setErrorMessage("응답 스트림을 열 수 없습니다.");
+        return { ok: false, unprocessedIds: [] };
+      }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
+      let unprocessedIds: string[] = [];
+      let failed = false;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const event = JSON.parse(line);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
 
-              if (event.type === "start") {
-                setTotal(event.total ?? 0);
-              } else if (event.type === "progress") {
-                setCurrent(event.current ?? 0);
-                if (event.total) setTotal(event.total);
-                if (event.log) {
-                  setLogs((prev) => [...prev, event.log]);
-                }
-                if (event.diff) {
-                  setDiffs((prev) => [...prev, event.diff]);
-                }
-              } else if (event.type === "done") {
-                if (event.diffs) setDiffs(event.diffs);
-                setStatus("completed");
-              } else if (event.type === "error") {
-                setStatus("error");
-                setErrorMessage(event.error ?? "점검 중 오류가 발생했습니다.");
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+
+            if (event.type === "start") {
+              if (!isChunked) setTotal(event.total ?? 0);
+            } else if (event.type === "progress") {
+              if (isChunked) setCurrent((c) => c + 1);
+              else setCurrent(event.current ?? 0);
+              if (!isChunked && event.total) setTotal(event.total);
+              if (event.log) {
+                setLogs((prev) => [...prev, event.log]);
               }
-            } catch (parseErr) {
-              console.warn("[AuditLogModal] 파싱 오류 라인:", line, parseErr);
+              if (event.diff) {
+                setDiffs((prev) => [...prev, event.diff]);
+              }
+            } else if (event.type === "done") {
+              if (!isChunked && event.diffs) setDiffs(event.diffs);
+              if (Array.isArray(event.unprocessedIds)) unprocessedIds = event.unprocessedIds;
+            } else if (event.type === "error") {
+              failed = true;
+              setStatus("error");
+              setErrorMessage(event.error ?? "점검 중 오류가 발생했습니다.");
             }
+          } catch (parseErr) {
+            console.warn("[AuditLogModal] 파싱 오류 라인:", line, parseErr);
           }
         }
+      }
+      return { ok: !failed, unprocessedIds };
+    }
 
-        setStatus("completed");
+    // 제로페이: 대상 id를 받아 CHUNK_SIZE개씩 나눠 요청한다. 서버는 한 요청을 약 40초 안에 끊고
+    // 남은 id를 돌려주므로, Vercel 함수 실행시간 제한에 걸리지 않고 전체를 끝까지 점검할 수 있다.
+    async function runZeroPayChunked() {
+      let ids = targetIdsRef.current;
+      if (!ids || ids.length === 0) {
+        const planRes = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ companyCode, mode: "plan" }),
+          signal: abortController.signal,
+        });
+        const plan = await planRes.json().catch(() => ({}));
+        if (!planRes.ok || !Array.isArray(plan.ids)) {
+          setStatus("error");
+          setErrorMessage(plan.error ?? "점검 대상 목록을 불러오지 못했습니다.");
+          return;
+        }
+        ids = plan.ids as string[];
+      }
+      setTotal(ids.length);
+      const queue = [...ids];
+      const CHUNK_SIZE = 15;
+      while (queue.length > 0) {
+        const chunk = queue.splice(0, CHUNK_SIZE);
+        const { ok, unprocessedIds } = await runStream({ companyCode, targetIds: chunk }, true);
+        if (!ok) return;
+        if (unprocessedIds.length > 0) queue.unshift(...unprocessedIds);
+      }
+      setStatus("completed");
+    }
+
+    async function startStream() {
+      try {
+        if (type === "zeropay") {
+          await runZeroPayChunked();
+        } else {
+          const { ok } = await runStream({ companyCode, targetIds: targetIdsRef.current }, false);
+          if (ok) setStatus("completed");
+        }
       } catch (err: any) {
         if (err.name === "AbortError") {
           return;
@@ -143,7 +199,7 @@ export default function AuditLogModal({
     return () => {
       abortController.abort();
     };
-  }, [open, type, companyCode, targetIds]);
+  }, [open, type, companyCode, targetIdsKey]);
 
   // 자동 스크롤
   useEffect(() => {
@@ -196,6 +252,21 @@ export default function AuditLogModal({
       return true;
     });
   }, [logs, filterTab, filterQuery]);
+
+  const applicableDiffs = useMemo(
+    () => diffs.filter((d) => d.confidence !== "review" || includedReviewIds.has(d.id)),
+    [diffs, includedReviewIds]
+  );
+  const reviewDiffCount = useMemo(() => diffs.filter((d) => d.confidence === "review").length, [diffs]);
+
+  const toggleReviewInclude = (id: string) => {
+    setIncludedReviewIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const stats = useMemo(() => {
     const successCount = logs.filter((l) => l.status === "match_success").length;
@@ -410,6 +481,31 @@ export default function AuditLogModal({
                     <p className={`text-xs ${isSuccess ? "text-emerald-300" : isMismatchFixed ? "text-amber-300" : "text-zinc-300"}`}>
                       {log.summary}
                     </p>
+                    {log.diff?.confidence === "review" && (
+                      <div
+                        className="mt-1.5 rounded-lg border border-sky-500/30 bg-sky-950/30 p-2 text-[11px] text-sky-200"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <label className="flex cursor-pointer items-center gap-2 font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={includedReviewIds.has(log.diff.id)}
+                            onChange={() => toggleReviewInclude(log.diff.id)}
+                            className="rounded border-zinc-600 bg-zinc-800"
+                          />
+                          확인 후 반영 ({log.diff.proposedIsZeroPay ? "제로페이 지원으로 변경" : "제로페이 미지원으로 변경"})
+                        </label>
+                        {Array.isArray(log.diff.candidates) && log.diff.candidates.length > 0 && (
+                          <ul className="mt-1 space-y-0.5 pl-6 text-sky-300/90">
+                            {log.diff.candidates.map((c: any, ci: number) => (
+                              <li key={ci}>
+                                {c.name} · {c.address} · {c.bizType} ({c.reason})
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -491,6 +587,9 @@ export default function AuditLogModal({
             </label>
             <span>
               발견된 변경사항: <strong className="text-amber-400 font-bold">{diffs.length}건</strong>
+              {reviewDiffCount > 0 && (
+                <> (확인 필요 {reviewDiffCount}건 중 {includedReviewIds.size}건 선택)</>
+              )}
             </span>
           </div>
 
@@ -502,14 +601,14 @@ export default function AuditLogModal({
               {status === "running" ? "닫기 (백그라운드 계속 진행)" : "닫기"}
             </button>
             <button
-              onClick={() => onApplyBatch(diffs)}
-              disabled={isApplyingBatch || diffs.length === 0 || status === "running"}
+              onClick={() => onApplyBatch(applicableDiffs)}
+              disabled={isApplyingBatch || applicableDiffs.length === 0 || status === "running"}
               className="rounded-xl bg-primary px-6 py-2.5 text-xs font-bold text-white shadow-soft transition hover:bg-primary-dark disabled:opacity-50"
             >
               {isApplyingBatch
                 ? "DB에 반영하는 중..."
-                : diffs.length > 0
-                ? `발견된 ${diffs.length}개 변경사항 DB 반영하기`
+                : applicableDiffs.length > 0
+                ? `선택된 ${applicableDiffs.length}개 변경사항 DB 반영하기`
                 : "변경할 항목 없음"}
             </button>
           </div>

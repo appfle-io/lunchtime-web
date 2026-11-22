@@ -1,11 +1,10 @@
 {
   "name": "lunchtime",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "회사 점심 메뉴 추천 서비스 (lunchtime.seeuson.com) - 멀티테넌트 구조 초안",
+  "description": "회사 점심 메뉴 추천 서비스 (lunchtime.seeuson.com)",
   "scripts": {
     "dev": "next dev -p 3300",
-    "socket": "tsx scripts/socket-server.ts",
     "build": "next build",
     "start": "next start -p 3300",
     "lint": "next lint",
@@ -17,7 +16,6 @@
     "classify:categories": "tsx scripts/classify-categories-ai.ts",
     "set:neighborhoods": "tsx scripts/set-company-neighborhoods.ts",
     "set:signgucd": "tsx scripts/set-company-signgucd.ts",
-    "enrich:zeropay": "tsx scripts/enrich-zeropay-naver.ts",
     "enrich:zeropay-official": "tsx scripts/enrich-zeropay-official.ts",
     "enrich:zeropay-convenience": "tsx scripts/enrich-zeropay-convenience.ts",
     "seed:convenience": "tsx scripts/seed-convenience-stores.ts",

@@ -2,8 +2,21 @@ node_modules
 .next
 .env
 .env.local
+.env*.local
 .DS_Store
 *.log
+
+# 프로젝트 구동에 필요 없는 자료(백업, 일회성 스크립트, 지침/히스토리 문서)는 _secret/에 둔다.
+# 이 폴더는 커밋하지 않고 사용자가 직접 백업한다.
+/_secret/
+
+# 빌드 산출물
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# 데이터 수집 스크립트가 만드는 체크포인트/백업 (커밋 금지)
+.enrich-*-checkpoint.json
+.dedupe-backups/
 
 # 공공데이터포털 상가업소 CSV (수백 MB, 커밋하지 않음 - scripts/seed-restaurants-csv.ts용)
 /data/*.csv

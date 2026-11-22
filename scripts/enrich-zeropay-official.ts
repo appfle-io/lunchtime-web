@@ -74,6 +74,11 @@ async function main() {
 
     try {
       const res = await checkZeroPayOfficial(name, address, context);
+      // 조회 실패/관리자 확인 필요 결과는 미가맹으로 저장하지 않고 건너뛴다 (관리자 점검 화면에서 처리).
+      if (res.status === 'error' || res.status === 'review') {
+        console.log(`  [건너뜀] ${name}: ${res.status} - ${res.message}`);
+        continue;
+      }
       results.set(doc.id, {
         isZeroPay: res.isZeroPay,
         officialName: res.officialName,

@@ -56,7 +56,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 지도/목록 갱신용 메모리 캐시 무효화
-    invalidateRestaurantsCache(companyCode);
+    await invalidateRestaurantsCache(
+      companyCode,
+      items.map((item) => item.id).filter(Boolean)
+    );
 
     return NextResponse.json({ success: true, updatedCount });
   } catch (err) {

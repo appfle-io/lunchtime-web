@@ -150,12 +150,108 @@ export function updateInMemoryRestaurantsCache(companyCode: string, updatedOrNew
   }
 }
 
-export function invalidateRestaurantsCache(companyCode: string): void {
-  restaurantsCache.delete(companyCode);
-  // 백그라운드로 Firestore 통합 문서 갱신
-  rebuildAggregatedRestaurantsDoc(companyCode).catch((err) =>
-    console.error(`[restaurantsCache] "${companyCode}" 통합 문서 백그라운드 갱신 실패:`, err)
+/**
+ * 식당 데이터가 바뀌었을 때 캐시(메모리 + 통합 캐시 문서)를 맞춘다.
+ *
+ * 과금 주의: 예전엔 투표 1번/관리자 수정 1번마다 rebuildAggregatedRestaurantsDoc()으로 식당 서브컬렉션
+ * 전체(1,000건 이상)를 다시 읽었다. 바뀐 식당 id를 넘기면 그 문서들만 읽어서 해당 청크만 고쳐 쓴다
+ * (읽기 = 바뀐 문서 수 + 청크 수, 쓰기 = 바뀐 청크 수). id 없이 부르면 예전처럼 전체를 다시 만든다.
+ */
+export async function invalidateRestaurantsCache(companyCode: string, changedIds?: string[]): Promise<void> {
+  if (!changedIds || changedIds.length === 0) {
+    restaurantsCache.delete(companyCode);
+    try {
+      await rebuildAggregatedRestaurantsDoc(companyCode);
+    } catch (err) {
+      console.error(`[restaurantsCache] "${companyCode}" 통합 문서 갱신 실패:`, err);
+    }
+    return;
+  }
+  try {
+    await refreshRestaurantsInCache(companyCode, Array.from(new Set(changedIds)));
+  } catch (err) {
+    console.error(`[restaurantsCache] "${companyCode}" 부분 갱신 실패, 메모리 캐시만 비웁니다:`, err);
+    restaurantsCache.delete(companyCode);
+  }
+}
+
+async function refreshRestaurantsInCache(companyCode: string, ids: string[]): Promise<void> {
+  const companyRef = db.collection("companies").doc(companyCode);
+  const restaurantsCol = companyRef.collection("restaurants");
+  const updated = new Map<string, RestaurantSummary>();
+  const deleted = new Set<string>();
+  for (let i = 0; i < ids.length; i += 300) {
+    const snaps = await db.getAll(...ids.slice(i, i + 300).map((id) => restaurantsCol.doc(id)));
+    for (const s of snaps) {
+      if (s.exists) updated.set(s.id, toRestaurantSummary(s.id, s.data()!));
+      else deleted.add(s.id);
+    }
+  }
+
+  const applyTo = (items: RestaurantSummary[], remainingNew: Map<string, RestaurantSummary>) =>
+    items
+      .filter((it) => !deleted.has(it.id))
+      .map((it) => {
+        const u = updated.get(it.id);
+        if (!u) return it;
+        remainingNew.delete(it.id);
+        return u;
+      });
+
+  // 1) 메모리 캐시
+  const cached = restaurantsCache.get(companyCode);
+  if (cached) {
+    const remaining = new Map(updated);
+    const next = applyTo(cached.data, remaining);
+    cached.data = [...Array.from(remaining.values()), ...next];
+  }
+
+  // 2) 통합 캐시 문서 (청크)
+  const cacheCol = companyRef.collection("cache");
+  const indexSnap = await cacheCol.doc("restaurants_all").get();
+  const chunkCount = typeof indexSnap.data()?.chunkCount === "number" ? (indexSnap.data()!.chunkCount as number) : 0;
+  if (!indexSnap.exists || chunkCount === 0) {
+    restaurantsCache.delete(companyCode);
+    await rebuildAggregatedRestaurantsDoc(companyCode);
+    return;
+  }
+
+  const chunkSnaps = await Promise.all(
+    Array.from({ length: chunkCount }, (_, i) => cacheCol.doc(`restaurants_part${i}`).get())
   );
+  const remainingNew = new Map(updated);
+  const chunks = chunkSnaps.map((snap) => (Array.isArray(snap.data()?.items) ? (snap.data()!.items as RestaurantSummary[]) : []));
+  const changedChunks = new Set<number>();
+  const nextChunks = chunks.map((items, index) => {
+    const before = items.length;
+    const touched = items.some((it) => updated.has(it.id) || deleted.has(it.id));
+    const next = applyTo(items, remainingNew);
+    if (touched || next.length !== before) changedChunks.add(index);
+    return next;
+  });
+
+  // 캐시에 없던 새 식당은 마지막 청크에 붙이고, 넘치면 새 청크를 만든다.
+  for (const item of Array.from(remainingNew.values())) {
+    let last = nextChunks.length - 1;
+    if (last < 0 || nextChunks[last].length >= CHUNK_SIZE) {
+      nextChunks.push([]);
+      last = nextChunks.length - 1;
+    }
+    nextChunks[last].push(item);
+    changedChunks.add(last);
+  }
+
+  if (changedChunks.size === 0) return;
+  const batch = db.batch();
+  for (const index of Array.from(changedChunks)) {
+    batch.set(cacheCol.doc(`restaurants_part${index}`), { items: nextChunks[index], index });
+  }
+  batch.set(cacheCol.doc("restaurants_all"), {
+    chunkCount: nextChunks.length,
+    updatedAt: new Date().toISOString(),
+    totalCount: nextChunks.reduce((sum, c) => sum + c.length, 0),
+  });
+  await batch.commit();
 }
 
 export function toRestaurantSummary(id: string, data: Record<string, unknown>): RestaurantSummary {
@@ -449,7 +545,7 @@ export async function addRestaurantFromCandidate(
   };
 
   await docRef.set(restaurant);
-  invalidateRestaurantsCache(companyCode); // 새로 추가된 식당이 지도/리스트에 바로 보이도록 캐시 무효화
+  await invalidateRestaurantsCache(companyCode, [docRef.id]); // 새로 추가된 식당이 지도/리스트에 바로 보이도록 캐시 반영
 
   // 2026-08-10: toRestaurantSummary()로 통일 - 방금 만든 restaurant 객체엔 phone/menus 등 enrich
   // 필드가 아직 없는데, pickEnrichedFields()가 그대로 null/[] 기본값을 채워주고 isActive도
@@ -489,8 +585,18 @@ export async function updateRestaurantAdminFields(
   update: RestaurantAdminUpdate
 ): Promise<RestaurantSummary> {
   const docRef = db.collection("companies").doc(companyCode).collection("restaurants").doc(restaurantId);
-  await docRef.set(update, { merge: true });
-  invalidateRestaurantsCache(companyCode); // 수정된 내용이 지도/리스트에 바로 보이도록 캐시 무효화
+  const patch: Record<string, unknown> = { ...update };
+  // 관리자가 제로페이 여부를 직접 바꾸면 "수동 설정"으로 표시한다. 이후 공식 사이트 점검/투표가
+  // 이 값을 덮어쓰지 않는다 (우선순위: 관리자 > 공식 사이트 > 사용자 투표).
+  if (typeof update.isZeroPay === "boolean") {
+    const before = await docRef.get();
+    if (Boolean(before.data()?.isZeroPay) !== update.isZeroPay) {
+      patch.zeroPaySource = "manual";
+      patch.zeroPayManualAt = new Date().toISOString();
+    }
+  }
+  await docRef.set(patch, { merge: true });
+  await invalidateRestaurantsCache(companyCode, [restaurantId]); // 수정된 내용이 지도/리스트에 바로 보이도록 캐시 반영
   const snapshot = await docRef.get();
   return toRestaurantSummary(restaurantId, snapshot.data()!);
 }

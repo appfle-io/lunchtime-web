@@ -5,7 +5,46 @@ import {
   resolveNaverPlaceId,
   fetchNaverPlaceFullDetails,
 } from "@/lib/naver-place-detail";
-import { checkZeroPayOfficial, checkZeroPayOfficialWithTrace, type TraceStep } from "@/lib/zeropay-official";
+import { checkZeroPayOfficialWithTrace, type TraceStep, type ZeroPayOfficialCheckResult } from "@/lib/zeropay-official";
+
+/**
+ * 제로페이 공식 판정 결과를 식당 문서 필드로 바꾼다. 판정 기록(status/시각/후보)은 항상 남기고,
+ * isZeroPay 자체는 confirmed일 때만 true로 바꾼다. 관리자가 수동으로 정한 곳(zeroPaySource: "manual")은
+ * 기록만 남기고 isZeroPay를 건드리지 않는다. not_found/review/error는 여기서 false로 내리지 않는다 -
+ * 내리는 건 관리자 점검 화면에서 확인 후에만 한다.
+ */
+export function zeroPayCheckFields(
+  result: ZeroPayOfficialCheckResult,
+  current: { isZeroPay: boolean; zeroPaySource?: string | null }
+): Record<string, unknown> {
+  const now = new Date().toISOString();
+  const fields: Record<string, unknown> = {
+    zeroPayCheckStatus: result.status,
+    zeroPayCheckMessage: result.message,
+    zeroPayCheckedAt: now,
+    zeroPayReviewCandidates:
+      result.status === "review"
+        ? (result.candidates ?? []).slice(0, 5).map((c) => ({
+            name: c.name,
+            address: c.address,
+            bizType: c.bizType,
+            reason: c.reason,
+          }))
+        : [],
+  };
+  if (result.status === "confirmed") {
+    fields.zeroPayOfficialName = result.officialName ?? null;
+    fields.zeroPayOfficialAddress = result.officialAddress ?? null;
+    fields.zeroPayOfficialPhone = result.officialPhone ?? null;
+    fields.zeroPayRecentTransaction = Boolean(result.recentTransaction);
+    if (current.zeroPaySource !== "manual") {
+      fields.isZeroPay = true;
+      fields.zeroPaySource = "official_zeropay_api";
+      fields.zeroPayEnrichedAt = now;
+    }
+  }
+  return fields;
+}
 import { CATEGORY_LABELS } from "@/lib/restaurant-category";
 import type { RestaurantSummary } from "@/types";
 
@@ -213,26 +252,29 @@ export async function enrichRestaurantByIdWithTrace(
   // 3. 제로페이 공식 DB (zeropay.or.kr) 교차 검증 (skipZeroPay가 아닐 때만 실행)
   if (!options.skipZeroPay) {
     try {
-      const zpTrace = await checkZeroPayOfficialWithTrace(name, address);
+      const zpTrace = await checkZeroPayOfficialWithTrace({
+        name,
+        address,
+        phone: (update.phone as string | undefined) ?? currentPhone,
+      });
       zpTrace.steps.forEach((s) => steps.push(s));
 
-      if (zpTrace.result.isZeroPay) {
-        update.isZeroPay = true;
-        update.zeroPaySource = "zeropay_official";
-        update.zeroPayEnrichedAt = new Date().toISOString();
-        if (zpTrace.result.officialName) update.zeroPayOfficialName = zpTrace.result.officialName;
-        if (zpTrace.result.officialAddress) update.zeroPayOfficialAddress = zpTrace.result.officialAddress;
+      const zpFields = zeroPayCheckFields(zpTrace.result, {
+        isZeroPay: currentZeroPay,
+        zeroPaySource: (storeData.zeroPaySource as string | undefined) ?? null,
+      });
+      Object.assign(update, zpFields);
 
+      if (zpFields.isZeroPay === true) {
         enrichedSummary.isZeroPay = true;
-        enrichedSummary.zeroPaySource = "zeropay_official";
-
+        enrichedSummary.zeroPaySource = "official_zeropay_api";
         if (!currentZeroPay) {
-          changesSummary.push(`제로페이: 미지원 ➔ 지원 (공식상호: '${zpTrace.result.officialName}')`);
+          changesSummary.push(`제로페이: 미지원 ➔ 지원 (공식 등록명: '${zpTrace.result.officialName}')`);
         }
-      } else {
-        if (currentZeroPay) {
-          changesSummary.push("제로페이: 지원 ➔ 미지원 변경");
-        }
+      } else if (zpTrace.result.status === "review") {
+        changesSummary.push(`제로페이: 관리자 확인 필요 - ${zpTrace.result.message}`);
+      } else if (zpTrace.result.status === "not_found" && currentZeroPay) {
+        changesSummary.push("제로페이: 공식 사이트에서 찾지 못함 (값은 유지, 관리자 점검에서 확인 필요)");
       }
     } catch (zpErr) {
       steps.push({
@@ -291,15 +333,19 @@ JSON으로만 답하세요: {"label": "라벨"}`;
   }
 
   // DB 업데이트 및 캐시 무효화 (saveToDb 옵션이 true일 때만)
-  if (options.saveToDb !== false && Object.keys(update).length > 0) {
-    await docRef.set(update, { merge: true });
-    invalidateRestaurantsCache(companyCode);
+  let finalSummary;
+  if (options.saveToDb !== false) {
+    if (Object.keys(update).length > 0) {
+      await docRef.set(update, { merge: true });
+      await invalidateRestaurantsCache(companyCode, [restaurantId]);
+    }
+    const updatedSnap = await docRef.get();
+    finalSummary = toRestaurantSummary(restaurantId, updatedSnap.data()!);
+  } else {
+    // 점검(미저장) 모드: DB를 다시 읽으면 기존 값이 나오므로, 기존 값 + 새로 수집한 값을 합쳐서 돌려준다.
+    // (예전엔 여기서 DB를 다시 읽어서 네이버 점검 화면의 "변경 예정" 값이 기존 값 그대로였다)
+    finalSummary = toRestaurantSummary(restaurantId, { ...storeData, ...update });
   }
-
-  const updatedSnap = await docRef.get();
-  const updatedData = updatedSnap.data()!;
-
-  const finalSummary = toRestaurantSummary(restaurantId, updatedData);
 
   return {
     enrichResult: {
