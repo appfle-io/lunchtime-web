@@ -56,6 +56,27 @@ export function toNicknameId(nickname: string): string {
 }
 
 /**
+ * 새로 만들거나 바꿀 닉네임의 형식 검증. 닉네임 ID는 Firestore 문서ID와 실시간 배틀(RTDB) 경로에
+ * 그대로 들어가므로, 경로 구분자("/")나 RTDB 키 금지 문자(". # $ [ ]")가 섞이면 다른 문서 경로를
+ * 가리키거나 저장이 실패한다. 문제가 없으면 null, 있으면 사용자에게 보여줄 오류 문구를 돌려준다.
+ */
+export function validateNewNickname(nickname: string): string | null {
+  const trimmed = nickname.trim();
+  if (!trimmed) return "닉네임을 입력해주세요.";
+  if (trimmed.length > 20) return "닉네임은 20자 이하로 입력해주세요.";
+  if (/[\/.#$\[\]]/.test(trimmed)) return "닉네임에는 / . # $ [ ] 문자를 쓸 수 없어요.";
+  if (/^__.*__$/.test(toNicknameId(trimmed))) return "사용할 수 없는 닉네임입니다.";
+  return null;
+}
+
+/**
+ * 기존 계정 로그인 시에도 항상 막아야 하는 경로 조작 문자 검사 ("/"는 Firestore 경로 구분자).
+ */
+export function isPathSafeNicknameId(nicknameId: string): boolean {
+  return nicknameId.length > 0 && nicknameId.length <= 100 && !nicknameId.includes("/") && nicknameId !== "." && nicknameId !== "..";
+}
+
+/**
  * 닉네임이 이미 회사 내에 존재하면(정규화된 ID 기준) 숫자 접미사를 붙여 유일하게 만든다.
  * existingNicknameIds는 호출부(API 라우트)에서 Firestore 조회 후 전달하는 "정규화된 ID" 집합.
  */

@@ -185,16 +185,28 @@ export async function getVote(companyCode: string, voteId: string): Promise<Vote
 // 필드에 있어서 서브컬렉션이 필요 없다). 그래서 목록 조회는 summaryFromDocOnly로 문서 필드만
 // 쓰는 가벼운 요약을 내려주고, 실제 응답/댓글 내용은 사용자가 카드를 펼쳤을 때만
 // GET /api/votes/{voteId}로 그 투표 1건만 지연 로딩한다(LunchVoteModal.tsx VoteCard 참고).
+const VOTE_LIST_LIMIT = 200;
+
 export async function listVotesForUser(companyCode: string, nicknameId: string): Promise<VoteSummary[]> {
-  const snapshot = await votesRef(companyCode)
-    .where("participantNicknameIds", "array-contains", nicknameId)
-    .get();
+  // 예전엔 내가 참가한 투표를 "전부" 읽은 뒤 메모리에서 최근 200개만 잘랐다 - 투표가 쌓일수록
+  // 투표함을 열 때마다 읽기 비용이 계속 늘었다. 서버에서 최신순 200개만 읽는다.
+  // 이 쿼리는 복합 색인(firestore.indexes.json)이 필요하다. 색인이 아직 배포되지 않았으면
+  // FAILED_PRECONDITION으로 실패하므로, 그때만 예전 방식으로 폴백한다.
+  const baseQuery = votesRef(companyCode).where("participantNicknameIds", "array-contains", nicknameId);
+  try {
+    const limited = await baseQuery.orderBy("createdAt", "desc").limit(VOTE_LIST_LIMIT).get();
+    return limited.docs.map(summaryFromDocOnly);
+  } catch (err) {
+    console.warn("[votes] 복합 색인 미배포로 전체 조회로 폴백합니다 - firestore.indexes.json을 배포하세요.", err);
+  }
+
+  const snapshot = await baseQuery.get();
 
   // 2026-08-06 3차: 목록 탭에 검색/페이징 기능이 추가된 걸 감안해 50 -> 200개로 늘렸다
   // (토이 프로젝트 규모라 충분한 상한선).
   const topVoteDocs = snapshot.docs
     .sort((a, b) => (a.data().createdAt < b.data().createdAt ? 1 : -1))
-    .slice(0, 200);
+    .slice(0, VOTE_LIST_LIMIT);
 
   return topVoteDocs.map(summaryFromDocOnly);
 }

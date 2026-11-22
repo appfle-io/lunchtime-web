@@ -13,6 +13,6 @@ const firebaseConfig = {
     `https://${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "lunchtime-d2364"}-default-rtdb.firebaseio.com`,
 };
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-export const rtdb = getDatabase(app);
+export const rtdb = getDatabase(firebaseApp);

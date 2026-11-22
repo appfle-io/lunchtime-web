@@ -18,8 +18,15 @@ interface BattleLobbyModalProps {
   onNotify?: (message: string) => void;
 }
 
-export default function BattleLobbyModal({
-  open,
+// 모달이 닫혀 있을 때는 내부 컴포넌트(= useBattleRoom 훅)를 아예 마운트하지 않는다.
+// 예전엔 훅이 모달 열림 여부와 무관하게 항상 돌아서, 로그인한 모든 사용자가 하루 종일 RTDB에
+// 연결된 채 전체 배틀방 데이터를 구독하고 있었다(동시 접속 수/다운로드 비용 누수).
+export default function BattleLobbyModal(props: BattleLobbyModalProps) {
+  if (!props.open) return null;
+  return <BattleLobbyContent {...props} />;
+}
+
+function BattleLobbyContent({
   onClose,
   companyCode,
   myNicknameId,
@@ -73,8 +80,6 @@ export default function BattleLobbyModal({
 
   // 방 삭제 확인 모달 상태
   const [roomToDelete, setRoomToDelete] = useState<BattleRoomSummary | null>(null);
-
-  if (!open) return null;
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

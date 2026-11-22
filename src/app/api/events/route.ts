@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logRestaurantEvent } from "@/lib/analytics-server";
+import { getSessionForCompany, unauthorizedResponse } from "@/lib/api-session";
 
 // POST /api/events
 // body: { companyCode, restaurantId, type: "click" }
 // 통계 수집용 - 실시간 인기 Top3(추후 구현) 등에 쓸 클릭 이벤트를 쌓는다.
-// 익명 집계용 데이터라 로그인 여부와 무관하게 기록하고, 세션 체크는 하지 않는다.
+// 집계 자체는 익명이지만, 비로그인 요청이 임의 회사 경로에 쓰기(과금)를 만들지 못하도록 세션은 확인한다.
 export async function POST(request: NextRequest) {
   let body: { companyCode?: string; restaurantId?: string; type?: string };
   try {
@@ -19,6 +20,11 @@ export async function POST(request: NextRequest) {
       { error: "companyCode, restaurantId, type(click)이 필요합니다." },
       { status: 400 }
     );
+  }
+
+  if (!getSessionForCompany(companyCode)) return unauthorizedResponse();
+  if (restaurantId.length > 100 || /[./]/.test(restaurantId)) {
+    return NextResponse.json({ error: "restaurantId가 올바르지 않습니다." }, { status: 400 });
   }
 
   try {

@@ -1,10 +1,44 @@
 import crypto from "node:crypto";
 import { db } from "@/lib/firebase";
-import { toNicknameId, resolveUniqueNickname } from "@/lib/nickname";
-import { invalidateCompanyUsersCache } from "@/lib/user-server";
+import {
+  toNicknameId,
+  resolveUniqueNickname,
+  validateNewNickname,
+  isPathSafeNicknameId,
+} from "@/lib/nickname";
+import { invalidateCompanyUsersCache, listCompanyUsers } from "@/lib/user-server";
+import { getCompanyByCode } from "@/lib/company-server";
 
 export const SESSION_COOKIE_NAME = "lt_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 180; // 180일 - 재입력 최소화 목적
+
+// PIN(4자리 = 1만 가지)과 보안 답변 무차별 대입 방지. 연속 실패가 MAX_FAILED_ATTEMPTS에 도달하면
+// LOCK_DURATION_MS 동안 해당 계정의 시도를 막는다. 카운터는 사용자 문서에 저장한다
+// (실패 1회당 쓰기 1회 - 정상 사용에서는 거의 발생하지 않는다).
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCK_DURATION_MS = 10 * 60 * 1000;
+
+function lockRemainingSeconds(lockedUntil: unknown): number {
+  if (typeof lockedUntil !== "number") return 0;
+  const remaining = lockedUntil - Date.now();
+  return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
+}
+
+// 실패 1회를 기록하고, 이번 실패로 잠기게 됐으면 잠금 남은 시간(초)을 돌려준다.
+async function recordFailedAttempt(
+  userRef: FirebaseFirestore.DocumentReference,
+  currentCount: unknown,
+  countField: string,
+  lockField: string
+): Promise<number> {
+  const next = (typeof currentCount === "number" ? currentCount : 0) + 1;
+  if (next >= MAX_FAILED_ATTEMPTS) {
+    await userRef.set({ [countField]: 0, [lockField]: Date.now() + LOCK_DURATION_MS }, { merge: true });
+    return Math.ceil(LOCK_DURATION_MS / 1000);
+  }
+  await userRef.set({ [countField]: next }, { merge: true });
+  return 0;
+}
 
 function getSessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -57,8 +91,12 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   if (!timingSafeEqualHex(signature, expectedSignature)) return null;
 
   try {
-    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString()) as SessionPayload;
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString()) as SessionPayload &
+      { purpose?: unknown };
     if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    // 같은 시크릿으로 서명되는 PIN 재설정용 토큰(purpose 필드 보유)이 세션으로 쓰이지 않게 막는다.
+    if (payload.purpose !== undefined) return null;
+    if (typeof payload.companyCode !== "string" || typeof payload.nicknameId !== "string") return null;
     return payload;
   } catch {
     return null;
@@ -72,7 +110,10 @@ export function issueToken(companyCode: string, nicknameId: string, nickname: st
 
 export type AuthResult =
   | { status: "signup" | "login"; token: string; nickname: string; nicknameId: string }
-  | { status: "conflict"; suggestion: string };
+  | { status: "conflict"; suggestion: string }
+  | { status: "locked"; retryAfterSeconds: number }
+  | { status: "no-company" }
+  | { status: "invalid-nickname"; message: string };
 
 // 회사코드+닉네임+PIN을 한 번에 처리하는 가입/로그인 통합 흐름.
 // - 해당 닉네임 문서가 없으면: 새 계정 생성 (가입)
@@ -86,19 +127,34 @@ export async function authenticate(
 ): Promise<AuthResult> {
   const nickname = rawNickname.trim();
   const nicknameId = toNicknameId(nickname);
+  if (!isPathSafeNicknameId(nicknameId)) {
+    return { status: "invalid-nickname", message: "닉네임에는 / 문자를 쓸 수 없어요." };
+  }
   const usersRef = db.collection("companies").doc(companyCode).collection("users");
   const userRef = usersRef.doc(nicknameId);
   const snapshot = await userRef.get();
 
   if (!snapshot.exists) {
+    const invalid = validateNewNickname(nickname);
+    if (invalid) return { status: "invalid-nickname", message: invalid };
+
+    // 존재하지 않는 회사코드 아래에 계정 문서가 마구 생기는 것을 막는다 (회사 문서는 1시간 캐시).
+    const company = await getCompanyByCode(companyCode);
+    if (!company) return { status: "no-company" };
+
     const salt = crypto.randomBytes(16).toString("hex");
     const pinHash = hashPin(pin, salt);
-    await userRef.set({
-      nickname,
-      pinSalt: salt,
-      pinHash,
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      // create()는 문서가 이미 있으면 실패한다 - 동시에 같은 닉네임으로 가입할 때 덮어쓰기 방지.
+      await userRef.create({
+        nickname,
+        pinSalt: salt,
+        pinHash,
+        createdAt: new Date().toISOString(),
+      });
+    } catch {
+      return { status: "conflict", suggestion: resolveUniqueNickname(nickname, new Set([nicknameId])) };
+    }
     // 2026-08-11 신규: 새 가입자가 listCompanyUsers() 캐시(user-server.ts, TTL 5분)에 바로
     // 반영되도록 무효화 - 안 하면 최대 5분 동안 친구목록/투표/룰렛 모달의 "전체 사용자" 목록에
     // 방금 가입한 사람이 안 보일 수 있다.
@@ -112,13 +168,31 @@ export async function authenticate(
   }
 
   const data = snapshot.data()!;
+
+  const lockedFor = lockRemainingSeconds(data.pinLockedUntil);
+  if (lockedFor > 0) return { status: "locked", retryAfterSeconds: lockedFor };
+
   const computedHash = hashPin(pin, data.pinSalt);
 
   if (!timingSafeEqualHex(computedHash, data.pinHash)) {
-    const existingDocs = await usersRef.listDocuments();
-    const existingIds = new Set(existingDocs.map((doc) => doc.id));
+    const nowLockedFor = await recordFailedAttempt(
+      userRef,
+      data.failedPinAttempts,
+      "failedPinAttempts",
+      "pinLockedUntil"
+    );
+    if (nowLockedFor > 0) return { status: "locked", retryAfterSeconds: nowLockedFor };
+
+    // 예전엔 listDocuments()로 회사 전체 사용자 문서를 매번 나열했다(틀릴 때마다 사용자 수만큼 과금).
+    // 이미 TTL 캐시가 있는 listCompanyUsers()로 대체한다.
+    const existingIds = new Set((await listCompanyUsers(companyCode)).map((u) => u.nicknameId));
+    existingIds.add(nicknameId);
     const suggestion = resolveUniqueNickname(nickname, existingIds);
     return { status: "conflict", suggestion };
+  }
+
+  if (data.failedPinAttempts) {
+    await userRef.set({ failedPinAttempts: 0 }, { merge: true });
   }
 
   return {
@@ -149,6 +223,7 @@ export async function getSecurityQuestion(
   rawNickname: string
 ): Promise<SecurityQuestionResult | null> {
   const nicknameId = toNicknameId(rawNickname);
+  if (!isPathSafeNicknameId(nicknameId)) return null;
   const doc = await db.collection("companies").doc(companyCode).collection("users").doc(nicknameId).get();
   if (!doc.exists) return null;
   const data = doc.data()!;
@@ -176,14 +251,31 @@ export async function verifySecurityAnswer(
   companyCode: string,
   rawNickname: string,
   answer: string
-): Promise<{ ok: true; nicknameId: string } | { ok: false }> {
+): Promise<{ ok: true; nicknameId: string } | { ok: false; retryAfterSeconds?: number }> {
   const nicknameId = toNicknameId(rawNickname);
-  const doc = await db.collection("companies").doc(companyCode).collection("users").doc(nicknameId).get();
+  if (!isPathSafeNicknameId(nicknameId)) return { ok: false };
+  const userRef = db.collection("companies").doc(companyCode).collection("users").doc(nicknameId);
+  const doc = await userRef.get();
   if (!doc.exists) return { ok: false };
   const data = doc.data()!;
   if (!data.answerHash || !data.answerSalt) return { ok: false };
+
+  const lockedFor = lockRemainingSeconds(data.answerLockedUntil);
+  if (lockedFor > 0) return { ok: false, retryAfterSeconds: lockedFor };
+
   const computed = hashPin(normalizeAnswer(answer), data.answerSalt);
-  if (!timingSafeEqualHex(computed, data.answerHash)) return { ok: false };
+  if (!timingSafeEqualHex(computed, data.answerHash)) {
+    const nowLockedFor = await recordFailedAttempt(
+      userRef,
+      data.failedAnswerAttempts,
+      "failedAnswerAttempts",
+      "answerLockedUntil"
+    );
+    return nowLockedFor > 0 ? { ok: false, retryAfterSeconds: nowLockedFor } : { ok: false };
+  }
+  if (data.failedAnswerAttempts) {
+    await userRef.set({ failedAnswerAttempts: 0 }, { merge: true });
+  }
   return { ok: true, nicknameId };
 }
 
@@ -197,7 +289,10 @@ export async function resetPin(
   if (!doc.exists) throw new Error("계정을 찾을 수 없습니다.");
   const salt = crypto.randomBytes(16).toString("hex");
   const pinHash = hashPin(newPin, salt);
-  await userRef.set({ pinHash, pinSalt: salt }, { merge: true });
+  await userRef.set(
+    { pinHash, pinSalt: salt, failedPinAttempts: 0, pinLockedUntil: 0 },
+    { merge: true }
+  );
   return { nickname: doc.data()!.nickname };
 }
 

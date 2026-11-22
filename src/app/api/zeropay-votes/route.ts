@@ -19,9 +19,11 @@ export async function GET(request: NextRequest) {
 
   const sessionToken = cookies().get(SESSION_COOKIE_NAME)?.value;
   const session = verifySessionToken(sessionToken);
-  const nicknameId = session && session.companyCode === companyCode ? session.nicknameId : null;
+  if (!session || session.companyCode !== companyCode) {
+    return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  }
 
-  const status = await getZeroPayStatus(companyCode, restaurantId, nicknameId);
+  const status = await getZeroPayStatus(companyCode, restaurantId, session.nicknameId);
   return NextResponse.json(status);
 }
 

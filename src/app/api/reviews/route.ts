@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { listReviews, addReview } from "@/lib/review-server";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth-server";
+import { getSessionForCompany, unauthorizedResponse } from "@/lib/api-session";
 
 // GET /api/reviews?companyCode=&restaurantId= - 특정 식당의 댓글 목록 조회
 export async function GET(request: NextRequest) {
@@ -15,6 +16,8 @@ export async function GET(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  if (!getSessionForCompany(companyCode)) return unauthorizedResponse();
 
   const reviews = await listReviews(companyCode, restaurantId);
   return NextResponse.json({ reviews });

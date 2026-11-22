@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// 이 앱은 Firestore를 서버(Next.js API 라우트)의 Admin SDK로만 읽고 쓴다.
+// Admin SDK는 보안 규칙을 거치지 않으므로, 브라우저(클라이언트 SDK)에서의 직접 접근은 전부 막는다.
+// NEXT_PUBLIC_FIREBASE_* 설정값은 브라우저에 공개되는 값이라, 규칙이 열려 있으면 누구나
+// 전체 데이터(PIN 해시 포함)를 읽고 쓸 수 있고 그 읽기/쓰기는 전부 과금된다.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

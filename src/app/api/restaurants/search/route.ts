@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { searchRestaurantCandidates } from "@/lib/restaurant-server";
+import { getSessionForCompany, unauthorizedResponse } from "@/lib/api-session";
 
 // POST /api/restaurants/search
 // body: { companyCode: string, name: string, addressHint?: string }
@@ -22,6 +23,9 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  // 네이버 검색 API 쿼터를 쓰는 요청이라 같은 회사 로그인 사용자만 허용한다.
+  if (!getSessionForCompany(companyCode)) return unauthorizedResponse();
 
   try {
     const candidates = await searchRestaurantCandidates(companyCode, name.trim(), addressHint?.trim());

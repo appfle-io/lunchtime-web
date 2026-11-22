@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   ref,
   onValue,
@@ -10,8 +10,12 @@ import {
   remove,
   onDisconnect,
   get,
+  goOnline,
+  goOffline,
 } from "firebase/database";
 import { rtdb } from "@/lib/firebase-client";
+import { ensureBattleAuth } from "@/lib/battle-auth";
+import { toBattleKey } from "@/lib/battle-key";
 import type {
   BattleCandidate,
   BattleChatMessage,
@@ -24,6 +28,18 @@ import type {
   BattleVoteState,
   BattleWorldcupMatch,
 } from "@/types/battle";
+
+// RTDB 데이터 구조 (보안 규칙: database.rules.json)
+// - battles/{cc}/lobby/{roomId}     : 로비 목록용 가벼운 요약 + members/{배틀키}: true
+// - battles/{cc}/rooms/{roomId}     : 방 상세(플레이어/후보/채팅/게임 상태). 비밀번호는 여기 두지 않는다.
+// - battleSecrets/{cc}/{roomId}     : 방 비밀번호 (클라이언트 읽기 불가)
+// - battleAccess/{cc}/{roomId}/{bk} : 입장 시 입력한 비밀번호. 규칙이 secrets와 일치할 때만 쓰기를 허용한다.
+//
+// 비용 메모: 예전엔 로비가 rooms 전체(채팅/투표 포함)를 구독해서, 어느 방에서든 채팅 한 줄이 오가면
+// 접속 중인 모든 사용자에게 그 변경이 전송됐다. 지금은 로비는 lobby 요약만, 방 상세는 들어간 방만 구독한다.
+// 또 배틀 모달이 열려 있을 때만 이 훅이 마운트되고, 닫히면 goOffline으로 RTDB 연결 자체를 끊는다.
+
+const STALE_EMPTY_ROOM_MS = 2 * 60 * 1000; // 참가자가 0명인 채로 이 시간이 지난 방은 정리 대상
 
 interface UseBattleRoomProps {
   companyCode: string;
@@ -45,13 +61,59 @@ function getTodayKstMidnight(): number {
   return new Date(`${kstDateStr}T00:00:00+09:00`).getTime();
 }
 
+function roomPath(companyCode: string, roomId: string) {
+  return `battles/${companyCode}/rooms/${roomId}`;
+}
+
+function lobbyPath(companyCode: string, roomId: string) {
+  return `battles/${companyCode}/lobby/${roomId}`;
+}
+
+function systemMessage(content: string) {
+  return {
+    id: `sys-${Date.now()}`,
+    senderNickname: "SYSTEM",
+    content,
+    createdAt: new Date().toISOString(),
+    isSystem: true,
+  };
+}
+
+// 방 상태를 바꾸면서, 로비 요약에 보이는 필드(status/gameMode/hostNickname)가 바뀌면 lobby도 같이 맞춘다.
+async function updateRoomAndLobby(
+  companyCode: string,
+  roomId: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  await update(ref(rtdb, roomPath(companyCode, roomId)), patch);
+  const lobbyPatch: Record<string, unknown> = {};
+  for (const field of ["status", "gameMode", "hostNickname"]) {
+    if (patch[field] !== undefined) lobbyPatch[field] = patch[field];
+  }
+  if (Object.keys(lobbyPatch).length > 0) {
+    await update(ref(rtdb, lobbyPath(companyCode, roomId)), lobbyPatch).catch(() => {});
+  }
+}
+
+// 방 삭제 후 로비 요약/비밀번호/내 입장 기록까지 정리. 방을 먼저 지워야 규칙상 나머지 삭제가 허용된다.
+async function removeRoomCompletely(companyCode: string, roomId: string, myKey: string): Promise<void> {
+  await remove(ref(rtdb, roomPath(companyCode, roomId)));
+  await Promise.all([
+    remove(ref(rtdb, lobbyPath(companyCode, roomId))).catch(() => {}),
+    remove(ref(rtdb, `battleSecrets/${companyCode}/${roomId}`)).catch(() => {}),
+    remove(ref(rtdb, `battleAccess/${companyCode}/${roomId}/${myKey}`)).catch(() => {}),
+  ]);
+}
+
 export function useBattleRoom({
   companyCode,
   myNicknameId,
   myNickname,
   onNotify,
 }: UseBattleRoomProps) {
-  const [isConnected, setIsConnected] = useState(true);
+  const myKey = useMemo(() => toBattleKey(myNicknameId), [myNicknameId]);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [rooms, setRooms] = useState<BattleRoomSummary[]>([]);
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const [currentRoom, setCurrentRoom] = useState<BattleRoomDetail | null>(null);
@@ -59,126 +121,177 @@ export function useBattleRoom({
   const [voteState, setVoteState] = useState<BattleVoteState | null>(null);
   const [worldcupMatch, setWorldcupMatch] = useState<BattleWorldcupMatch | null>(null);
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
+  const cleanupAttemptedRef = useRef<Set<string>>(new Set());
+  const onNotifyRef = useRef(onNotify);
+  onNotifyRef.current = onNotify;
 
-  // 1. 방 목록 실시간 구독 (한국시간 기준 당일 방만 유지 및 자정 지난 방 자동 정리)
+  // 0. RTDB 연결 및 Firebase 인증 (훅이 마운트된 동안에만 연결 유지)
   useEffect(() => {
-    if (!companyCode) return;
-    setIsLoadingRooms(true);
-    const roomsRef = ref(rtdb, `battles/${companyCode}/rooms`);
-    const todayMidnight = getTodayKstMidnight();
+    if (!companyCode || !myNicknameId) return;
+    let cancelled = false;
+    goOnline(rtdb);
 
-    const unsubscribe = onValue(roomsRef, (snapshot) => {
-      setIsLoadingRooms(false);
-      if (!snapshot.exists()) {
-        setRooms([]);
-        return;
-      }
-      const data = snapshot.val();
-      const list: BattleRoomSummary[] = [];
-
-      Object.keys(data).forEach((roomId) => {
-        const r = data[roomId];
-        if (!r || !r.status) return;
-
-        const createdAt = r.createdAt || 0;
-        // 자정(00:00:00 KST) 이전에 개설된 오래된 방은 RTDB에서 자동 정리
-        if (createdAt < todayMidnight) {
-          remove(ref(rtdb, `battles/${companyCode}/rooms/${roomId}`)).catch(() => {});
-          return;
-        }
-
-        const playersCount = r.players ? Object.keys(r.players).length : 0;
-        list.push({
-          id: roomId,
-          title: r.title,
-          companyCode,
-          hostNickname: r.hostNickname || "방장",
-          hasPassword: Boolean(r.password && r.password.trim().length > 0),
-          maxPlayers: r.maxPlayers || 6,
-          playerCount: playersCount,
-          gameMode: r.gameMode || "speed-vote",
-          status: r.status || "waiting",
-          createdAt,
-        });
-      });
-
-      setRooms(list.sort((a, b) => b.createdAt - a.createdAt));
+    const unsubscribeConnected = onValue(ref(rtdb, ".info/connected"), (snap) => {
+      setIsConnected(snap.val() === true);
     });
 
+    ensureBattleAuth(companyCode, myNicknameId)
+      .then(() => {
+        if (!cancelled) setIsAuthReady(true);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) onNotifyRef.current?.(err.message);
+      });
+
+    return () => {
+      cancelled = true;
+      setIsAuthReady(false);
+      unsubscribeConnected();
+      // 연결을 끊으면 onDisconnect로 걸어둔 내 플레이어/로비 멤버 항목도 서버에서 자동 정리된다.
+      goOffline(rtdb);
+    };
+  }, [companyCode, myNicknameId]);
+
+  // 1. 로비 목록 실시간 구독 (요약 노드만 - 한국시간 기준 당일 방만 표시, 오래된/빈 방 정리)
+  useEffect(() => {
+    if (!companyCode || !isAuthReady) return;
+    setIsLoadingRooms(true);
+    const lobbyRef = ref(rtdb, `battles/${companyCode}/lobby`);
+
+    const unsubscribe = onValue(
+      lobbyRef,
+      (snapshot) => {
+        setIsLoadingRooms(false);
+        if (!snapshot.exists()) {
+          setRooms([]);
+          return;
+        }
+        const data = snapshot.val() as Record<string, any>;
+        const todayMidnight = getTodayKstMidnight();
+        const now = Date.now();
+        const list: BattleRoomSummary[] = [];
+
+        Object.keys(data).forEach((roomId) => {
+          const r = data[roomId];
+          if (!r || !r.status) return;
+
+          const createdAt = r.createdAt || 0;
+          const playerCount = r.members ? Object.keys(r.members).length : 0;
+          const isOld = createdAt < todayMidnight;
+          const isAbandoned = playerCount === 0 && now - createdAt > STALE_EMPTY_ROOM_MS;
+
+          if (isOld || isAbandoned) {
+            // 규칙상 허용되는 경우(빈 방 / 12시간 경과 / 내가 방장)에만 실제로 지워진다. 같은 방은 한 번만 시도.
+            if (!cleanupAttemptedRef.current.has(roomId)) {
+              cleanupAttemptedRef.current.add(roomId);
+              removeRoomCompletely(companyCode, roomId, myKey).catch(() => {});
+            }
+            return;
+          }
+
+          list.push({
+            id: roomId,
+            title: r.title,
+            companyCode,
+            hostNickname: r.hostNickname || "방장",
+            hasPassword: Boolean(r.hasPassword),
+            maxPlayers: r.maxPlayers || 6,
+            playerCount,
+            gameMode: r.gameMode || "speed-vote",
+            status: r.status || "waiting",
+            createdAt,
+          });
+        });
+
+        setRooms(list.sort((a, b) => b.createdAt - a.createdAt));
+      },
+      () => {
+        setIsLoadingRooms(false);
+        setRooms([]);
+      }
+    );
+
     return () => unsubscribe();
-  }, [companyCode]);
+  }, [companyCode, isAuthReady, myKey]);
 
   // 2. 현재 방 상세 실시간 구독
   useEffect(() => {
-    if (!currentRoomId || !companyCode) return;
+    if (!currentRoomId || !companyCode || !isAuthReady) return;
     const roomId = currentRoomId;
-    const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
+    const roomRef = ref(rtdb, roomPath(companyCode, roomId));
 
-    const unsubscribe = onValue(roomRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        setCurrentRoom(null);
-        setCurrentRoomId(null);
-        setMessages([]);
-        setVoteState(null);
-        setWorldcupMatch(null);
-        return;
-      }
+    const resetRoomState = () => {
+      setCurrentRoom(null);
+      setCurrentRoomId(null);
+      setMessages([]);
+      setVoteState(null);
+      setWorldcupMatch(null);
+    };
 
-      const data = snapshot.val();
-      const rawPlayers = data.players || {};
-      const playersList: BattlePlayer[] = Object.values(rawPlayers);
-
-      // 내가 방에서 나갔는지 체크
-      const amIInRoom = playersList.some(
-        (p) => p.nicknameId === myNicknameId || p.nickname === myNickname
-      );
-      if (!amIInRoom) {
-        setCurrentRoom(null);
-        setCurrentRoomId(null);
-        return;
-      }
-
-      const rawCandidates = data.candidates || {};
-      const candidatesList: BattleCandidate[] = Object.values(rawCandidates);
-
-      const rawMessages = data.messages || {};
-      const messagesList: BattleChatMessage[] = (Object.values(rawMessages) as BattleChatMessage[]).sort(
-        (a, b) => {
-          const tA = new Date(a.createdAt).getTime() || 0;
-          const tB = new Date(b.createdAt).getTime() || 0;
-          return tA - tB;
+    const unsubscribe = onValue(
+      roomRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          resetRoomState();
+          return;
         }
-      );
 
-      const roomDetail: BattleRoomDetail = {
-        id: roomId,
-        title: data.title,
-        companyCode,
-        hostNicknameId: data.hostNicknameId,
-        hostNickname: data.hostNickname,
-        hasPassword: Boolean(data.password && data.password.trim().length > 0),
-        maxPlayers: data.maxPlayers || 6,
-        gameMode: data.gameMode || "speed-vote",
-        status: data.status || "waiting",
-        players: playersList,
-        candidates: candidatesList,
-        messages: messagesList,
-        voteState: data.voteState || undefined,
-        worldcupMatch: data.worldcupMatch || undefined,
-        rouletteState: data.rouletteState || undefined,
-        result: data.result || undefined,
-        createdAt: data.createdAt || Date.now(),
-      };
+        const data = snapshot.val();
+        const rawPlayers: Record<string, BattlePlayer> = data.players || {};
+        const playersList: BattlePlayer[] = Object.values(rawPlayers);
 
-      setCurrentRoom(roomDetail);
-      setMessages(messagesList);
-      setVoteState(data.voteState || null);
-      setWorldcupMatch(data.worldcupMatch || null);
-    });
+        // 내가 방에서 나갔는지 체크
+        if (!rawPlayers[myKey]) {
+          setCurrentRoom(null);
+          setCurrentRoomId(null);
+          return;
+        }
+
+        const rawCandidates = data.candidates || {};
+        const candidatesList: BattleCandidate[] = Object.values(rawCandidates);
+
+        const rawMessages = data.messages || {};
+        const messagesList: BattleChatMessage[] = (Object.values(rawMessages) as BattleChatMessage[]).sort(
+          (a, b) => {
+            const tA = new Date(a.createdAt).getTime() || 0;
+            const tB = new Date(b.createdAt).getTime() || 0;
+            return tA - tB;
+          }
+        );
+
+        const roomDetail: BattleRoomDetail = {
+          id: roomId,
+          title: data.title,
+          companyCode,
+          hostNicknameId: data.hostNicknameId,
+          hostKey: data.hostKey,
+          hostNickname: data.hostNickname,
+          hasPassword: Boolean(data.hasPassword),
+          maxPlayers: data.maxPlayers || 6,
+          gameMode: data.gameMode || "speed-vote",
+          status: data.status || "waiting",
+          players: playersList,
+          candidates: candidatesList,
+          messages: messagesList,
+          voteState: data.voteState || undefined,
+          worldcupMatch: data.worldcupMatch || undefined,
+          rouletteState: data.rouletteState || undefined,
+          result: data.result || undefined,
+          createdAt: data.createdAt || Date.now(),
+        };
+
+        setCurrentRoom(roomDetail);
+        setMessages(messagesList);
+        setVoteState(data.voteState || null);
+        setWorldcupMatch(data.worldcupMatch || null);
+      },
+      () => resetRoomState()
+    );
 
     return () => unsubscribe();
-  }, [companyCode, currentRoomId, myNickname, myNicknameId]);
+  }, [companyCode, currentRoomId, isAuthReady, myKey]);
 
+  // 로비는 실시간 구독이라 별도 재조회가 필요 없다 - 버튼 피드백만 준다.
   const refreshRooms = useCallback(() => {
     setIsLoadingRooms(true);
     setTimeout(() => setIsLoadingRooms(false), 300);
@@ -192,12 +305,16 @@ export function useBattleRoom({
       maxPlayers: number = 6,
       gameMode: BattleGameMode = "speed-vote"
     ) => {
+      if (!isAuthReady) return { success: false, error: "실시간 연결을 준비 중입니다. 잠시 후 다시 시도해주세요." };
       try {
         const roomId = generateRoomId();
-        const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
+        const trimmedPassword = password?.trim() || "";
+        if (trimmedPassword.length > 30) {
+          return { success: false, error: "비밀번호는 30자 이하로 입력해주세요." };
+        }
 
         const hostPlayer: BattlePlayer = {
-          socketId: myNicknameId,
+          socketId: myKey,
           nicknameId: myNicknameId,
           nickname: myNickname,
           isHost: true,
@@ -205,38 +322,49 @@ export function useBattleRoom({
           slotIndex: 0,
         };
 
-        const nowIso = new Date().toISOString();
+        const createdAt = Date.now();
+        const roomTitle = (title || `${myNickname}님의 방`).slice(0, 40);
+        const safeMaxPlayers = Math.min(Math.max(maxPlayers || 6, 2), 8);
         const initialData = {
           id: roomId,
-          title: title || `${myNickname}님의 방`,
+          title: roomTitle,
           companyCode,
           hostNicknameId: myNicknameId,
+          hostKey: myKey,
           hostNickname: myNickname,
-          password: password?.trim() || "",
-          maxPlayers: Math.min(Math.max(maxPlayers || 6, 2), 8),
+          hasPassword: trimmedPassword.length > 0,
+          maxPlayers: safeMaxPlayers,
           gameMode: gameMode || "speed-vote",
           status: "waiting",
           players: {
-            [myNicknameId]: hostPlayer,
+            [myKey]: hostPlayer,
           },
           candidates: {},
           messages: {
-            [`msg_${Date.now()}`]: {
-              id: `sys-${Date.now()}`,
-              senderNickname: "SYSTEM",
-              content: `${myNickname}님이 방을 개설했습니다.`,
-              createdAt: nowIso,
-              isSystem: true,
-            },
+            [`msg_${createdAt}`]: systemMessage(`${myNickname}님이 방을 개설했습니다.`),
           },
-          createdAt: Date.now(),
+          createdAt,
         };
 
-        await set(roomRef, initialData);
+        // 순서 중요: 방 → 비밀번호 → 로비 요약. 로비에 노출되기 전에 비밀번호가 먼저 걸리게 한다.
+        await set(ref(rtdb, roomPath(companyCode, roomId)), initialData);
+        if (trimmedPassword) {
+          await set(ref(rtdb, `battleSecrets/${companyCode}/${roomId}`), { password: trimmedPassword });
+        }
+        await set(ref(rtdb, lobbyPath(companyCode, roomId)), {
+          title: roomTitle,
+          hostNickname: myNickname,
+          hasPassword: trimmedPassword.length > 0,
+          maxPlayers: safeMaxPlayers,
+          gameMode: gameMode || "speed-vote",
+          status: "waiting",
+          createdAt,
+          members: { [myKey]: true },
+        });
 
         // 연결 끊김 시 내 슬롯 자동 제거
-        const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myNicknameId}`);
-        onDisconnect(myPlayerRef).remove();
+        onDisconnect(ref(rtdb, `${roomPath(companyCode, roomId)}/players/${myKey}`)).remove();
+        onDisconnect(ref(rtdb, `${lobbyPath(companyCode, roomId)}/members/${myKey}`)).remove();
 
         setCurrentRoomId(roomId);
         return { success: true };
@@ -244,40 +372,46 @@ export function useBattleRoom({
         return { success: false, error: err?.message || "방 생성에 실패했습니다." };
       }
     },
-    [companyCode, myNickname, myNicknameId]
+    [companyCode, isAuthReady, myKey, myNickname, myNicknameId]
   );
 
   // 4. 방 입장하기
   const joinRoom = useCallback(
     async (roomId: string, password?: string) => {
+      if (!isAuthReady) return { success: false, error: "실시간 연결을 준비 중입니다. 잠시 후 다시 시도해주세요." };
       try {
-        const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
-        const snapshot = await get(roomRef);
+        const snapshot = await get(ref(rtdb, roomPath(companyCode, roomId)));
 
         if (!snapshot.exists()) {
           return { success: false, error: "존재하지 않는 방입니다." };
         }
 
         const data = snapshot.val();
-        if (data.password && data.password !== password) {
-          return { success: false, error: "비밀번호가 일치하지 않습니다." };
+        const currentPlayers: Record<string, BattlePlayer> = data.players || {};
+        const playersList = Object.values(currentPlayers);
+
+        // 이미 들어가 있는 경우
+        if (currentPlayers[myKey]) {
+          setCurrentRoomId(roomId);
+          return { success: true };
         }
 
         if (data.status !== "waiting") {
           return { success: false, error: "이미 게임이 시작되었거나 종료된 방입니다." };
         }
 
-        const currentPlayers: Record<string, BattlePlayer> = data.players || {};
-        const playersList = Object.values(currentPlayers);
-
-        // 이미 들어가 있는 경우
-        if (currentPlayers[myNicknameId]) {
-          setCurrentRoomId(roomId);
-          return { success: true };
-        }
-
         if (playersList.length >= (data.maxPlayers || 6)) {
           return { success: false, error: "정원이 가득 찬 방입니다." };
+        }
+
+        // 비밀번호 방: 서버 규칙이 battleSecrets와 일치하는 값만 쓰기를 허용한다.
+        // 비밀번호 자체는 클라이언트로 내려오지 않는다.
+        if (data.hasPassword) {
+          try {
+            await set(ref(rtdb, `battleAccess/${companyCode}/${roomId}/${myKey}`), password ?? "");
+          } catch {
+            return { success: false, error: "비밀번호가 일치하지 않습니다." };
+          }
         }
 
         // 빈 슬롯 찾기
@@ -291,7 +425,7 @@ export function useBattleRoom({
         }
 
         const newPlayer: BattlePlayer = {
-          socketId: myNicknameId,
+          socketId: myKey,
           nicknameId: myNicknameId,
           nickname: myNickname,
           isHost: false,
@@ -299,18 +433,17 @@ export function useBattleRoom({
           slotIndex: availableSlot >= 0 ? availableSlot : playersList.length,
         };
 
-        const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myNicknameId}`);
+        const myPlayerRef = ref(rtdb, `${roomPath(companyCode, roomId)}/players/${myKey}`);
+        const myMemberRef = ref(rtdb, `${lobbyPath(companyCode, roomId)}/members/${myKey}`);
         await set(myPlayerRef, newPlayer);
+        await set(myMemberRef, true);
         onDisconnect(myPlayerRef).remove();
+        onDisconnect(myMemberRef).remove();
 
-        const messagesRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/messages`);
-        await push(messagesRef, {
-          id: `sys-${Date.now()}`,
-          senderNickname: "SYSTEM",
-          content: `${myNickname}님이 입장했습니다.`,
-          createdAt: new Date().toISOString(),
-          isSystem: true,
-        });
+        await push(
+          ref(rtdb, `${roomPath(companyCode, roomId)}/messages`),
+          systemMessage(`${myNickname}님이 입장했습니다.`)
+        );
 
         setCurrentRoomId(roomId);
         return { success: true };
@@ -318,52 +451,58 @@ export function useBattleRoom({
         return { success: false, error: err?.message || "입장에 실패했습니다." };
       }
     },
-    [companyCode, myNickname, myNicknameId]
+    [companyCode, isAuthReady, myKey, myNickname, myNicknameId]
+  );
+
+  // 방장 위임 + 퇴장 메시지 + 내 슬롯 제거. 규칙상 방 멤버만 방을 수정할 수 있으므로
+  // 위임/메시지를 먼저 쓰고 마지막에 내 슬롯을 지운다.
+  const leaveRoomInternal = useCallback(
+    async (roomId: string, data: any, leaveMessage: (nextHostNickname?: string) => string) => {
+      const players: Record<string, BattlePlayer> = data.players || {};
+      const remainingKeys = Object.keys(players).filter((k) => k !== myKey);
+
+      if (remainingKeys.length === 0) {
+        // 마지막 유저가 나가면 방 전체 삭제
+        await removeRoomCompletely(companyCode, roomId, myKey);
+        return;
+      }
+
+      const isHostLeaving = data.hostKey === myKey || data.hostNicknameId === myNicknameId;
+      let nextHostNickname: string | undefined;
+      if (isHostLeaving) {
+        const nextHostKey = remainingKeys[0];
+        const nextHost = players[nextHostKey];
+        nextHostNickname = nextHost.nickname;
+        await updateRoomAndLobby(companyCode, roomId, {
+          hostNicknameId: nextHost.nicknameId,
+          hostKey: nextHostKey,
+          hostNickname: nextHost.nickname,
+          [`players/${nextHostKey}/isHost`]: true,
+          [`players/${nextHostKey}/isReady`]: true,
+        });
+      }
+
+      await push(ref(rtdb, `${roomPath(companyCode, roomId)}/messages`), systemMessage(leaveMessage(nextHostNickname)));
+      await remove(ref(rtdb, `${lobbyPath(companyCode, roomId)}/members/${myKey}`)).catch(() => {});
+      await remove(ref(rtdb, `${roomPath(companyCode, roomId)}/players/${myKey}`));
+      await remove(ref(rtdb, `battleAccess/${companyCode}/${roomId}/${myKey}`)).catch(() => {});
+    },
+    [companyCode, myKey, myNicknameId]
   );
 
   // 5. 방 나가기
   const leaveRoom = useCallback(async () => {
     if (!currentRoomId || !companyCode) return;
     const roomId = currentRoomId;
-    const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
-    const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myNicknameId}`);
 
     try {
-      const snapshot = await get(roomRef);
+      const snapshot = await get(ref(rtdb, roomPath(companyCode, roomId)));
       if (snapshot.exists()) {
-        const data = snapshot.val();
-        const players = data.players || {};
-        const remainingKeys = Object.keys(players).filter((k) => k !== myNicknameId);
-
-        if (remainingKeys.length === 0) {
-          // 마지막 유저가 나가면 방 전체 삭제
-          await remove(roomRef);
-        } else {
-          await remove(myPlayerRef);
-
-          // 방장이 나간 경우 다음 사람에게 방장 위임
-          let transferMsg = `${myNickname}님이 퇴장했습니다.`;
-          if (data.hostNicknameId === myNicknameId || data.hostNickname === myNickname) {
-            const nextHostKey = remainingKeys[0];
-            const nextHost = players[nextHostKey];
-            await update(roomRef, {
-              hostNicknameId: nextHost.nicknameId,
-              hostNickname: nextHost.nickname,
-              [`players/${nextHostKey}/isHost`]: true,
-              [`players/${nextHostKey}/isReady`]: true,
-            });
-            transferMsg = `방장 ${myNickname}님이 퇴장하여 ${nextHost.nickname}님에게 방장 권한이 위임되었습니다.`;
-          }
-
-          const messagesRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/messages`);
-          await push(messagesRef, {
-            id: `sys-${Date.now()}`,
-            senderNickname: "SYSTEM",
-            content: transferMsg,
-            createdAt: new Date().toISOString(),
-            isSystem: true,
-          });
-        }
+        await leaveRoomInternal(roomId, snapshot.val(), (nextHostNickname) =>
+          nextHostNickname
+            ? `방장 ${myNickname}님이 퇴장하여 ${nextHostNickname}님에게 방장 권한이 위임되었습니다.`
+            : `${myNickname}님이 퇴장했습니다.`
+        );
       }
     } catch (e) {
       console.error("Error leaving room:", e);
@@ -374,90 +513,77 @@ export function useBattleRoom({
     setMessages([]);
     setVoteState(null);
     setWorldcupMatch(null);
-  }, [companyCode, currentRoomId, myNickname, myNicknameId]);
+  }, [companyCode, currentRoomId, leaveRoomInternal, myNickname]);
 
   // 5-2. 방장 권한 수동 위임
   const transferHost = useCallback(
     async (targetNicknameId: string) => {
       if (!currentRoomId || !companyCode) return;
       const roomId = currentRoomId;
-      const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
+      const targetKey = toBattleKey(targetNicknameId);
 
       try {
-        const snapshot = await get(roomRef);
+        const snapshot = await get(ref(rtdb, roomPath(companyCode, roomId)));
         if (!snapshot.exists()) return;
         const data = snapshot.val();
         const players = data.players || {};
-        const targetPlayer = players[targetNicknameId];
+        const targetPlayer = players[targetKey];
         if (!targetPlayer) return;
 
-        await update(roomRef, {
+        await updateRoomAndLobby(companyCode, roomId, {
           hostNicknameId: targetPlayer.nicknameId,
+          hostKey: targetKey,
           hostNickname: targetPlayer.nickname,
-          [`players/${myNicknameId}/isHost`]: false,
-          [`players/${myNicknameId}/isReady`]: false,
-          [`players/${targetNicknameId}/isHost`]: true,
-          [`players/${targetNicknameId}/isReady`]: true,
+          [`players/${myKey}/isHost`]: false,
+          [`players/${myKey}/isReady`]: false,
+          [`players/${targetKey}/isHost`]: true,
+          [`players/${targetKey}/isReady`]: true,
         });
 
-        const messagesRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/messages`);
-        await push(messagesRef, {
-          id: `sys-${Date.now()}`,
-          senderNickname: "SYSTEM",
-          content: `${myNickname}님이 ${targetPlayer.nickname}님에게 방장 권한을 위임했습니다.`,
-          createdAt: new Date().toISOString(),
-          isSystem: true,
-        });
+        await push(
+          ref(rtdb, `${roomPath(companyCode, roomId)}/messages`),
+          systemMessage(`${myNickname}님이 ${targetPlayer.nickname}님에게 방장 권한을 위임했습니다.`)
+        );
       } catch (err) {
         console.error("Failed to transfer host:", err);
       }
     },
-    [companyCode, currentRoomId, myNickname, myNicknameId]
+    [companyCode, currentRoomId, myKey, myNickname]
   );
 
   // 5-3. 로비에서 방 삭제 (방장 전용 / 다른 참가자가 있으면 권한 위임 후 나만 나오기 or 전체 삭제)
   const deleteRoomFromLobby = useCallback(
     async (roomId: string, forceDeleteAll: boolean = false) => {
       if (!companyCode || !roomId) return;
-      const roomRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}`);
 
       try {
-        const snapshot = await get(roomRef);
-        if (!snapshot.exists()) return;
+        const snapshot = await get(ref(rtdb, roomPath(companyCode, roomId)));
+        if (!snapshot.exists()) {
+          // 방 본문이 이미 없으면 남은 로비 요약만 정리
+          await remove(ref(rtdb, lobbyPath(companyCode, roomId))).catch(() => {});
+          return;
+        }
         const data = snapshot.val();
         const players = data.players || {};
-        const remainingKeys = Object.keys(players).filter((k) => k !== myNicknameId);
+        const remainingKeys = Object.keys(players).filter((k) => k !== myKey);
 
         if (remainingKeys.length === 0 || forceDeleteAll) {
-          await remove(roomRef);
+          await removeRoomCompletely(companyCode, roomId, myKey);
         } else {
-          // 다른 참가자에게 위임하고 방장만 방에서 빠져나오기
-          const nextHostKey = remainingKeys[0];
-          const nextHost = players[nextHostKey];
-          const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myNicknameId}`);
-          await remove(myPlayerRef);
-          await update(roomRef, {
-            hostNicknameId: nextHost.nicknameId,
-            hostNickname: nextHost.nickname,
-            [`players/${nextHostKey}/isHost`]: true,
-            [`players/${nextHostKey}/isReady`]: true,
-          });
-
-          const messagesRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/messages`);
-          await push(messagesRef, {
-            id: `sys-${Date.now()}`,
-            senderNickname: "SYSTEM",
-            content: `개설자 ${myNickname}님이 방을 나가서 ${nextHost.nickname}님에게 방장 권한이 위임되었습니다.`,
-            createdAt: new Date().toISOString(),
-            isSystem: true,
-          });
+          await leaveRoomInternal(roomId, data, (nextHostNickname) =>
+            nextHostNickname
+              ? `개설자 ${myNickname}님이 방을 나가서 ${nextHostNickname}님에게 방장 권한이 위임되었습니다.`
+              : `${myNickname}님이 퇴장했습니다.`
+          );
         }
       } catch (err) {
         console.error("Failed to delete room from lobby:", err);
+        onNotifyRef.current?.("방을 삭제할 권한이 없습니다.");
       }
     },
-    [companyCode, myNickname, myNicknameId]
+    [companyCode, leaveRoomInternal, myKey, myNickname]
   );
+
 
   // 6. 준비(READY) 토글
   const toggleReady = useCallback(async () => {
@@ -468,10 +594,10 @@ export function useBattleRoom({
 
     const myPlayerRef = ref(
       rtdb,
-      `battles/${companyCode}/rooms/${currentRoomId}/players/${myNicknameId}`
+      `battles/${companyCode}/rooms/${currentRoomId}/players/${myKey}`
     );
     await update(myPlayerRef, { isReady: !me.isReady });
-  }, [companyCode, currentRoom, currentRoomId, myNickname, myNicknameId]);
+  }, [companyCode, currentRoom, currentRoomId, myNickname, myNicknameId, myKey]);
 
   // 7. 식당 픽하기 (새 후보 등록 및 내 대표 픽 설정)
   const pickRestaurant = useCallback(
@@ -479,7 +605,7 @@ export function useBattleRoom({
       if (!currentRoomId || !currentRoom) return;
       const roomId = currentRoomId;
 
-      const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myNicknameId}`);
+      const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myKey}`);
       await update(myPlayerRef, { pickedRestaurant: restaurant });
 
       const candId = `cand-${Date.now()}`;
@@ -502,7 +628,7 @@ export function useBattleRoom({
         isSystem: true,
       });
     },
-    [companyCode, currentRoom, currentRoomId, myNickname, myNicknameId]
+    [companyCode, currentRoom, currentRoomId, myNickname, myKey]
   );
 
   // 7-2. 기존 등록된 후보 중 하나를 내 대표 픽으로 설정
@@ -511,7 +637,7 @@ export function useBattleRoom({
       if (!currentRoomId || !currentRoom) return;
       const roomId = currentRoomId;
 
-      const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myNicknameId}`);
+      const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myKey}`);
       await update(myPlayerRef, {
         pickedRestaurant: {
           id: cand.restaurantId,
@@ -521,7 +647,7 @@ export function useBattleRoom({
         },
       });
     },
-    [companyCode, currentRoom, currentRoomId, myNicknameId]
+    [companyCode, currentRoom, currentRoomId, myKey]
   );
 
   // 7-3. 후보 삭제 (내가 등록한 후보이거나 방장인 경우)
@@ -551,7 +677,7 @@ export function useBattleRoom({
         addedByNickname: myNickname,
       });
 
-      const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myNicknameId}`);
+      const myPlayerRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/players/${myKey}`);
       await update(myPlayerRef, {
         pickedRestaurant: {
           name: name.trim(),
@@ -568,7 +694,7 @@ export function useBattleRoom({
         isSystem: true,
       });
     },
-    [companyCode, currentRoomId, myNickname, myNicknameId]
+    [companyCode, currentRoomId, myNickname, myKey]
   );
 
   // 9. 채팅 메시지 전송
@@ -611,7 +737,7 @@ export function useBattleRoom({
         "roulette": "운명의 룰렛",
       };
 
-      await update(roomRef, { gameMode: newMode });
+      await updateRoomAndLobby(companyCode, roomId, { gameMode: newMode });
 
       const messagesRef = ref(rtdb, `battles/${companyCode}/rooms/${roomId}/messages`);
       await push(messagesRef, {
@@ -667,7 +793,7 @@ export function useBattleRoom({
         finishedAt: new Date().toISOString(),
       };
 
-      await update(roomRef, {
+      await updateRoomAndLobby(companyCode, roomId, {
         status: "finished",
         result,
       });
@@ -730,7 +856,7 @@ export function useBattleRoom({
             tieMessage: "투표 결과가 동점입니다! 팀원들과 함께 맛있는 점심을 잘 협의해보세요.",
           };
 
-          await update(roomRef, {
+          await updateRoomAndLobby(companyCode, roomId, {
             status: "finished",
             result,
           });
@@ -808,7 +934,7 @@ export function useBattleRoom({
           isFinal: false,
         };
 
-        await update(roomRef, {
+        await updateRoomAndLobby(companyCode, roomId, {
           worldcupMatch: nextMatch,
         });
 
@@ -852,7 +978,7 @@ export function useBattleRoom({
           isTie: false,
         };
 
-        await update(roomRef, {
+        await updateRoomAndLobby(companyCode, roomId, {
           status: "finished",
           result,
         });
@@ -920,7 +1046,7 @@ export function useBattleRoom({
         isFinal: isNextFinal,
       };
 
-      await update(roomRef, {
+      await updateRoomAndLobby(companyCode, roomId, {
         worldcupMatch: nextMatch,
       });
 
@@ -965,7 +1091,7 @@ export function useBattleRoom({
         durationSeconds: 60,
         votes: {},
       };
-      await update(roomRef, {
+      await updateRoomAndLobby(companyCode, roomId, {
         status: "in-game",
         voteState,
       });
@@ -983,7 +1109,7 @@ export function useBattleRoom({
         winnerCandidateId: winner.id,
       };
 
-      await update(roomRef, {
+      await updateRoomAndLobby(companyCode, roomId, {
         status: "in-game",
         rouletteState,
       });
@@ -1001,7 +1127,7 @@ export function useBattleRoom({
           totalParticipants: Object.keys(currentData.players || {}).length,
           finishedAt: new Date().toISOString(),
         };
-        await update(roomRef, {
+        await updateRoomAndLobby(companyCode, roomId, {
           status: "finished",
           result,
         });
@@ -1059,7 +1185,7 @@ export function useBattleRoom({
         isFinal,
       };
 
-      await update(roomRef, {
+      await updateRoomAndLobby(companyCode, roomId, {
         status: "in-game",
         worldcupMatch: match,
       });
@@ -1090,7 +1216,7 @@ export function useBattleRoom({
       if (currentRoom.gameMode === "speed-vote") {
         const voteRef = ref(
           rtdb,
-          `battles/${companyCode}/rooms/${roomId}/voteState/votes/${myNicknameId}`
+          `battles/${companyCode}/rooms/${roomId}/voteState/votes/${myKey}`
         );
         await set(voteRef, candidateId);
 
@@ -1115,22 +1241,22 @@ export function useBattleRoom({
         if (candidateId === candAId) {
           const voteARef = ref(
             rtdb,
-            `battles/${companyCode}/rooms/${roomId}/worldcupMatch/votesA/${myNicknameId}`
+            `battles/${companyCode}/rooms/${roomId}/worldcupMatch/votesA/${myKey}`
           );
           const voteBRef = ref(
             rtdb,
-            `battles/${companyCode}/rooms/${roomId}/worldcupMatch/votesB/${myNicknameId}`
+            `battles/${companyCode}/rooms/${roomId}/worldcupMatch/votesB/${myKey}`
           );
           await set(voteARef, true);
           await remove(voteBRef);
         } else if (candidateId === candBId) {
           const voteARef = ref(
             rtdb,
-            `battles/${companyCode}/rooms/${roomId}/worldcupMatch/votesA/${myNicknameId}`
+            `battles/${companyCode}/rooms/${roomId}/worldcupMatch/votesA/${myKey}`
           );
           const voteBRef = ref(
             rtdb,
-            `battles/${companyCode}/rooms/${roomId}/worldcupMatch/votesB/${myNicknameId}`
+            `battles/${companyCode}/rooms/${roomId}/worldcupMatch/votesB/${myKey}`
           );
           await set(voteBRef, true);
           await remove(voteARef);
@@ -1153,7 +1279,7 @@ export function useBattleRoom({
         }
       }
     },
-    [companyCode, currentRoom, currentRoomId, finishSpeedVote, resolveWorldcupMatch, myNicknameId]
+    [companyCode, currentRoom, currentRoomId, finishSpeedVote, resolveWorldcupMatch, myKey]
   );
 
   // 12. 게임 종료 후 대기실로 복귀 (방장/참가자 공유)
@@ -1173,8 +1299,8 @@ export function useBattleRoom({
           const p = players[k];
           const isHost =
             p.isHost ||
-            k === data.hostNicknameId ||
-            p.nickname === data.hostNickname;
+            k === data.hostKey ||
+            p.nicknameId === data.hostNicknameId;
 
           updatedPlayers[k] = {
             ...p,
@@ -1182,7 +1308,7 @@ export function useBattleRoom({
           };
         });
 
-        await update(roomRef, {
+        await updateRoomAndLobby(companyCode, roomId, {
           status: "waiting",
           result: null,
           voteState: null,

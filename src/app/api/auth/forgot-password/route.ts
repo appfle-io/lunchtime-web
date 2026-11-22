@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeCompanyCode, isValidCompanyCode } from "@/lib/company";
 import { verifySecurityAnswer, signVerifyToken } from "@/lib/auth-server";
 
 // POST /api/auth/forgot-password
@@ -14,13 +15,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "요청 본문이 올바른 JSON이 아닙니다." }, { status: 400 });
   }
 
-  const { companyCode, nickname, answer } = body;
-  if (!companyCode || !nickname?.trim() || !answer?.trim()) {
+  const { nickname, answer } = body;
+  if (!body.companyCode || !nickname?.trim() || !answer?.trim()) {
     return NextResponse.json({ error: "닉네임과 답변을 입력해줘." }, { status: 400 });
+  }
+  const companyCode = normalizeCompanyCode(body.companyCode);
+  if (!isValidCompanyCode(companyCode)) {
+    return NextResponse.json({ error: "존재하지 않는 회사코드입니다." }, { status: 404 });
   }
 
   const result = await verifySecurityAnswer(companyCode, nickname.trim(), answer.trim());
   if (!result.ok) {
+    if (result.retryAfterSeconds) {
+      const minutes = Math.ceil(result.retryAfterSeconds / 60);
+      return NextResponse.json(
+        { error: `답변을 여러 번 틀려서 잠겼어요. ${minutes}분 뒤에 다시 시도해줘.` },
+        { status: 429, headers: { "Retry-After": String(result.retryAfterSeconds) } }
+      );
+    }
     return NextResponse.json({ error: "답변이 일치하지 않아요." }, { status: 400 });
   }
 

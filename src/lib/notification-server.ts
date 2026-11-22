@@ -43,13 +43,14 @@ export async function listNotifications(
   companyCode: string,
   nicknameId: string
 ): Promise<NotificationEntry[]> {
-  // orderBy 없이 전체(최대 50개 최근 것만 남기고 싶지만 지금은 다 읽어 메모리 정렬 - 토이 프로젝트
-  // 규모라 문제 없음)를 읽어서 최신순으로 정렬한다.
-  const snapshot = await notificationsRef(companyCode, nicknameId).get();
-  return snapshot.docs
-    .map((doc) => ({ id: doc.id, ...(doc.data() as Omit<NotificationEntry, "id">) }))
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-    .slice(0, 50);
+  // 예전엔 알림 전체를 읽고 메모리에서 최근 50개만 잘랐다 - 알림은 지우지 않으면 계속 쌓이므로
+  // 알림함을 열 때마다 읽기 비용이 계속 늘어나는 구조였다. 서버에서 최신순 50개만 읽는다
+  // (단일 필드 정렬이라 별도 색인 불필요).
+  const snapshot = await notificationsRef(companyCode, nicknameId)
+    .orderBy("createdAt", "desc")
+    .limit(50)
+    .get();
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<NotificationEntry, "id">) }));
 }
 
 export async function createNotification(

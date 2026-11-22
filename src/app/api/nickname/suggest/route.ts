@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateNicknameCandidates, resolveUniqueNickname } from "@/lib/nickname";
 import { normalizeCompanyCode } from "@/lib/company";
-import { db } from "@/lib/firebase";
+import { getCompanyByCode } from "@/lib/company-server";
+import { listCompanyUsers } from "@/lib/user-server";
 
 // GET /api/nickname/suggest?companyCode=xxx
 // 계정 생성 화면에서 "닉네임 제안" / "다시 추천" 버튼이 호출하는 API.
@@ -14,16 +15,15 @@ export async function GET(req: NextRequest) {
   }
   const companyCode = normalizeCompanyCode(rawCompanyCode);
 
-  const companyRef = db.collection("companies").doc(companyCode);
-  const companySnap = await companyRef.get();
-
-  if (!companySnap.exists) {
+  // 로그인 전 화면에서 호출되는 공개 API라, 예전처럼 호출마다 회사 문서 + 전체 사용자 문서를
+  // 읽으면 "다시 추천" 연타만으로 사용자 수만큼 읽기가 계속 과금됐다. 회사/사용자 목록 모두
+  // 서버 TTL 캐시(company-server.ts, user-server.ts)를 거치게 한다.
+  const company = await getCompanyByCode(companyCode);
+  if (!company) {
     return NextResponse.json({ error: "존재하지 않는 회사코드입니다." }, { status: 404 });
   }
 
-  // 문서 본문은 필요 없고 문서ID(=정규화된 닉네임)만 필요하므로 select()로 필드 전송을 줄인다.
-  const usersSnap = await companyRef.collection("users").select().get();
-  const existingNicknameIds = new Set(usersSnap.docs.map((d) => d.id));
+  const existingNicknameIds = new Set((await listCompanyUsers(companyCode)).map((u) => u.nicknameId));
 
   const candidates = generateNicknameCandidates(3).map((c) =>
     resolveUniqueNickname(c, existingNicknameIds)

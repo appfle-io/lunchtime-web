@@ -93,6 +93,7 @@ export interface BattleRoomDetail {
   title: string;
   companyCode: string;
   hostNicknameId: string;
+  hostKey?: string; // RTDB 플레이어 키(toBattleKey) 기준 방장
   hostNickname: string;
   hasPassword: boolean;
   maxPlayers: number;

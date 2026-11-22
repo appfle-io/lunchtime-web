@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth-server";
+import { getSessionForCompany, unauthorizedResponse } from "@/lib/api-session";
 import {
   createEditRequest,
   listEditRequestsForRestaurant,
@@ -30,6 +31,8 @@ export async function GET(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  if (!getSessionForCompany(companyCode)) return unauthorizedResponse();
 
   const requests = await listEditRequestsForRestaurant(companyCode, restaurantId);
   return NextResponse.json({ requests });

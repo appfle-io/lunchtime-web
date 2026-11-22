@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeCompanyCode, isValidCompanyCode } from "@/lib/company";
 import { cookies } from "next/headers";
 import {
   verifySessionToken,
@@ -17,7 +18,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "companyCode, nickname이 필요합니다." }, { status: 400 });
   }
 
-  const result = await getSecurityQuestion(companyCode, nickname);
+  const code = normalizeCompanyCode(companyCode);
+  if (!isValidCompanyCode(code)) {
+    return NextResponse.json({ error: "존재하지 않는 회사코드입니다." }, { status: 404 });
+  }
+
+  const result = await getSecurityQuestion(code, nickname);
   if (!result) {
     return NextResponse.json(
       { error: "이 계정에는 비밀번호 찾기용 질문이 설정되어 있지 않아요." },

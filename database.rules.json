@@ -1,0 +1,70 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "battles": {
+      "$cc": {
+        "lobby": {
+          ".read": "auth != null && auth.token.cc == $cc",
+          "$roomId": {
+            ".write": "auth != null && auth.token.cc == $cc && (root.child('battles').child($cc).child('rooms').child($roomId).child('players').child(auth.token.bk).exists() || !root.child('battles').child($cc).child('rooms').child($roomId).exists())",
+            "members": {
+              "$bk": {
+                ".write": "auth != null && auth.token.cc == $cc && auth.token.bk == $bk",
+                ".validate": "newData.val() === true"
+              }
+            }
+          }
+        },
+
+        "rooms": {
+          "$roomId": {
+            ".read": "auth != null && auth.token.cc == $cc",
+            ".write": "auth != null && auth.token.cc == $cc && ((!data.exists() && newData.child('hostKey').val() == auth.token.bk && newData.child('players').child(auth.token.bk).exists()) || (data.exists() && !newData.exists() && (data.child('players').child(auth.token.bk).exists() || data.child('hostKey').val() == auth.token.bk || !data.child('players').exists() || data.child('createdAt').val() < now - 43200000)))",
+
+            "players": {
+              ".write": "auth != null && auth.token.cc == $cc && newData.exists() && data.child(auth.token.bk).exists()",
+              "$bk": {
+                ".write": "auth != null && auth.token.cc == $cc && (data.parent().child(auth.token.bk).exists() || (auth.token.bk == $bk && (!newData.exists() || data.exists() || (data.parent().parent().child('status').val() == 'waiting' && (!root.child('battleSecrets').child($cc).child($roomId).exists() || root.child('battleAccess').child($cc).child($roomId).child($bk).val() == root.child('battleSecrets').child($cc).child($roomId).child('password').val())))))"
+              }
+            },
+
+            "messages": {
+              ".write": "auth != null && auth.token.cc == $cc && data.parent().child('players').child(auth.token.bk).exists()",
+              "$msgId": {
+                ".validate": "newData.child('content').isString() && newData.child('content').val().length <= 500"
+              }
+            },
+
+            "$field": {
+              ".write": "auth != null && auth.token.cc == $cc && data.parent().child('players').child(auth.token.bk).exists()"
+            }
+          }
+        }
+      }
+    },
+
+    "battleSecrets": {
+      "$cc": {
+        "$roomId": {
+          ".read": false,
+          ".write": "auth != null && auth.token.cc == $cc && ((!data.exists() && root.child('battles').child($cc).child('rooms').child($roomId).child('hostKey').val() == auth.token.bk) || (!newData.exists() && (!root.child('battles').child($cc).child('rooms').child($roomId).exists() || root.child('battles').child($cc).child('rooms').child($roomId).child('hostKey').val() == auth.token.bk)))",
+          ".validate": "newData.child('password').isString() && newData.child('password').val().length > 0 && newData.child('password').val().length <= 30"
+        }
+      }
+    },
+
+    "battleAccess": {
+      "$cc": {
+        "$roomId": {
+          "$bk": {
+            ".read": false,
+            ".write": "auth != null && auth.token.cc == $cc && auth.token.bk == $bk",
+            ".validate": "newData.isString() && newData.val() == root.child('battleSecrets').child($cc).child($roomId).child('password').val()"
+          }
+        }
+      }
+    }
+  }
+}

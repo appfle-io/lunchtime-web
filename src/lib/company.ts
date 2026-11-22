@@ -6,3 +6,9 @@
 export function normalizeCompanyCode(code: string): string {
   return code.trim().toLowerCase();
 }
+
+// 회사코드는 Firestore 문서ID / RTDB 경로에 그대로 들어가므로 경로 구분자("/")와
+// RTDB 키 금지 문자(". # $ [ ]"), 공백이 섞인 값은 거부한다.
+export function isValidCompanyCode(normalizedCode: string): boolean {
+  return /^[^\s/.#$\[\]]{1,40}$/.test(normalizedCode);
+}

@@ -576,6 +576,9 @@ export default function CompanyHome({
 
   async function handleLogout() {
     await fetch("/api/auth", { method: "DELETE" });
+    // 실시간 배틀용 Firebase 로그인도 정리 (배틀을 안 썼으면 아무 일도 안 함).
+    // firebase/auth 번들이 메인 화면 초기 로딩에 끼지 않도록 동적 import.
+    await import("@/lib/battle-auth").then((m) => m.signOutBattle()).catch(() => {});
     router.refresh();
   }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCompanyByCode } from "@/lib/company-server";
 import { addRestaurantFromCandidate } from "@/lib/restaurant-server";
 import { db } from "@/lib/firebase";
+import { getSessionForCompany, unauthorizedResponse } from "@/lib/api-session";
 
 // POST /api/restaurants
 //
@@ -19,6 +20,9 @@ export async function POST(req: Request) {
     if (!companyCode || typeof companyCode !== "string") {
       return NextResponse.json({ error: "companyCode가 필요해요." }, { status: 400 });
     }
+
+    // 식당 문서 쓰기 + 외부 수집(네이버/제로페이)을 일으키는 요청이라 같은 회사 로그인 사용자만 허용한다.
+    if (!getSessionForCompany(companyCode)) return unauthorizedResponse();
 
     if (
       !candidate ||

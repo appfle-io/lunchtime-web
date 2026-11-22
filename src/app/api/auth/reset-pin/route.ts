@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeCompanyCode, isValidCompanyCode } from "@/lib/company";
 import {
   verifyVerifyToken,
   resetPin,
@@ -21,10 +22,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "요청 본문이 올바른 JSON이 아닙니다." }, { status: 400 });
   }
 
-  const { companyCode, nickname, verifyToken, newPin } = body;
-  if (!companyCode || !nickname?.trim() || !verifyToken || !newPin) {
+  const { nickname, verifyToken, newPin } = body;
+  if (!body.companyCode || !nickname?.trim() || !verifyToken || !newPin) {
     return NextResponse.json({ error: "필요한 정보가 부족합니다." }, { status: 400 });
   }
+  const companyCode = normalizeCompanyCode(body.companyCode);
   if (!/^\d{4}$/.test(newPin)) {
     return NextResponse.json({ error: "PIN은 숫자 4자리로 입력해줘." }, { status: 400 });
   }

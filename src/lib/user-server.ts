@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { toNicknameId } from "@/lib/nickname";
+import { toNicknameId, validateNewNickname } from "@/lib/nickname";
 
 export interface CompanyUserEntry {
   nicknameId: string;
@@ -65,8 +65,9 @@ export async function changeUserNickname(
   if (!newNickname) {
     throw new Error("새 닉네임을 입력해주세요.");
   }
-  if (newNickname.length > 20) {
-    throw new Error("닉네임은 20자 이하로 입력해주세요.");
+  const invalid = validateNewNickname(newNickname);
+  if (invalid) {
+    throw new Error(invalid);
   }
   const newNicknameId = toNicknameId(newNickname);
   if (newNicknameId === oldNicknameId) {
