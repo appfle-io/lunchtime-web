@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
 import { getAvailableCategoryLabels } from "@/lib/restaurant-filters";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface RecommendResult {
   restaurant: RestaurantSummary;
@@ -237,6 +238,8 @@ export default function LunchRouletteModal({
   }, [open, companyCode]);
 
   useEffect(() => () => stopSpinInterval(), []);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

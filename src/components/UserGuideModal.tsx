@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface UserGuideModalProps {
   open: boolean;
@@ -26,13 +27,13 @@ const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: "search",
     tabLabel: "식당 탐색 및 필터",
-    title: "식당 탐색 및 스마트 필터",
+    title: "식당 탐색과 필터",
     summary: "지도 이동에 따른 실시간 목록 동기화와 상단 필터, 날씨/인기 위젯을 활용할 수 있습니다.",
     tip: "지도에서 식당 마커나 목록 카드를 클릭하면 위치로 포커스되며 상세 카드가 열립니다.",
     items: [
       {
         label: "지도 연동 주변 식당 목록",
-        description: "지도를 드래그하거나 확대/축소하면 현재 화면에 보이는 위치의 식당들만 좌측 목록에 실시간으로 표시됩니다.",
+        description: "지도를 드래그하거나 확대/축소하면 현재 화면에 보이는 위치의 식당만 목록에 표시됩니다.",
         renderPreview: () => (
           <div className="flex h-36 w-full items-center justify-between gap-3 rounded-xl border border-black/10 bg-slate-100/70 p-3.5">
             {/* 좌측 미니 리스트 */}
@@ -357,7 +358,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
     id: "calendar_favorite",
     tabLabel: "식사 기록 및 즐겨찾기",
     title: "식사 캘린더 및 즐겨찾기",
-    summary: "방문했던 식당을 캘린더에 기록하고, 단골 식당을 즐겨찾기로 모아보며 비플페이 투표에 참여할 수 있습니다.",
+    summary: "방문했던 식당을 캘린더에 기록하고, 단골 식당을 즐겨찾기로 모아보며 제로페이 투표에 참여할 수 있습니다.",
     items: [
       {
         label: "월별 식사 캘린더",
@@ -394,8 +395,8 @@ const GUIDE_SECTIONS: GuideSection[] = [
         ),
       },
       {
-        label: "즐겨찾기 (북마크) & 비플페이 투표",
-        description: "식당 카드의 하트(❤️) 버튼으로 즐겨찾기에 등록하고, '비플페이 되나요?'에서 👍/👎 투표로 결제 가능 여부를 공유합니다.",
+        label: "즐겨찾기와 제로페이 투표",
+        description: "식당 카드의 하트 버튼으로 즐겨찾기에 등록하고, 상세 화면에서 제로페이 결제 가능 여부를 투표로 알려 줄 수 있습니다.",
         renderPreview: () => (
           <div className="flex h-36 w-full flex-col justify-center gap-2 rounded-xl border border-black/10 bg-slate-50 p-3.5">
             <div className="flex items-center justify-between rounded-lg bg-white p-2 shadow-xs">
@@ -403,7 +404,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
               <span className="text-[10px] text-ink-soft">상단 즐겨찾기 필터로 조회</span>
             </div>
             <div className="flex items-center justify-between rounded-lg bg-white p-2 shadow-xs">
-              <span className="text-xs text-ink-soft">비플페이 되나요?</span>
+              <span className="text-xs text-ink-soft">제로페이 결제 되나요?</span>
               <div className="flex gap-1">
                 <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-white">
                   👍 12
@@ -469,7 +470,8 @@ const GUIDE_SECTIONS: GuideSection[] = [
 export default function UserGuideModal({ open, onClose }: UserGuideModalProps) {
   const [activeTab, setActiveTab] = useState(GUIDE_SECTIONS[0].id);
   const [selectedItemIndex, setSelectedItemIndex] = useState(0);
-  const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 
@@ -482,12 +484,12 @@ export default function UserGuideModal({ open, onClose }: UserGuideModalProps) {
   }
 
   function handleClose() {
-    onClose(dontShowAgain);
+    onClose();
   }
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in"
       onClick={(e) => {
         if (e.target === e.currentTarget) handleClose();
       }}
@@ -543,7 +545,7 @@ export default function UserGuideModal({ open, onClose }: UserGuideModalProps) {
           {/* 우측 상세 설명 패널 */}
           <div
             key={activeTab}
-            className="flex-1 overflow-y-auto p-6 animate-in fade-in-50 slide-in-from-bottom-2 duration-300 fill-mode-both"
+            className="flex-1 overflow-y-auto p-6 animate-fade-in"
           >
             {/* 섹터 제목 */}
             <div className="mb-4">
@@ -564,7 +566,7 @@ export default function UserGuideModal({ open, onClose }: UserGuideModalProps) {
               </div>
               <div
                 key={`${activeTab}-${selectedItemIndex}`}
-                className="animate-in fade-in zoom-in-95 duration-200 fill-mode-both"
+                className="animate-fade-in"
               >
                 {currentItem.renderPreview()}
               </div>
@@ -621,15 +623,7 @@ export default function UserGuideModal({ open, onClose }: UserGuideModalProps) {
 
         {/* 하단 푸터 */}
         <div className="flex items-center justify-between border-t border-black/10 bg-surface-muted/30 px-6 py-3.5">
-          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-soft select-none hover:text-ink">
-            <input
-              type="checkbox"
-              checked={dontShowAgain}
-              onChange={(e) => setDontShowAgain(e.target.checked)}
-              className="h-4 w-4 rounded border-black/20 text-ink focus:ring-ink"
-            />
-            <span>다시 보지 않기</span>
-          </label>
+          <span className="text-xs text-ink-soft">언제든 목록 위 ? 버튼으로 다시 볼 수 있어요.</span>
           <button
             onClick={handleClose}
             className="rounded-xl bg-ink px-5 py-2 text-xs font-semibold text-white transition hover:bg-black"

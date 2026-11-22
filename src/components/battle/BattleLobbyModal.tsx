@@ -7,6 +7,7 @@ import { useBattleRoom } from "@/hooks/useBattleRoom";
 import BattleRoomView from "./BattleRoomView";
 import BattleGameView from "./BattleGameView";
 import BattleResultView from "./BattleResultView";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface BattleLobbyModalProps {
   open: boolean;
@@ -80,6 +81,14 @@ function BattleLobbyContent({
 
   // 방 삭제 확인 모달 상태
   const [roomToDelete, setRoomToDelete] = useState<BattleRoomSummary | null>(null);
+
+  // Esc: 로비에서는 모달 닫기(방 안에서는 닫기 버튼이 없으므로 Esc도 막는다), 팝업은 팝업만 닫기.
+  useModalBehavior(!currentRoom, onClose);
+  useModalBehavior(isCreateModalOpen, () => {
+    if (!isCreating) setIsCreateModalOpen(false);
+  });
+  useModalBehavior(selectedRoomToJoin !== null, () => setSelectedRoomToJoin(null));
+  useModalBehavior(roomToDelete !== null, () => setRoomToDelete(null));
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

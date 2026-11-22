@@ -9,6 +9,7 @@ import {
   type EditRequestPayload,
 } from "@/lib/restaurant-edit-request";
 import { CATEGORY_LABELS } from "@/lib/restaurant-category";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface EditRequestModalProps {
   open: boolean;
@@ -47,6 +48,8 @@ export default function EditRequestModal({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

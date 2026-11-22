@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface NicknameChangeModalProps {
   open: boolean;
@@ -27,6 +28,8 @@ export default function NicknameChangeModal({
     setError(null);
     setLoading(false);
   }, [open]);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

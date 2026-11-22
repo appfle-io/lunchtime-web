@@ -1,79 +1,52 @@
 "use client";
 
 import { ReactNode, useState } from "react";
+import Icon from "./ui/Icon";
 
 interface BottomSheetProps {
   children: ReactNode;
-  title?: string;
-  // 2026-08-06 3차 신규: title과 같은 줄, 오른쪽 끝에 놓을 슬롯 - 원래 지도 좌상단에 독립된
-  // 절대좌표로 떠 있던 "{닉네임}님 · 로그아웃" 버튼을 "주변식당 있는 자리의 오른쪽 끝"으로
-  // 옮겨달라는 요청에 대응한다. 새 절대좌표를 만들지 않고 이미 안전한 title 줄에 얹는 방식.
+  // 문자열이면 기본 제목(h2)으로, 노드면 그대로 그린다 (모바일에서 제목 자리에 탭을 두는 경우).
+  title?: ReactNode;
+  // 제목 줄 오른쪽 끝 슬롯 (사용자 메뉴).
   titleRight?: ReactNode;
-  // 2026-08-06 추가: 항상 보여야 하는 버튼류(예: "오늘 뭐 먹지?", "직접 추가하기")를 위한 슬롯.
-  // title 아래·children 스크롤 영역 밖에 고정으로 렌더링된다. 예전엔 이런 버튼들을 children 맨 위에
-  // 그냥 같이 넣었는데, 그러면 리스트를 보려고 스크롤할 때 버튼들도 같이 스크롤되어 위로 사라지고,
-  // 반대로 목록이 길면 버튼까지 도달하기 위해 매번 스크롤이 필요해서 "스크롤 압박이 심하다"는
-  // 사용자 피드백을 받았다. header로 분리해서 항상 같은 자리에 고정시킨다.
+  // 제목 아래, 스크롤 영역 밖에 고정되는 슬롯 (검색/같이 정하기 등 항상 보여야 하는 버튼).
   header?: ReactNode;
 }
 
-// 모바일에서는 화면 하단에서 끌어올리는 바텀시트, 데스크톱에서는 좌상단 플로팅 카드로 보이는
-// 공용 셸 컴포넌트. "좌측 고정 패널 + 우측 지도"라는 전형적인 지도앱 틀을 벗어나기 위한 장치.
-// flex-col + overflow-hidden(바깥) + flex-1 overflow-y-auto(안쪽 스크롤 영역) 구조로,
-// 드래그 핸들/제목/header가 차지하는 높이를 제외한 나머지 공간만 스크롤 영역이 갖도록 해서
-// 콘텐츠가 카드 바깥(지도 위)으로 삐져나오지 않게 한다.
-// 2026-08-06: 데스크톱 폭을 360px -> 400px로 살짝 넓힘(사용자가 "너무 좁아서 스크롤 압박이
-// 심하다"고 피드백 - 식당 이름/주소가 잘 안 잘리게).
-// 2026-08-06 추가 키우기: "주변식당 영역이 너무 좁다"는 요청으로 모바일 접힘/펼침 높이(32vh->40vh,
-// 70vh->80vh)와 데스크톱 상하 여백(24px->16px)을 줄여서 카드 자체를 키움.
-// 2026-08-10 되돌림: "지도가 너무 가려진다"는 반대 피드백으로 모바일 접힘 높이를 40vh->28vh로
-// 다시 줄였다(펼친 상태 80vh는 그대로 - 리스트를 일부러 펼쳤을 땐 크게 보는 게 맞음). PopularWidget이
-// 이 접힌 높이 바로 위에 배치되던 값을 참조했었는데, 이제 PopularWidget 자체를 모바일에서 안 보여주기로
-// 해서(PopularWidget.tsx 참고) 그 커플링은 없어졌다 - 이 값은 이제 자유롭게 바꿔도 된다.
-// 2026-08-06 저녁: "주변식당 아래에 캘린더뷰(밥 먹은 기록)를 추가해달라"는 요청으로 한 번
-// 위/아래 절반 분할 모드를 만들었었는데, 사용자 피드백은 "주변식당은 그대로 두고 그 아래
-// 공간에 캘린더를 추가하라는 것 - 반으로 쪼개는 게 아니다"였다. 그래서 분할 모드를 되돌리고,
-// 캘린더는 RestaurantList.tsx가 children 맨 아래에 그냥 이어서 넣는 방식(단일 스크롤 영역
-// 안에서 리스트 다음에 캘린더가 나오는 것)으로 처리한다 - 이 컴포넌트 자체는 다시 원래 형태로.
-// TODO: 실제 드래그 제스처(Framer Motion)로 높이 조절, snap point(접힘/반펼침/완전펼침) 추가.
+// 모바일: 화면 아래 바텀시트(접힘/펼침 2단). 데스크톱: 왼쪽 플로팅 카드.
+// 바깥은 overflow-hidden, 안쪽 children 영역만 스크롤된다.
+// 접힘 높이는 "지도를 너무 가리지 않으면서 목록이 최소 한 줄은 보이는" 값으로 맞춘다
+// (헤더를 한 줄로 줄인 2.1.0 기준 약 33dvh에서 목록 1줄 이상).
+// TODO: 끌어올리기 제스처, 3단(접힘/반/전체) 스냅.
 export default function BottomSheet({ children, title, titleRight, header }: BottomSheetProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <section
       className={[
-        "absolute z-20 flex flex-col overflow-hidden rounded-t-xl2 bg-surface shadow-soft transition-all",
-        // 모바일: 하단 고정
+        "absolute z-20 flex flex-col overflow-hidden rounded-t-2xl bg-surface shadow-soft transition-all",
         "bottom-0 left-0 right-0",
-        expanded ? "h-[80vh]" : "h-[28vh]",
-        // 데스크톱: CompanyHome의 좌측 패널 wrapper(md:flex md:flex-col) 안에서 flex 아이템으로 동작한다.
-        // 2026-08-07: 예전엔 이 카드도 top-4/bottom-4로 고정 높이를 강제해서, 그 아래 캘린더 카드가
-        // 남는 공간을 다 채우다 보니 캘린더 내용보다 카드가 훨씬 커져 빈 여백이 생겼다. 이제 캘린더
-        // 카드(CalendarPanel)는 shrink-0(내용만큼만 차지)이고, 이 카드가 flex-1로 남는 세로 공간을
-        // 전부 흡수한다 - 그만큼 주변식당 목록이 커진다. min-h-0은 내부 가상 스크롤(react-window)
-        // 높이 계산이 flex 자식에서도 정확히 되도록 필요하다.
+        expanded ? "h-[80dvh]" : "h-[33dvh]",
+        // 데스크톱: CompanyHome의 왼쪽 컬럼 안에서 남는 세로 공간을 차지한다 (min-h-0은 가상 스크롤 높이 계산용).
         "md:static md:h-auto md:w-full md:flex-1 md:min-h-0 md:rounded-xl2",
       ].join(" ")}
     >
-      {/* 2026-08-12 변경: 예전엔 그냥 짧은 회색 바(h-1.5 w-10)만 있어서 "이게 눌리는 버튼이고
-          펼치기/접기 기능이 있다"는 게 잘 안 보였다("이렇게 되어있는데" 지적). 방향을 바로 알 수
-          있게 ▲(펼치기)/▼(접기) 화살표로 바꾼다 - 접혀있을 때는 위로 펼쳐지니 ▲, 펼쳐져 있을 때는
-          아래로 접히니 ▼로, 버튼을 눌렀을 때 실제로 일어날 움직임 방향과 화살표 방향을 맞췄다. */}
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="mx-auto mt-2 flex h-6 w-12 shrink-0 items-center justify-center rounded-full bg-black/5 text-[11px] leading-none text-ink-soft md:hidden"
-        aria-label={expanded ? "접기" : "펼치기"}
+        className="mx-auto mt-1 flex h-5 w-12 shrink-0 items-center justify-center rounded-full text-ink-soft/70 transition hover:text-ink md:hidden"
+        aria-label={expanded ? "목록 접기" : "목록 펼치기"}
+        aria-expanded={expanded}
       >
-        {expanded ? "▼" : "▲"}
+        <Icon name={expanded ? "chevronDown" : "chevronUp"} className="h-4 w-4" />
       </button>
       {(title || titleRight) && (
-        <div className="flex shrink-0 items-center justify-between gap-2 px-5 pt-3 md:pt-5">
-          {title && <h2 className="text-lg font-bold text-ink">{title}</h2>}
+        <div className="flex shrink-0 items-center justify-between gap-2 px-4 md:px-5 md:pt-5">
+          {typeof title === "string" ? <h2 className="text-lg font-bold text-ink">{title}</h2> : title}
           {titleRight}
         </div>
       )}
-      {header && <div className="shrink-0 px-5 pt-3">{header}</div>}
-      <div className="flex-1 overflow-y-auto px-5 pb-6 pt-2">{children}</div>
+      {header && <div className="shrink-0 px-4 pt-2.5 md:px-5 md:pt-3">{header}</div>}
+      <div className="flex-1 overflow-y-auto px-4 pb-3 pt-1 md:px-5 md:pb-5">{children}</div>
     </section>
   );
 }

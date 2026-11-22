@@ -144,7 +144,7 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
 
   if (step === "setup-question") {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-surface-muted px-6">
+      <main className="flex min-h-dvh flex-col items-center justify-center bg-surface-muted px-6">
         <div className="w-full max-w-sm rounded-xl2 bg-surface p-8 shadow-soft">
           <h1 className="text-2xl font-bold text-ink">거의 다 됐어요!</h1>
           <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">
@@ -209,7 +209,7 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-surface-muted px-6">
+    <main className="flex min-h-dvh flex-col items-center justify-center bg-surface-muted px-6">
       <div className="w-full max-w-sm rounded-xl2 bg-surface p-8 shadow-soft">
         <h1 className="text-2xl font-bold text-ink">밥시간</h1>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">

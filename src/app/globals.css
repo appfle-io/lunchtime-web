@@ -14,3 +14,22 @@ body {
   --z-overlay: 10;
   --z-bottomsheet: 20;
 }
+
+/* iOS Safari는 글자가 16px보다 작은 입력창에 포커스하면 화면을 자동 확대한다.
+   예전엔 화면 확대 자체를 막아서(userScalable: false) 피했는데, 접근성 때문에 확대는 허용하고
+   모바일에서만 입력창 글자를 16px로 맞춘다. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* 가로 스크롤은 되지만 스크롤바는 숨긴다 (필터 칩 줄) */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

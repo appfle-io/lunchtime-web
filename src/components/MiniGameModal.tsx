@@ -7,6 +7,7 @@ import DrawGame from "./games/DrawGame";
 import RouletteGame from "./games/RouletteGame";
 import LadderGame from "./games/LadderGame";
 import TeamSplitGame, { type MiniGameTeamDraft } from "./games/TeamSplitGame";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface CompanyUserEntry {
   nicknameId: string;
@@ -77,6 +78,8 @@ export default function MiniGameModal({
     setLeftoverMode("spread");
     setLastResult(null);
   }, [open, myNicknameId, myNickname]);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

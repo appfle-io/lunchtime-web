@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import type { RestaurantSummary } from "@/types";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface BattleRestaurantPickerModalProps {
   open: boolean;
@@ -190,6 +191,8 @@ export default function BattleRestaurantPickerModal({
     };
   }, [open, activeTab, restaurants]);
 
+  useModalBehavior(open, onClose);
+
   if (!open) return null;
 
   const handleDirectSubmit = (e: React.FormEvent) => {
@@ -330,7 +333,7 @@ export default function BattleRestaurantPickerModal({
 
             {/* 지도 위 식당 선택 카드 팝업 */}
             {selectedMapRestaurant && (
-              <div className="absolute bottom-3 left-3 right-3 rounded-2xl border border-black/10 bg-surface p-3.5 shadow-lg flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2">
+              <div className="absolute bottom-3 left-3 right-3 rounded-2xl border border-black/10 bg-surface p-3.5 shadow-lg flex items-center justify-between gap-3 animate-fade-in">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-bold text-ink text-sm sm:text-base">

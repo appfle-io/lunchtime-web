@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import type { BattleCandidate, BattleChatMessage, BattleGameMode, BattlePlayer, BattleRoomDetail } from "@/types/battle";
 import type { RestaurantSummary } from "@/types";
 import BattleRestaurantPickerModal from "./BattleRestaurantPickerModal";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface BattleRoomViewProps {
   room: BattleRoomDetail;
@@ -56,6 +57,8 @@ export default function BattleRoomView({
 
   // 방장 수동 위임 확인 모달 상태
   const [targetHostPlayer, setTargetHostPlayer] = useState<BattlePlayer | null>(null);
+  useModalBehavior(isLeaveModalOpen, () => setIsLeaveModalOpen(false));
+  useModalBehavior(targetHostPlayer !== null, () => setTargetHostPlayer(null));
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 

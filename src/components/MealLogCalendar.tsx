@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 export interface MealLogEntry {
   id: string;
@@ -287,6 +288,7 @@ function MealLogDayModal({
   const [memo, setMemo] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  useModalBehavior(true, onClose);
 
   const suggestions = useMemo(() => {
     const q = nameInput.trim().toLowerCase();

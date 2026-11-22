@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 export interface FriendEntry {
   nicknameId: string;
@@ -126,6 +127,8 @@ export default function FriendsModal({
       (f) => f.nickname.toLowerCase().includes(q) || f.memo.toLowerCase().includes(q)
     );
   }, [friends, myFriendsSearch]);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TraceStep } from "@/lib/zeropay-official";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 export interface AuditLogItem {
   storeId: string;
@@ -288,6 +289,10 @@ export default function AuditLogModal({
       alert("전체 점검 로그가 클립보드에 복사되었습니다.");
     });
   };
+
+  useModalBehavior(open, () => {
+    if (status !== "running") onClose();
+  });
 
   if (!open) return null;
 

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { RestaurantSummary } from "@/types";
+import Icon from "./ui/Icon";
 import { SPECIAL_FILTERS, getAvailableCategoryLabels, type SpecialFilterKey } from "@/lib/restaurant-filters";
 
 interface FilterBarProps {
@@ -59,9 +60,9 @@ interface FilterBarProps {
 // 체크마크(✓)까지 붙여서 "켜져 있다"는 게 색약/저채도 화면에서도 확실히 보이게 한다.
 function filterChipClassName(active: boolean) {
   return [
-    "whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition",
+    "shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition",
     active
-      ? "border-primary bg-primary text-white font-semibold shadow-sm"
+      ? "border-primary bg-primary text-white font-semibold"
       : "border-black/10 bg-surface text-ink-soft hover:border-primary/50 hover:bg-primary-light",
   ].join(" ");
 }
@@ -109,11 +110,18 @@ export default function FilterBar({
           onClick={onGoHome}
           className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-soft transition hover:bg-black"
         >
-          🏠 전체 지도로 돌아가기
+          <Icon name="home" className="h-3.5 w-3.5" />
+          전체 지도로
         </button>
       )}
 
-      <div className="pointer-events-auto flex max-w-[92vw] flex-wrap items-center justify-center gap-1.5 rounded-full bg-surface/95 px-3 py-2 shadow-soft backdrop-blur md:max-w-none">
+      <div
+        className={[
+          "pointer-events-auto flex max-w-[92vw] flex-wrap items-center justify-center gap-1.5 rounded-full bg-surface/95 px-3 py-2 shadow-soft backdrop-blur",
+          // 데스크톱: 칩이 많으면 여러 줄로 쌓여 지도를 가렸다. 보이는 지도 폭(100vw-448px) 안에서 한 줄로 두고 가로로 넘긴다.
+          "no-scrollbar md:max-w-[calc(100vw-448px-48px)] md:flex-nowrap md:justify-start md:overflow-x-auto",
+        ].join(" ")}
+      >
         {/* 제로페이는 모바일에서도 항상 보이는 필수 태그 - 나머지(카테고리/다른 특수태그)와 분리해서
             "더보기"로 접었을 때도 이것만은 계속 눌러서 켤 수 있게 한다.
             2026-08-11: 예전엔 아래 collapsible <div>가 데스크톱에서도 하나의 flex item으로 통째로
@@ -124,7 +132,6 @@ export default function FilterBar({
           onClick={() => onToggleSpecialFilter(zeroPayFilter.key)}
           className={filterChipClassName(activeSpecialFilters.has(zeroPayFilter.key))}
         >
-          {activeSpecialFilters.has(zeroPayFilter.key) && "✓ "}
           {zeroPayFilter.label}
         </button>
 
@@ -140,7 +147,7 @@ export default function FilterBar({
               {hiddenActiveCount}
             </span>
           )}
-          <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
+          <Icon name={expanded ? "chevronUp" : "chevronDown"} className="h-3 w-3" />
         </button>
 
         {/* 카테고리 + 제로페이 외 특수태그 - 모바일은 expanded일 때만, 데스크톱은 항상 보임.
@@ -157,12 +164,11 @@ export default function FilterBar({
               onClick={() => onToggleCategory(label)}
               className={filterChipClassName(activeCategory === label)}
             >
-              {activeCategory === label && "✓ "}
               {label}
             </button>
           ))}
 
-          {categoryLabels.length > 0 && <span className="mx-0.5 w-px self-stretch bg-black/10" />}
+          {categoryLabels.length > 0 && <span className="mx-0.5 w-px shrink-0 self-stretch bg-black/10" />}
 
           {restSpecialFilters.map((f) => (
             <button
@@ -170,7 +176,6 @@ export default function FilterBar({
               onClick={() => onToggleSpecialFilter(f.key)}
               className={filterChipClassName(activeSpecialFilters.has(f.key))}
             >
-              {activeSpecialFilters.has(f.key) && "✓ "}
               {f.label}
             </button>
           ))}

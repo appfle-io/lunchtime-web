@@ -38,7 +38,7 @@ export default function WeatherWidget({ weather, onRefresh, isRefreshing }: Weat
         "md:left-[calc(50%+224px)] md:right-auto md:top-6 md:-translate-x-1/2",
       ].join(" ")}
     >
-      <span className="text-sm">{isRefreshing ? "⏳" : weather.icon}</span>
+      <span className="text-sm">{weather.icon}</span>
       <span>{weather.tempC}°</span>
       <span className="text-ink-soft">{weather.condition}</span>
     </button>

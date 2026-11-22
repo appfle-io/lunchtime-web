@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import type { RestaurantSummary } from "@/types";
 import { CATEGORY_LABELS } from "@/lib/restaurant-category";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface AdminDirectEditModalProps {
   open: boolean;
@@ -78,6 +79,8 @@ export default function AdminDirectEditModal({
     );
     setError(null);
   }, [restaurant, open]);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

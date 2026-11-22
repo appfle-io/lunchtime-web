@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 export interface NotificationEntry {
   id: string;
@@ -59,6 +60,8 @@ export default function NotificationsModal({
   const unreadCount = useMemo(() => {
     return notifications.filter((n) => !n.read).length;
   }, [notifications]);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

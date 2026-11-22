@@ -20,6 +20,23 @@ const config: Config = {
           DEFAULT: "#FFFFFF",
           muted: "#F5F5F7",
         },
+        // 상태 표시용 의미 색. 배지/안내 박스는 light 배경 + dark 글자 조합으로 쓴다.
+        // emerald/amber/rose를 직접 쓰던 곳은 이 토큰으로 옮긴다.
+        success: {
+          DEFAULT: "#059669",
+          light: "#ECFDF5",
+          dark: "#065F46",
+        },
+        warning: {
+          DEFAULT: "#D97706",
+          light: "#FEF3C7",
+          dark: "#92400E",
+        },
+        danger: {
+          DEFAULT: "#E11D48",
+          light: "#FFE4E6",
+          dark: "#9F1239",
+        },
       },
       fontFamily: {
         sans: ["Pretendard", "system-ui", "sans-serif"],
@@ -29,6 +46,23 @@ const config: Config = {
       },
       boxShadow: {
         soft: "0 8px 24px -8px rgba(0,0,0,0.12)",
+        xs: "0 1px 2px 0 rgba(0,0,0,0.05)",
+      },
+      // 아래는 코드에서 이미 쓰고 있었지만 Tailwind 3 기본값에 없어 적용되지 않던 값들.
+      zIndex: {
+        60: "60",
+      },
+      backdropBlur: {
+        xs: "2px",
+      },
+      keyframes: {
+        "fade-in": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+      },
+      animation: {
+        "fade-in": "fade-in 150ms ease-out",
       },
     },
   },

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SECURITY_QUESTIONS, CUSTOM_QUESTION_OPTION } from "@/lib/security-questions";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface PinResetModalProps {
   companyCode: string;
@@ -62,6 +63,8 @@ export default function PinResetModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, fixedNickname]);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

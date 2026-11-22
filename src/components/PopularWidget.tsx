@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { RestaurantSummary } from "@/types";
 import type { PopularEntry } from "@/lib/popular-server";
+import Icon from "./ui/Icon";
 
 interface PopularWidgetProps {
   entries: PopularEntry[]; // 이미 상위 3개로 잘려서 들어옴 (2026-08-06: 로그인 1회 + 업무시간 정각에만 갱신)
@@ -44,16 +45,16 @@ export default function PopularWidget({
   return (
     <div className="hidden z-20 w-56 rounded-xl2 bg-surface/95 p-3 shadow-soft backdrop-blur md:absolute md:block md:bottom-auto md:right-6 md:top-6">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-ink-soft">🔥 실시간 인기 Top3</p>
+        <p className="text-xs font-semibold text-ink-soft">지금 많이 보는 식당</p>
         {onRefresh && (
           <button
             type="button"
             onClick={onRefresh}
             disabled={isRefreshing}
-            className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] text-ink-soft transition hover:bg-surface-muted disabled:opacity-50"
-            aria-label="인기 Top3 새로고침"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted disabled:opacity-50"
+            aria-label="새로고침"
           >
-            {isRefreshing ? "새로고침 중..." : "↻ 새로고침"}
+            <Icon name="refresh" className={isRefreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
           </button>
         )}
       </div>

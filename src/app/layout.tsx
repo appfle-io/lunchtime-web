@@ -4,8 +4,8 @@ import "./globals.css";
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // 확대를 막지 않는다(작은 글씨를 키워 볼 수 있어야 함). 입력창을 눌렀을 때 iOS가 자동 확대하는
+  // 문제는 globals.css에서 모바일 입력창 글자를 16px로 맞춰 해결한다.
 };
 
 export const metadata: Metadata = {

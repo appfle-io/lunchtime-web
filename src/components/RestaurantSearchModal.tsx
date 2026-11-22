@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface RestaurantSearchModalProps {
   open: boolean;
@@ -87,6 +88,8 @@ export default function RestaurantSearchModal({
 
     return allMatches.slice(0, MAX_RESULTS);
   }, [query, allRestaurants]);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

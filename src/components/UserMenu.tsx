@@ -48,16 +48,18 @@ export default function UserMenu({
           onClick={onOpenGuide}
           title="사용 가이드"
           aria-label="사용 가이드"
-          className="flex h-6 w-6 items-center justify-center rounded-full bg-surface-muted text-xs font-bold text-ink-soft transition hover:bg-black/10 hover:text-ink"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted text-xs font-bold text-ink-soft transition hover:bg-black/10 hover:text-ink"
         >
           ?
         </button>
       )}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="whitespace-nowrap rounded-full bg-surface-muted px-2.5 py-1 text-xs font-medium text-ink-soft transition hover:text-primary-dark"
+        className="max-w-[9rem] truncate whitespace-nowrap rounded-full bg-surface-muted px-3 py-1.5 text-xs font-medium text-ink transition hover:bg-black/[0.08]"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        {nickname}님 ▾
+        {nickname}님
       </button>
       {open && (
         <div className="absolute right-0 top-full z-10 mt-1 w-36 overflow-hidden rounded-xl border border-black/10 bg-surface shadow-soft">
@@ -69,7 +71,7 @@ export default function UserMenu({
               }}
               className="block w-full px-3 py-2 text-left text-xs font-medium text-primary-dark transition hover:bg-surface-muted"
             >
-              🛠️ 관리자 페이지
+              관리자 페이지
             </button>
           )}
           {onChangeNickname && (
@@ -90,7 +92,7 @@ export default function UserMenu({
             }}
             className="block w-full px-3 py-2 text-left text-xs text-ink transition hover:bg-surface-muted"
           >
-            비밀번호 변경
+            PIN 변경
           </button>
           {onOpenGuide && (
             <button

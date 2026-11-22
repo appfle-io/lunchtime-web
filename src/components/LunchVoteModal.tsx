@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface FriendEntry {
   nicknameId: string;
@@ -202,6 +203,8 @@ export default function LunchVoteModal({
       .filter((r) => !selectedOptions.some((o) => o.key === r.id))
       .slice(0, 15);
   }, [restaurantFilter, restaurants, selectedOptions]);
+
+  useModalBehavior(open, onClose);
 
   if (!open) return null;
 

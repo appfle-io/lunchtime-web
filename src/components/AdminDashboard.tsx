@@ -9,6 +9,7 @@ import type { RestaurantEditRequest } from "@/lib/restaurant-edit-request-server
 import Toast from "./Toast";
 import LoadingOverlay from "./LoadingOverlay";
 import AuditLogModal from "./AuditLogModal";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 interface AdminDashboardProps {
   companyCode: string;
@@ -81,6 +82,7 @@ export default function AdminDashboard({
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
   const detailRestaurant = useMemo(() => rows.find((r) => r.id === detailId) ?? null, [rows, detailId]);
+  useModalBehavior(detailRestaurant !== null, () => setDetailId(null));
 
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase().replace(/\s/g, "");
@@ -465,7 +467,7 @@ export default function AdminDashboard({
   }
 
   return (
-    <main className="min-h-screen bg-surface-muted px-3 py-6 sm:px-6">
+    <main className="min-h-dvh bg-surface-muted px-3 py-6 sm:px-6">
       <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>

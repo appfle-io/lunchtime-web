@@ -32,7 +32,7 @@ export default function CompanyEntryPage() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-6">
+    <main className="flex min-h-dvh flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm rounded-xl2 bg-surface p-8 shadow-soft">
         <h1 className="text-2xl font-bold text-ink">밥시간</h1>
         <p className="mt-1 text-sm text-ink-soft">오늘 뭐 먹지? 회사코드로 시작해보세요.</p>

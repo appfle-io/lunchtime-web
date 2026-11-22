@@ -1,25 +1,36 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
+import Icon from "./ui/Icon";
 
 interface CalendarPanelProps {
   children: ReactNode;
 }
 
-// 2026-08-06 심야 신규: "주변 식당 카드 바로 아래 빈 공간(파란 박스)에 캘린더를 새 카드로 노출해달라"는
-// 요청에 대응하는 데스크톱 전용 카드.
-// 2026-08-07 수정: 예전엔 top-[calc(40vh+2rem)]~bottom-4로 남는 세로 공간을 전부 이 카드가
-// 강제로 채우게 해서, 캘린더 실제 내용(달력 그리드)보다 카드가 훨씬 커져 카드 안쪽에 큰 빈
-// 여백이 생기는 문제가 있었다("왼쪽 캘린더 여백이 너무 심하다" 피드백). 이제 이 카드는
-// CompanyHome의 좌측 패널 wrapper(md:flex md:flex-col) 안에서 shrink-0(내용 높이만큼만 차지)로
-// 동작하고, 위에 있는 주변식당 카드(BottomSheet, flex-1)가 그만큼 커진 나머지 공간을 흡수한다.
-// 모바일에서는 이 카드를 아예 그리지 않는다(hidden) - 화면이 좁아서 카드를 하나 더 띄울 공간이 없다는
-// 피드백에 따라, 모바일은 대신 RestaurantList의 바텀시트 안에 "주변식당/캘린더" 탭으로 전환해서 보여준다
-// (RestaurantList.tsx 참고). 그래서 이 컴포넌트를 실제로 마운트할지는 CompanyHome.tsx가
-// matchMedia(min-width: 768px)로 판단해서, 데스크톱일 때만 MealLogCalendar를 이 안에 넣어준다 -
-// 모바일 탭 쪽과 이 카드에 동시에 MealLogCalendar를 마운트하면 같은 데이터를 두 번 fetch하게 되므로
-// 한쪽만 마운트되게 한다.
+const STORAGE_KEY = "lt:calendarPanelOpen";
+
+// 데스크톱 전용 "밥 먹은 기록" 카드 (모바일은 RestaurantList의 캘린더 탭).
+// 펼쳐 두면 캘린더가 주변 식당 목록보다 커져서(1440x900에서 목록 1.5줄) 기본은 접어 두고,
+// 사용자가 펼친 상태는 기억한다. 접혀 있어도 내용은 마운트된 채라 다시 불러오지 않는다.
 export default function CalendarPanel({ children }: CalendarPanelProps) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      setOpen(localStorage.getItem(STORAGE_KEY) === "1");
+    } catch {}
+  }, []);
+
+  function toggle() {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+      } catch {}
+      return next;
+    });
+  }
+
   return (
     <section
       className={[
@@ -27,10 +38,19 @@ export default function CalendarPanel({ children }: CalendarPanelProps) {
         "md:flex md:static md:w-full md:shrink-0",
       ].join(" ")}
     >
-      <div className="shrink-0 px-5 pt-4">
-        <h2 className="text-base font-bold text-ink">밥 먹은 기록</h2>
-      </div>
-      <div className="flex-1 overflow-y-auto px-5 pb-4 pt-2">{children}</div>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex shrink-0 items-center justify-between px-5 py-3.5 text-left transition hover:bg-surface-muted/60"
+      >
+        <span className="flex items-center gap-2 text-base font-bold text-ink">
+          <Icon name="calendar" className="h-4 w-4 text-ink-soft" />
+          밥 먹은 기록
+        </span>
+        <Icon name={open ? "chevronUp" : "chevronDown"} className="h-4 w-4 text-ink-soft" />
+      </button>
+      <div className={open ? "flex-1 overflow-y-auto px-5 pb-4" : "hidden"}>{children}</div>
     </section>
   );
 }

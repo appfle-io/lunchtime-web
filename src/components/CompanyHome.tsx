@@ -216,22 +216,18 @@ export default function CompanyHome({
   // 사용 가이드 모달 상태.
   const [showGuide, setShowGuide] = useState(false);
 
-  // 최초 진입 시 사용 가이드 자동 노출 여부 확인
+  // 사용 가이드는 처음 들어왔을 때 한 번만 자동으로 띄운다. 다시 보려면 "?" 버튼.
+  // (예전엔 "다시 보지 않기"를 체크하지 않으면 접속할 때마다 떴다)
   useEffect(() => {
     try {
-      const dismissed = localStorage.getItem("lunchtime_guide_dismissed");
-      if (!dismissed) {
+      if (!localStorage.getItem("lunchtime_guide_dismissed")) {
         setShowGuide(true);
+        localStorage.setItem("lunchtime_guide_dismissed", "true");
       }
     } catch {}
   }, []);
 
-  function handleCloseGuide(dontShowAgain?: boolean) {
-    if (dontShowAgain) {
-      try {
-        localStorage.setItem("lunchtime_guide_dismissed", "true");
-      } catch {}
-    }
+  function handleCloseGuide() {
     setShowGuide(false);
   }
 
@@ -629,7 +625,7 @@ export default function CompanyHome({
   }
 
   return (
-    <main className="relative h-screen w-full overflow-hidden">
+    <main className="relative h-dvh w-full overflow-hidden">
       <MapView
         companyCode={companyCode}
         centerLat={centerLat}
@@ -692,6 +688,14 @@ export default function CompanyHome({
           restaurants={listRestaurants}
           hasAnyRestaurants={restaurants.length > 0}
           hasRestaurantsOutOfView={listRestaurants.length === 0 && mapAndListRestaurants.length > 0}
+          onClearFilters={
+            activeCategory !== null || activeSpecialFilters.size > 0
+              ? () => {
+                  setActiveCategory(null);
+                  setActiveSpecialFilters(new Set());
+                }
+              : undefined
+          }
           favoriteIds={favoriteIds}
           onToggleFavorite={toggleFavorite}
           onFocusRestaurant={focusRestaurant}
