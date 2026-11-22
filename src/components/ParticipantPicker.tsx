@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { MiniGameParticipant } from "@/types";
+import Icon from "./ui/Icon";
 
 interface FriendEntry {
   nicknameId: string;
@@ -100,13 +101,13 @@ export default function ParticipantPicker({
               ].join(" ")}
             >
               {p.name}
-              {p.isGuest && <span className="text-[10px]">(게스트)</span>}
+              {p.isGuest && <span className="text-xs">(게스트)</span>}
               <button
                 onClick={() => removeParticipant(p.id)}
                 aria-label="참가자 삭제"
                 className={p.isGuest ? "text-ink-soft/70 hover:text-ink-soft" : "text-white/80 hover:text-white"}
               >
-                ✕
+                <Icon name="close" className="h-3.5 w-3.5" />
               </button>
             </li>
           ))}
@@ -142,7 +143,7 @@ export default function ParticipantPicker({
 
       {friends.length > 0 && (
         <div>
-          <p className="mb-1.5 text-[11px] font-medium text-ink-soft">내 친구 중에서 빠르게 선택</p>
+          <p className="mb-1.5 text-xs font-medium text-ink-soft">내 친구 중에서 빠르게 선택</p>
           <ul className="flex flex-wrap gap-1.5">
             {friends.map((f) => (
               <li key={f.nicknameId}>

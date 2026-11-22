@@ -152,7 +152,7 @@ export default function BattleRoomView({
           {/* 게임 모드 뱃지 또는 방장 전용 모드 변경 드롭다운 */}
           {isHost && onChangeGameMode ? (
             <div className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2 py-1">
-              <span className="text-[11px] font-semibold text-primary">게임:</span>
+              <span className="text-xs font-semibold text-primary">게임:</span>
               <select
                 value={room.gameMode}
                 onChange={(e) => onChangeGameMode(e.target.value as BattleGameMode)}
@@ -227,19 +227,19 @@ export default function BattleRoomView({
                     >
                       {/* 상단: 번호 & 상태 뱃지 */}
                       <div className="flex items-center justify-between">
-                        <span className="font-mono text-[11px] font-bold text-ink-soft">{idx + 1}번 자리</span>
+                        <span className="font-mono text-xs font-bold text-ink-soft">{idx + 1}번 자리</span>
                         <div className="flex items-center gap-1">
                           {isPlayerHost && (
-                            <span className="rounded-md bg-primary px-1.5 py-0.5 text-[10px] font-bold text-white">
+                            <span className="rounded-md bg-primary px-1.5 py-0.5 text-xs font-bold text-white">
                               방장
                             </span>
                           )}
                           {player.isReady ? (
-                            <span className="rounded-md bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                            <span className="rounded-md bg-emerald-600 px-1.5 py-0.5 text-xs font-bold text-white">
                               준비 완료
                             </span>
                           ) : (
-                            <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium text-ink-soft border border-black/5">
+                            <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-xs font-medium text-ink-soft border border-black/5">
                               선택 중
                             </span>
                           )}
@@ -267,7 +267,7 @@ export default function BattleRoomView({
                             <div className="truncate font-bold text-ink text-xs sm:text-sm">
                               {player.pickedRestaurant.name}
                             </div>
-                            <div className="truncate text-[11px] text-ink-soft mt-0.5">
+                            <div className="truncate text-xs text-ink-soft mt-0.5">
                               {player.pickedRestaurant.category || "식당"}
                             </div>
                           </div>
@@ -282,7 +282,7 @@ export default function BattleRoomView({
                       {isHost && !isPlayerMe && onTransferHost && (
                         <button
                           onClick={() => setTargetHostPlayer(player)}
-                          className="mt-2 w-full rounded-lg border border-black/10 bg-surface py-1 text-[10px] font-semibold text-ink-soft hover:border-primary hover:text-primary transition"
+                          className="mt-2 w-full rounded-lg border border-black/10 bg-surface py-1 text-xs font-semibold text-ink-soft hover:border-primary hover:text-primary transition"
                         >
                           방장 권한 위임
                         </button>
@@ -296,9 +296,9 @@ export default function BattleRoomView({
                     key={`empty-${idx}`}
                     className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-black/15 bg-surface-muted/40 p-4 text-center min-h-[120px]"
                   >
-                    <span className="font-mono text-[11px] text-ink-soft font-bold">{idx + 1}번 자리</span>
+                    <span className="font-mono text-xs text-ink-soft font-bold">{idx + 1}번 자리</span>
                     <span className="text-xs sm:text-sm font-semibold text-ink-soft mt-1">빈 자리</span>
-                    <span className="text-[10px] text-ink-soft/70 mt-0.5">대기 중</span>
+                    <span className="text-xs text-ink-soft/70 mt-0.5">대기 중</span>
                   </div>
                 );
               })}
@@ -312,7 +312,7 @@ export default function BattleRoomView({
                 <span className="text-xs font-bold text-ink">
                   후보 메뉴 ({room.candidates.length}개)
                 </span>
-                <span className="text-[11px] text-ink-soft">
+                <span className="text-xs text-ink-soft">
                   클릭 시 내 대표 픽으로 설정
                 </span>
               </div>
@@ -348,10 +348,10 @@ export default function BattleRoomView({
                         >
                           <span className="font-semibold">{cand.name}</span>
                           {cand.category && (
-                            <span className="text-[10px] text-ink-soft">({cand.category})</span>
+                            <span className="text-xs text-ink-soft">({cand.category})</span>
                           )}
                           {isMyPick && (
-                            <span className="rounded bg-primary px-1 py-0.2 text-[9px] font-bold text-white">
+                            <span className="rounded bg-primary px-1 py-0.2 text-xs font-bold text-white">
                               내 픽
                             </span>
                           )}
@@ -387,7 +387,7 @@ export default function BattleRoomView({
         <div className="flex flex-col rounded-2xl border border-black/5 bg-surface md:col-span-5 overflow-hidden h-full min-h-0 shadow-xs">
           <div className="border-b border-black/5 bg-surface px-4 py-2.5 text-xs sm:text-sm font-bold text-ink flex items-center justify-between shrink-0">
             <span>실시간 대화</span>
-            <span className="text-[10px] font-medium text-ink-soft">실시간 참여 중</span>
+            <span className="text-xs font-medium text-ink-soft">실시간 참여 중</span>
           </div>
 
           {/* 채팅 메시지 목록 */}
@@ -395,7 +395,7 @@ export default function BattleRoomView({
             {messages.map((msg) => {
               if (msg.isSystem) {
                 return (
-                  <div key={msg.id} className="py-0.5 text-center text-[11px] text-ink-soft italic">
+                  <div key={msg.id} className="py-0.5 text-center text-xs text-ink-soft italic">
                     {msg.content}
                   </div>
                 );
@@ -403,7 +403,7 @@ export default function BattleRoomView({
               const isMine = msg.senderNickname === myNickname;
               return (
                 <div key={msg.id} className={`flex flex-col ${isMine ? "items-end" : "items-start"}`}>
-                  <span className="text-[10px] text-ink-soft mb-0.5 font-medium">{msg.senderNickname}</span>
+                  <span className="text-xs text-ink-soft mb-0.5 font-medium">{msg.senderNickname}</span>
                   <div
                     className={`rounded-2xl px-3.5 py-2 max-w-[85%] break-words text-xs sm:text-sm font-medium shadow-xs ${
                       isMine

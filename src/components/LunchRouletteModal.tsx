@@ -5,6 +5,7 @@ import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
 import { getAvailableCategoryLabels } from "@/lib/restaurant-filters";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface RecommendResult {
   restaurant: RestaurantSummary;
@@ -300,9 +301,9 @@ export default function LunchRouletteModal({
           <button
             onClick={onClose}
             aria-label="닫기"
-            className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 
@@ -363,7 +364,7 @@ export default function LunchRouletteModal({
                     : "border-black/10 text-ink-soft hover:border-primary/40",
                 ].join(" ")}
               >
-                <span>💚 제로페이 되는 곳만</span>
+                <span>제로페이 되는 곳만</span>
                 <span
                   className={[
                     "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition",
@@ -384,7 +385,7 @@ export default function LunchRouletteModal({
             <div className="rounded-2xl border border-black/5 bg-surface-muted/50 p-3.5">
               <div className="mb-2 flex items-baseline justify-between">
                 <p className="text-sm font-semibold text-ink">함께 먹을 사람</p>
-                <p className="text-[11px] text-ink-soft">초대 안 하면 나 혼자</p>
+                <p className="text-xs text-ink-soft">초대 안 하면 나 혼자</p>
               </div>
 
               {selectedParticipantIds.size > 0 && (
@@ -400,7 +401,7 @@ export default function LunchRouletteModal({
                         aria-label="초대 취소"
                         className="text-white/80 hover:text-white"
                       >
-                        ✕
+                        <Icon name="close" className="h-3.5 w-3.5" />
                       </button>
                     </li>
                   ))}
@@ -436,7 +437,7 @@ export default function LunchRouletteModal({
 
               {friends.length > 0 && (
                 <div className="mt-2.5 border-t border-black/5 pt-2.5">
-                  <p className="mb-1.5 text-[11px] font-medium text-ink-soft">내 친구 중에서 빠르게 선택</p>
+                  <p className="mb-1.5 text-xs font-medium text-ink-soft">내 친구 중에서 빠르게 선택</p>
                   <ul className="flex flex-wrap gap-1.5">
                     {friends.map((friend) => (
                       <li key={friend.nicknameId}>
@@ -457,7 +458,7 @@ export default function LunchRouletteModal({
                 </div>
               )}
 
-              <p className="mt-2.5 text-[11px] text-ink-soft">
+              <p className="mt-2.5 text-xs text-ink-soft">
                 초대한 사람들의 최근 방문 이력도 함께 살펴서, 다 같이 안 가본 곳 위주로 추천해요.
               </p>
             </div>

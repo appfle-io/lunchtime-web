@@ -33,7 +33,7 @@ export const EDIT_REQUEST_TYPE_LABELS: Record<EditRequestType, string> = {
   category: "카테고리가 달라요",
   menu: "메뉴/가격이 달라요",
   closedOrMoved: "폐업했어요 / 이전했어요",
-  zeroPay: "제로페이(비플식권) 여부가 달라요",
+  zeroPay: "제로페이 결제 여부가 달라요",
   discount: "제휴 할인 내용이 달라요",
   other: "기타",
 };

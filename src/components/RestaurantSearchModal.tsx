@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface RestaurantSearchModalProps {
   open: boolean;
@@ -18,7 +19,7 @@ interface RestaurantSearchModalProps {
 
 const MAX_RESULTS = 30;
 
-// 2026-08-08 신규: 돋보기(🔍) 검색 모달. 리스트를 스크롤하지 않고 이름으로 바로 찾아서, 클릭하면
+// 2026-08-08 신규: 돋보기 검색 모달. 리스트를 스크롤하지 않고 이름으로 바로 찾아서, 클릭하면
 // 그 가맹점의 상세모달을 열고 지도 포커스도 그쪽으로 옮긴다(다른 포커스 이동 경로와 동일하게
 // CompanyHome의 focusRestaurant/handleSelectRestaurant를 그대로 재사용 - MapView가 focusTarget을
 // 받으면 그 가맹점을 클러스터에서 제외하고 확대된 마커로 보여주는 로직도 자동으로 같이 적용된다).
@@ -113,9 +114,9 @@ export default function RestaurantSearchModal({
           <button
             onClick={onClose}
             aria-label="닫기"
-            className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 
@@ -155,13 +156,13 @@ export default function RestaurantSearchModal({
                       <span className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-ink">{r.name}</p>
                         {matchedMenu ? (
-                          <p className="truncate text-[11px] font-semibold text-primary-dark">
-                            🍱 메뉴: {matchedMenu}
+                          <p className="truncate text-xs font-semibold text-primary-dark">
+                            메뉴: {matchedMenu}
                           </p>
                         ) : (
                           (r.zeroPayOfficialName || r.businessName) &&
                           (r.zeroPayOfficialName !== r.name || r.businessName !== r.name) && (
-                            <p className="truncate text-[11px] text-emerald-700 font-medium">
+                            <p className="truncate text-xs text-emerald-700 font-medium">
                               {r.zeroPayOfficialName && r.zeroPayOfficialName !== r.name
                                 ? `제로페이 명칭: ${r.zeroPayOfficialName}`
                                 : r.businessName && r.businessName !== r.name
@@ -181,7 +182,7 @@ export default function RestaurantSearchModal({
                           </span>
                         )}
                         {r.isZeroPay && (
-                          <span className="whitespace-nowrap rounded-full bg-primary-light px-1.5 py-0.5 text-[10px] text-primary-dark">
+                          <span className="whitespace-nowrap rounded-full bg-primary-light px-1.5 py-0.5 text-xs text-primary-dark">
                             제로페이
                           </span>
                         )}
@@ -193,7 +194,7 @@ export default function RestaurantSearchModal({
             </ul>
           )}
           {results.length === MAX_RESULTS && (
-            <p className="mt-2 text-center text-[11px] text-ink-soft">
+            <p className="mt-2 text-center text-xs text-ink-soft">
               결과가 많아 상위 {MAX_RESULTS}개만 보여드려요. 검색어를 더 구체적으로 입력해보세요.
             </p>
           )}

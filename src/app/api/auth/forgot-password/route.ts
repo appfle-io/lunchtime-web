@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
 
   const { nickname, answer } = body;
   if (!body.companyCode || !nickname?.trim() || !answer?.trim()) {
-    return NextResponse.json({ error: "닉네임과 답변을 입력해줘." }, { status: 400 });
+    return NextResponse.json({ error: "닉네임과 답변을 입력해 주세요." }, { status: 400 });
   }
   const companyCode = normalizeCompanyCode(body.companyCode);
   if (!isValidCompanyCode(companyCode)) {
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     if (result.retryAfterSeconds) {
       const minutes = Math.ceil(result.retryAfterSeconds / 60);
       return NextResponse.json(
-        { error: `답변을 여러 번 틀려서 잠겼어요. ${minutes}분 뒤에 다시 시도해줘.` },
+        { error: `답변을 여러 번 틀려서 잠겼어요. ${minutes}분 뒤에 다시 시도해 주세요.` },
         { status: 429, headers: { "Retry-After": String(result.retryAfterSeconds) } }
       );
     }

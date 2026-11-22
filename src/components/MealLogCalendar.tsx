@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 export interface MealLogEntry {
   id: string;
@@ -180,7 +181,7 @@ export default function MealLogCalendar({
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-ink-soft">
+      <div className="grid grid-cols-7 gap-1 text-center text-xs text-ink-soft">
         {WEEKDAY_LABELS.map((label) => (
           <div key={label} className="py-1">
             {label}
@@ -327,7 +328,7 @@ function MealLogDayModal({
   async function handleSave() {
     const trimmed = nameInput.trim();
     if (!trimmed) {
-      onNotify?.("식당 이름을 입력해줘.");
+      onNotify?.("식당 이름을 입력해 주세요.");
       return;
     }
     setSaving(true);
@@ -441,9 +442,9 @@ function MealLogDayModal({
           <button
             onClick={onClose}
             aria-label="닫기"
-            className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 
@@ -470,7 +471,7 @@ function MealLogDayModal({
                       <span>{visual.emoji}</span>
                       <span className="truncate">{entry.restaurantName}</span>
                       {hasMatchingRestaurant && (
-                        <span className="text-[10px] text-primary-dark opacity-0 transition group-hover:opacity-100 font-semibold">
+                        <span className="text-xs text-primary-dark opacity-0 transition group-hover:opacity-100 font-semibold">
                           상세보기 ↗
                         </span>
                       )}
@@ -535,7 +536,7 @@ function MealLogDayModal({
                         className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-ink transition hover:bg-primary-light hover:text-primary-dark"
                       >
                         <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                        <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-ink-soft">
+                        <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-xs text-ink-soft">
                           {getCategoryVisual(r.category, r.categoryLabel, r.name).label}
                         </span>
                       </button>

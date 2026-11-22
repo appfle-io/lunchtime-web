@@ -299,11 +299,11 @@ export default function BattleRestaurantPickerModal({
                     <div className="min-w-0 pr-3">
                       <div className="flex items-center gap-2">
                         <span className="truncate font-semibold text-ink text-sm">{restaurant.name}</span>
-                        <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-[11px] text-ink-soft">
+                        <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-xs text-ink-soft">
                           {restaurant.category || "식당"}
                         </span>
                         {restaurant.isZeroPay && (
-                          <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
+                          <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
                             제로페이
                           </span>
                         )}
@@ -339,11 +339,11 @@ export default function BattleRestaurantPickerModal({
                     <span className="truncate font-bold text-ink text-sm sm:text-base">
                       {selectedMapRestaurant.name}
                     </span>
-                    <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-[11px] text-ink-soft">
+                    <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-xs text-ink-soft">
                       {selectedMapRestaurant.category || "식당"}
                     </span>
                     {selectedMapRestaurant.isZeroPay && (
-                      <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
+                      <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
                         제로페이
                       </span>
                     )}

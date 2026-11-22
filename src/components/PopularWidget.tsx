@@ -71,7 +71,7 @@ export default function PopularWidget({
               >
                 <span className="font-bold text-primary">{index + 1}</span>
                 <span className="min-w-0 flex-1 truncate text-ink">{restaurant.name}</span>
-                <span className="shrink-0 text-[10px] text-ink-soft">{entry.clickCount}회</span>
+                <span className="shrink-0 text-xs text-ink-soft">{entry.clickCount}회</span>
               </button>
             </li>
           );

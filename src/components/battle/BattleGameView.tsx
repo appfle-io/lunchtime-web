@@ -120,7 +120,7 @@ export default function BattleGameView({
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right">
-              <div className="text-[10px] text-ink-soft font-mono">남은 시간</div>
+              <div className="text-xs text-ink-soft font-mono">남은 시간</div>
               <div className="text-2xl font-black font-mono text-primary">{timeLeft}초</div>
             </div>
           </div>
@@ -167,7 +167,7 @@ export default function BattleGameView({
                         </span>
                       )}
                       {isSelected && (
-                        <span className="rounded-md bg-primary px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        <span className="rounded-md bg-primary px-1.5 py-0.5 text-xs font-bold text-white">
                           내 선택
                         </span>
                       )}
@@ -225,13 +225,13 @@ export default function BattleGameView({
               {worldcupMatch?.roundName || "결승전"}
             </span>
             {worldcupMatch?.byeCandidate && (
-              <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
+              <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-200">
                 부전승 대기: {worldcupMatch.byeCandidate.name}
               </span>
             )}
           </div>
           <div className="text-right">
-            <div className="text-[10px] text-ink-soft font-mono">남은 시간</div>
+            <div className="text-xs text-ink-soft font-mono">남은 시간</div>
             <div className="font-mono text-2xl font-black text-primary">{timeLeft}초</div>
           </div>
         </div>

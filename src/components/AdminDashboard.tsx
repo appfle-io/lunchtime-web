@@ -10,6 +10,7 @@ import Toast from "./Toast";
 import LoadingOverlay from "./LoadingOverlay";
 import AuditLogModal from "./AuditLogModal";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface AdminDashboardProps {
   companyCode: string;
@@ -471,7 +472,7 @@ export default function AdminDashboard({
       <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-ink">🛠️ 관리자 페이지</h1>
+            <h1 className="text-xl font-bold text-ink">관리자 페이지</h1>
             <p className="mt-0.5 text-sm text-ink-soft">
               {nickname}님 · {companyCode}
             </p>
@@ -503,7 +504,7 @@ export default function AdminDashboard({
                 tab === "requests" ? "bg-primary text-white" : "bg-surface text-ink-soft",
               ].join(" ")}
             >
-              문의하기 ({pendingRequests.length})
+              수정 요청 ({pendingRequests.length})
             </button>
           </div>
 
@@ -512,16 +513,16 @@ export default function AdminDashboard({
               <button
                 onClick={handleCheckZeroPayAll}
                 disabled={Boolean(auditModalType)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50 shadow-sm"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-primary-dark disabled:opacity-50"
               >
-                🛡️ 제로페이 가맹점 {tableSelectedIds.size > 0 ? `선택 점검 (${tableSelectedIds.size}개)` : "전체 점검"}
+                제로페이 {tableSelectedIds.size > 0 ? `선택 점검 (${tableSelectedIds.size}개)` : "전체 점검"}
               </button>
               <button
                 onClick={handleCheckNaverAll}
                 disabled={Boolean(auditModalType)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 bg-surface px-3.5 py-1.5 text-xs font-semibold text-ink transition hover:border-primary/40 disabled:opacity-50"
               >
-                🔄 네이버 정보 {tableSelectedIds.size > 0 ? `선택 갱신 (${tableSelectedIds.size}개)` : "전체 갱신"}
+                네이버 정보 {tableSelectedIds.size > 0 ? `선택 갱신 (${tableSelectedIds.size}개)` : "전체 갱신"}
               </button>
             </div>
           )}
@@ -534,7 +535,7 @@ export default function AdminDashboard({
               <input
                 value={searchQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
-                placeholder="🔍 이름, 주소, 메모, 메뉴 검색"
+                placeholder="이름, 주소, 메모, 메뉴 검색"
                 className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary bg-white"
               />
 
@@ -547,7 +548,7 @@ export default function AdminDashboard({
                 }}
                 className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary bg-white font-medium cursor-pointer"
               >
-                <option value="">🍽️ 카테고리: 전체보기</option>
+                <option value="">카테고리: 전체</option>
                 {CATEGORY_LABELS.map((cat) => (
                   <option key={cat} value={cat}>
                     {cat}
@@ -564,9 +565,9 @@ export default function AdminDashboard({
                 }}
                 className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary bg-white font-medium cursor-pointer"
               >
-                <option value="all">💚 제로페이: 전체보기</option>
-                <option value="Y">💚 제로페이: Y (가능만)</option>
-                <option value="N">❌ 제로페이: N (불가만)</option>
+                <option value="all">제로페이: 전체</option>
+                <option value="Y">제로페이: 가능</option>
+                <option value="N">제로페이: 불가</option>
               </select>
 
               {/* 사용여부 필터 */}
@@ -578,9 +579,9 @@ export default function AdminDashboard({
                 }}
                 className="rounded-xl border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-primary bg-white font-medium cursor-pointer"
               >
-                <option value="all">👁️ 사용여부: 전체보기</option>
-                <option value="Y">✅ 사용여부: Y (사용중)</option>
-                <option value="N">🚫 사용여부: N (미사용)</option>
+                <option value="all">사용 여부: 전체</option>
+                <option value="Y">사용 여부: 사용 중</option>
+                <option value="N">사용 여부: 숨김</option>
               </select>
             </div>
 
@@ -711,7 +712,7 @@ export default function AdminDashboard({
                               className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer shrink-0"
                             />
                             {isCompleted && (
-                              <span className="rounded bg-emerald-100 border border-emerald-300 px-1 py-0.5 text-[10px] font-bold text-emerald-800 shrink-0">
+                              <span className="rounded bg-emerald-100 border border-emerald-300 px-1 py-0.5 text-xs font-bold text-emerald-800 shrink-0">
                                 완료
                               </span>
                             )}
@@ -726,7 +727,7 @@ export default function AdminDashboard({
                           {(r.zeroPayOfficialName || r.businessName || r.adminMemo) && (
                             <div className="flex items-center gap-1 flex-wrap px-1.5 mt-0.5">
                               {(r.zeroPayOfficialName || r.businessName) && (
-                                <p className="text-[10px] text-emerald-700 truncate max-w-[180px]" title={`제로페이명: ${r.zeroPayOfficialName ?? '-'} / 사업자명: ${r.businessName ?? '-'}`}>
+                                <p className="text-xs text-emerald-700 truncate max-w-[180px]" title={`제로페이명: ${r.zeroPayOfficialName ?? '-'} / 사업자명: ${r.businessName ?? '-'}`}>
                                   {r.zeroPayOfficialName && r.zeroPayOfficialName !== r.name
                                     ? `[제로페이: ${r.zeroPayOfficialName}]`
                                     : r.businessName && r.businessName !== r.name
@@ -736,10 +737,10 @@ export default function AdminDashboard({
                               )}
                               {r.adminMemo && (
                                 <span
-                                  className="inline-flex items-center rounded bg-amber-100 border border-amber-300 px-1 py-0.5 text-[10px] font-bold text-amber-800 cursor-help shrink-0"
-                                  title={`[🔒 관리자 메모]\n${r.adminMemo}`}
+                                  className="inline-flex items-center rounded bg-amber-100 border border-amber-300 px-1 py-0.5 text-xs font-bold text-amber-800 cursor-help shrink-0"
+                                  title={`[관리자 메모]\n${r.adminMemo}`}
                                 >
-                                  📝 메모
+                                  메모
                                 </span>
                               )}
                             </div>
@@ -792,9 +793,9 @@ export default function AdminDashboard({
                             onClick={() => handleEnrichRow(r)}
                             disabled={enrichingId === r.id}
                             className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
-                            title="네이버맵 및 공식 제로페이 정보 실시간 수집"
+                            title="네이버 지도와 제로페이 공식 사이트에서 다시 조회"
                           >
-                            {enrichingId === r.id ? "수집중..." : "🔄 수동수집"}
+                            {enrichingId === r.id ? "수집 중..." : "정보 갱신"}
                           </button>
                         </td>
                         <td className="px-2 py-1.5 text-center">
@@ -854,7 +855,7 @@ export default function AdminDashboard({
 
         {tab === "requests" && (
           <section className="rounded-xl2 bg-surface p-4 shadow-soft">
-            <h2 className="text-base font-bold text-ink">📝 대기중인 수정요청 ({pendingRequests.length})</h2>
+            <h2 className="text-base font-bold text-ink">대기 중인 수정 요청 ({pendingRequests.length})</h2>
             {pendingRequests.length === 0 && (
               <p className="mt-2 text-sm text-ink-soft">대기중인 요청이 없어요.</p>
             )}
@@ -868,7 +869,7 @@ export default function AdminDashboard({
                     </span>
                   </p>
                   <p className="mt-1 text-sm text-ink-soft">{summarizeEditRequest(req.type, req.payload)}</p>
-                  {req.payload.note && <p className="mt-0.5 text-xs text-ink-soft">💬 {req.payload.note}</p>}
+                  {req.payload.note && <p className="mt-0.5 text-xs text-ink-soft">메모: {req.payload.note}</p>}
                   <p className="mt-1 text-xs text-ink-soft">{req.requestedByNickname}님이 요청함</p>
 
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -911,13 +912,13 @@ export default function AdminDashboard({
             className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-surface p-6 shadow-soft"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-ink">✏️ {detailRestaurant.name} 상세편집</h2>
+              <h2 className="text-base font-bold text-ink">{detailRestaurant.name} 상세 편집</h2>
               <button
                 onClick={() => setDetailId(null)}
                 aria-label="닫기"
-                className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
               >
-                ✕
+                <Icon name="close" className="h-4 w-4" />
               </button>
             </div>
 
@@ -926,11 +927,11 @@ export default function AdminDashboard({
                 type="button"
                 onClick={() => handleEnrichRow(detailRestaurant)}
                 disabled={enrichingId === detailRestaurant.id}
-                className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60 flex items-center justify-center gap-1.5 shadow-sm"
+                className="w-full rounded-xl border border-black/10 bg-surface px-3 py-2 text-xs font-semibold text-ink transition hover:border-primary/40 disabled:opacity-60 flex items-center justify-center gap-1.5"
               >
                 {enrichingId === detailRestaurant.id
-                  ? "🔄 네이버/제로페이 정보를 수집하고 있어요..."
-                  : "🔄 네이버/제로페이 정보 자동 불러오기"}
+                  ? "네이버·제로페이 정보를 불러오는 중..."
+                  : "네이버·제로페이 정보 다시 불러오기"}
               </button>
             </div>
 
@@ -1065,12 +1066,12 @@ export default function AdminDashboard({
               </div>
 
               <label className="flex flex-col gap-1 text-xs font-semibold text-amber-900 bg-amber-50/80 p-3.5 rounded-xl border border-amber-200 shadow-sm">
-                🔒 관리자 전용 메모 (변경 일시, 상태값, 사유 기록)
+                관리자 전용 메모 (변경 일시, 상태값, 사유)
                 <textarea
                   value={formAdminMemo}
                   onChange={(e) => setFormAdminMemo(e.target.value)}
                   rows={3}
-                  placeholder="예: [2026-08-14 12:38] isZeroPay(true➔false), isActive(true➔false / N) 변경 / 사유: 비외식 업종 가맹점 정돈"
+                  placeholder="예: [2026-08-14 12:38] isZeroPay(true→false), isActive(true→false) 변경 / 사유: 비외식 업종 가맹점 정돈"
                   className="rounded-lg border border-amber-300 px-3 py-2 text-xs text-ink outline-none focus:border-amber-500 bg-white font-sans whitespace-pre-wrap"
                 />
               </label>

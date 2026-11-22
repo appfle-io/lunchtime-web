@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RestaurantSummary } from "@/types";
 import { getCategoryVisual } from "@/lib/restaurant-category";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface FriendEntry {
   nicknameId: string;
@@ -248,7 +249,7 @@ export default function LunchVoteModal({
 
   async function handleCreateVote() {
     if (selectedOptions.length === 0) {
-      onNotify?.("메뉴(식당) 옵션을 1개 이상 골라줘.");
+      onNotify?.("식당 후보를 1개 이상 골라 주세요.");
       return;
     }
     setCreating(true);
@@ -315,9 +316,9 @@ export default function LunchVoteModal({
             <button
               onClick={onClose}
               aria-label="닫기"
-              className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
             >
-              ✕
+              <Icon name="close" className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -417,7 +418,7 @@ export default function LunchVoteModal({
             <div className="rounded-2xl border border-black/5 bg-surface-muted/50 p-3.5">
               <div className="mb-2.5 flex items-baseline justify-between">
                 <p className="text-sm font-semibold text-ink">참가자</p>
-                <p className="text-[11px] text-ink-soft">누구나 초대할 수 있어요</p>
+                <p className="text-xs text-ink-soft">누구나 초대할 수 있어요</p>
               </div>
 
               {selectedParticipantIds.size > 0 && (
@@ -433,7 +434,7 @@ export default function LunchVoteModal({
                         aria-label="참가자 제거"
                         className="text-white/80 hover:text-white"
                       >
-                        ✕
+                        <Icon name="close" className="h-3.5 w-3.5" />
                       </button>
                     </li>
                   ))}
@@ -469,7 +470,7 @@ export default function LunchVoteModal({
 
               {friends.length > 0 && (
                 <div className="mt-2.5 border-t border-black/5 pt-2.5">
-                  <p className="mb-1.5 text-[11px] font-medium text-ink-soft">내 친구 중에서 빠르게 선택</p>
+                  <p className="mb-1.5 text-xs font-medium text-ink-soft">내 친구 중에서 빠르게 선택</p>
                   <ul className="flex flex-wrap gap-1.5">
                     {friends.map((friend) => (
                       <li key={friend.nicknameId}>
@@ -504,14 +505,14 @@ export default function LunchVoteModal({
                     >
                       {option.label}
                       {option.category && (
-                        <span className="text-[10px] text-white/70">· {option.category}</span>
+                        <span className="text-xs text-white/70">· {option.category}</span>
                       )}
                       <button
                         onClick={() => removeOption(option.key)}
                         aria-label="옵션 제거"
                         className="text-white/80 hover:text-white"
                       >
-                        ✕
+                        <Icon name="close" className="h-3.5 w-3.5" />
                       </button>
                     </li>
                   ))}
@@ -544,7 +545,7 @@ export default function LunchVoteModal({
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-ink transition hover:bg-primary-light hover:text-primary-dark"
                         >
                           <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                          <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-ink-soft">
+                          <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-xs text-ink-soft">
                             {getCategoryVisual(r.category, r.categoryLabel, r.name).label}
                           </span>
                         </button>
@@ -780,7 +781,7 @@ function VoteCard({
                     <span className="shrink-0 text-xs text-ink-soft">{voters.length}명</span>
                   </button>
                   {voters.length > 0 && (
-                    <p className="mt-0.5 px-1 text-[11px] text-ink-soft">
+                    <p className="mt-0.5 px-1 text-xs text-ink-soft">
                       {voters.map((v) => v.nickname).join(", ")}
                     </p>
                   )}
@@ -791,7 +792,7 @@ function VoteCard({
 
           {/* 2026-08-11 신규: 투표 생성 이후에도 참가자 누구나 메뉴를 더 추가할 수 있게 하는 미니 폼. */}
           <div className="rounded-xl border border-dashed border-black/15 p-2.5">
-            <p className="mb-1.5 text-[11px] font-medium text-ink-soft">메뉴 추가하기</p>
+            <p className="mb-1.5 text-xs font-medium text-ink-soft">메뉴 추가하기</p>
             <div className="relative">
               <input
                 value={optionFilter}
@@ -812,7 +813,7 @@ function VoteCard({
                         className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-ink transition hover:bg-primary-light hover:text-primary-dark disabled:opacity-50"
                       >
                         <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                        <span className="shrink-0 text-[10px] text-ink-soft">+ 추가</span>
+                        <span className="shrink-0 text-xs text-ink-soft">+ 추가</span>
                       </button>
                     </li>
                   ))}
@@ -846,7 +847,7 @@ function VoteCard({
               {vote.comments.map((comment) => (
                 <li key={comment.id} className="rounded-lg bg-surface-muted p-2">
                   <p className="text-xs text-ink">{comment.content}</p>
-                  <p className="mt-0.5 text-[11px] text-ink-soft">{comment.authorNickname}</p>
+                  <p className="mt-0.5 text-xs text-ink-soft">{comment.authorNickname}</p>
                 </li>
               ))}
             </ul>

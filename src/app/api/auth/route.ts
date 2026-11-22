@@ -16,12 +16,12 @@ export async function POST(request: NextRequest) {
   const { companyCode, nickname, pin } = body;
   if (!companyCode || !nickname?.trim() || !pin) {
     return NextResponse.json(
-      { error: "회사코드, 닉네임, PIN을 모두 입력해줘." },
+      { error: "회사코드, 닉네임, PIN을 모두 입력해 주세요." },
       { status: 400 }
     );
   }
   if (!/^\d{4}$/.test(pin)) {
-    return NextResponse.json({ error: "PIN은 숫자 4자리로 입력해줘." }, { status: 400 });
+    return NextResponse.json({ error: "PIN은 숫자 4자리로 입력해 주세요." }, { status: 400 });
   }
 
   const code = normalizeCompanyCode(companyCode);
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (result.status === "locked") {
       const minutes = Math.ceil(result.retryAfterSeconds / 60);
       return NextResponse.json(
-        { error: `PIN을 여러 번 틀려서 잠겼어요. ${minutes}분 뒤에 다시 시도해줘.` },
+        { error: `PIN을 여러 번 틀려서 잠겼어요. ${minutes}분 뒤에 다시 시도해 주세요.` },
         { status: 429, headers: { "Retry-After": String(result.retryAfterSeconds) } }
       );
     }
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (err) {
     console.error("[auth] 로그인 처리 실패:", err);
-    return NextResponse.json({ error: "로그인 중 오류가 발생했어." }, { status: 500 });
+    return NextResponse.json({ error: "로그인 중 오류가 발생했어요." }, { status: 500 });
   }
 }
 

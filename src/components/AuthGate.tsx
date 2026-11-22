@@ -22,7 +22,7 @@ const REMEMBER_KEY_PREFIX = "lt_remember_nickname_";
 //   저장해서 다음에 들어올 때 미리 채워준다. 체크를 해제하면 저장된 값을 지운다.
 // - 가입(처음 보는 닉네임으로 계정이 막 만들어진 경우)에 성공하면 곧바로 앱으로 들어가지 않고,
 //   비밀번호 찾기용 질문/답변을 등록하는 화면을 한 번 보여준다("나중에 하기"로 건너뛸 수 있음).
-// - "비밀번호를 잊으셨나요?" 링크로 PinResetModal(forgot 모드)을 띄운다.
+// - "PIN을 잊으셨나요?" 링크로 PinResetModal(forgot 모드)을 띄운다.
 export default function AuthGate({ companyCode }: AuthGateProps) {
   const router = useRouter();
   const [nickname, setNickname] = useState(() => generateNicknameCandidates(1)[0]);
@@ -265,7 +265,7 @@ export default function AuthGate({ companyCode }: AuthGateProps) {
               onClick={() => setShowForgot(true)}
               className="text-xs text-ink-soft underline-offset-2 hover:text-primary-dark hover:underline"
             >
-              비밀번호를 잊으셨나요?
+              PIN을 잊으셨나요?
             </button>
           </div>
 

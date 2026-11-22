@@ -8,6 +8,7 @@ import RouletteGame from "./games/RouletteGame";
 import LadderGame from "./games/LadderGame";
 import TeamSplitGame, { type MiniGameTeamDraft } from "./games/TeamSplitGame";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface CompanyUserEntry {
   nicknameId: string;
@@ -162,8 +163,8 @@ export default function MiniGameModal({
           <h3 className="text-base font-bold text-ink">
             {step === "select" || step === "ranking" ? "미니게임" : (selectedGame?.title ?? "")}
           </h3>
-          <button onClick={onClose} aria-label="닫기" className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted">
-            ✕
+          <button onClick={onClose} aria-label="닫기" className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted">
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 

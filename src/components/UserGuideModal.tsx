@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface UserGuideModalProps {
   open: boolean;
@@ -39,27 +40,27 @@ const GUIDE_SECTIONS: GuideSection[] = [
             {/* 좌측 미니 리스트 */}
             <div className="flex h-full w-44 flex-col justify-between rounded-xl border border-black/10 bg-white p-2.5 shadow-xs">
               <div className="flex items-center justify-between border-b border-black/5 pb-1">
-                <span className="text-[11px] font-bold text-ink">주변 식당</span>
-                <span className="text-[9px] text-primary font-bold">12개</span>
+                <span className="text-xs font-bold text-ink">주변 식당</span>
+                <span className="text-xs text-primary font-bold">12개</span>
               </div>
               <div className="space-y-1">
-                <div className="rounded bg-primary-light/50 px-2 py-1 text-[10px] font-semibold text-primary-dark">
+                <div className="rounded bg-primary-light/50 px-2 py-1 text-xs font-semibold text-primary-dark">
                   1. 골목식당 (도보 3분)
                 </div>
-                <div className="rounded bg-slate-50 px-2 py-1 text-[10px] text-ink-soft">
+                <div className="rounded bg-slate-50 px-2 py-1 text-xs text-ink-soft">
                   2. 스시마을 (도보 5분)
                 </div>
               </div>
             </div>
             {/* 우측 지도 마커 그래픽 */}
             <div className="relative flex h-full flex-1 items-center justify-center rounded-xl border border-black/5 bg-slate-200/50">
-              <span className="absolute left-6 top-4 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white shadow-md animate-bounce">
+              <span className="absolute left-6 top-4 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-white shadow-md animate-bounce">
                 1
               </span>
-              <span className="absolute right-8 top-6 flex h-5 w-5 items-center justify-center rounded-full bg-ink text-[9px] font-bold text-white shadow-xs">
+              <span className="absolute right-8 top-6 flex h-5 w-5 items-center justify-center rounded-full bg-ink text-xs font-bold text-white shadow-xs">
                 2
               </span>
-              <span className="text-[10px] text-ink-soft">지도 화면 영역 동기화</span>
+              <span className="text-xs text-ink-soft">지도 화면 영역 동기화</span>
             </div>
           </div>
         ),
@@ -69,10 +70,10 @@ const GUIDE_SECTIONS: GuideSection[] = [
         description: "한식, 국밥, 일식 등 음식 카테고리와 제로페이, 도보 5분, 즐겨찾기, 회식, 최근많이찾는 필터를 조합할 수 있습니다.",
         renderPreview: () => (
           <div className="flex h-36 w-full flex-col justify-center gap-2.5 rounded-xl border border-black/10 bg-slate-50 p-4">
-            <div className="text-[11px] font-bold text-ink-soft">실제 필터바 디자인</div>
+            <div className="text-xs font-bold text-ink-soft">실제 필터바 디자인</div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="rounded-full border border-primary bg-primary px-3 py-1 text-xs font-semibold text-white shadow-xs">
-                ✓ 한식
+                한식
               </span>
               <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-ink-soft">
                 국밥
@@ -81,7 +82,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
                 일식
               </span>
               <span className="rounded-full border border-primary bg-primary px-3 py-1 text-xs font-semibold text-white shadow-xs">
-                ✓ 제로페이
+                제로페이
               </span>
               <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-ink-soft">
                 도보 5분
@@ -90,20 +91,20 @@ const GUIDE_SECTIONS: GuideSection[] = [
                 즐겨찾기
               </span>
             </div>
-            <div className="text-[10px] text-ink-soft">
-              선택된 필터는 진한 배경과 체크마크(✓)로 표시됩니다.
+            <div className="text-xs text-ink-soft">
+              선택된 필터는 진한 배경으로 표시됩니다.
             </div>
           </div>
         ),
       },
       {
-        label: "날씨 및 실시간 인기 Top3 위젯",
-        description: "지도 상단 알약형 날씨 위젯(클릭 시 새로고침)과 우측 상단의 실시간 인기 식당 랭킹 카드가 제공됩니다.",
+        label: "날씨와 많이 보는 식당",
+        description: "지도 상단 알약형 날씨 위젯(클릭 시 새로고침)과 우측 상단에 지금 많이 보는 식당 순위가 표시됩니다.",
         renderPreview: () => (
           <div className="flex h-36 w-full items-center justify-around gap-3 rounded-xl border border-black/10 bg-slate-100/60 p-3.5">
             {/* 실제 WeatherWidget 디자인 */}
             <div className="flex flex-col items-center gap-1">
-              <span className="text-[10px] font-medium text-ink-soft">지도 상단 날씨 위젯</span>
+              <span className="text-xs font-medium text-ink-soft">지도 상단 날씨 위젯</span>
               <div className="flex items-center gap-1.5 rounded-full border-2 border-primary/60 bg-white px-3 py-1.5 text-xs font-medium text-ink shadow-sm">
                 <span className="text-sm">☀️</span>
                 <span className="font-bold">24°</span>
@@ -112,20 +113,20 @@ const GUIDE_SECTIONS: GuideSection[] = [
             </div>
             {/* 실제 PopularWidget 디자인 */}
             <div className="w-48 rounded-xl border border-black/10 bg-white p-2.5 shadow-sm">
-              <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-ink-soft">
-                <span>🔥 실시간 인기 Top3</span>
+              <div className="mb-1 flex items-center justify-between text-xs font-bold text-ink-soft">
+                <span>지금 많이 보는 식당</span>
                 <span className="text-slate-400">새로고침</span>
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between rounded px-1.5 py-0.5 text-xs">
                   <span className="font-bold text-primary">1</span>
                   <span className="truncate text-ink font-medium">을지로찌개마을</span>
-                  <span className="text-[10px] text-ink-soft">42회</span>
+                  <span className="text-xs text-ink-soft">42회</span>
                 </div>
                 <div className="flex items-center justify-between rounded px-1.5 py-0.5 text-xs">
                   <span className="font-bold text-primary">2</span>
                   <span className="truncate text-ink">스시마을</span>
-                  <span className="text-[10px] text-ink-soft">28회</span>
+                  <span className="text-xs text-ink-soft">28회</span>
                 </div>
               </div>
             </div>
@@ -141,24 +142,24 @@ const GUIDE_SECTIONS: GuideSection[] = [
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-bold text-ink">을지로찌개마을</span>
-                  <span className="rounded-full bg-primary-light px-2 py-0.5 text-[9px] font-semibold text-primary-dark">
+                  <span className="rounded-full bg-primary-light px-2 py-0.5 text-xs font-semibold text-primary-dark">
                     제로페이 가능
                   </span>
                 </div>
-                <div className="mt-0.5 text-[10px] text-ink-soft">
-                  도보 약 3분 (210m) · 🕒 11:00 ~ 21:30
+                <div className="mt-0.5 text-xs text-ink-soft">
+                  한식 · 도보 3분
                 </div>
               </div>
-              <span className="text-xs">❤️</span>
+              <Icon name="heart" filled className="h-4 w-4 text-primary" />
             </div>
-            <div className="text-[10px] text-primary-dark underline">
+            <div className="text-xs text-primary-dark underline">
               네이버지도에서 보기 ↗
             </div>
             <div className="flex gap-1.5">
-              <span className="flex-1 rounded-lg bg-surface-muted py-1.5 text-center text-[10px] font-medium text-ink">
+              <span className="flex-1 rounded-lg bg-surface-muted py-1.5 text-center text-xs font-medium text-ink">
                 오늘 여기서 먹었어요
               </span>
-              <span className="flex-1 rounded-lg border border-dashed border-black/20 py-1.5 text-center text-[10px] font-medium text-ink-soft">
+              <span className="flex-1 rounded-lg border border-dashed border-black/20 py-1.5 text-center text-xs font-medium text-ink-soft">
                 정보수정요청
               </span>
             </div>
@@ -181,21 +182,21 @@ const GUIDE_SECTIONS: GuideSection[] = [
           <div className="flex h-36 w-full flex-col justify-between rounded-xl border border-black/10 bg-slate-50 p-3.5">
             <div className="flex items-center justify-between text-xs font-bold text-ink">
               <span>오늘 뭐 먹지? 조건 설정</span>
-              <span className="rounded bg-primary-light px-1.5 py-0.5 text-[10px] text-primary-dark">
+              <span className="rounded bg-primary-light px-1.5 py-0.5 text-xs text-primary-dark">
                 도보 5분 이내
               </span>
             </div>
             <div className="flex flex-wrap gap-1">
-              <span className="rounded-full bg-ink px-2 py-0.5 text-[10px] font-semibold text-white">
+              <span className="rounded-full bg-ink px-2 py-0.5 text-xs font-semibold text-white">
                 한식
               </span>
-              <span className="rounded-full bg-ink px-2 py-0.5 text-[10px] font-semibold text-white">
+              <span className="rounded-full bg-ink px-2 py-0.5 text-xs font-semibold text-white">
                 일식
               </span>
-              <span className="rounded-full border border-black/10 bg-white px-2 py-0.5 text-[10px] text-ink-soft">
+              <span className="rounded-full border border-black/10 bg-white px-2 py-0.5 text-xs text-ink-soft">
                 중식
               </span>
-              <span className="rounded-full bg-primary-light px-2 py-0.5 text-[10px] font-medium text-primary-dark">
+              <span className="rounded-full bg-primary-light px-2 py-0.5 text-xs font-medium text-primary-dark">
                 제로페이만 ON
               </span>
             </div>
@@ -212,11 +213,11 @@ const GUIDE_SECTIONS: GuideSection[] = [
           <div className="flex h-36 w-full flex-col justify-between rounded-xl border border-black/10 bg-white p-3.5">
             <div className="flex items-center justify-between text-xs font-bold text-ink">
               <span>오늘 점심 투표</span>
-              <span className="text-[10px] text-primary-dark font-semibold">5명 응답</span>
+              <span className="text-xs text-primary-dark font-semibold">5명 응답</span>
             </div>
             <div className="space-y-1.5">
               <div>
-                <div className="flex justify-between text-[11px]">
+                <div className="flex justify-between text-xs">
                   <span className="font-medium text-ink">1. 을지로찌개마을</span>
                   <span className="font-bold text-primary">3표 (60%)</span>
                 </div>
@@ -225,7 +226,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
                 </div>
               </div>
               <div>
-                <div className="flex justify-between text-[11px]">
+                <div className="flex justify-between text-xs">
                   <span className="text-ink-soft">2. 저는 따로 먹을게요</span>
                   <span className="text-ink-soft">2표 (40%)</span>
                 </div>
@@ -245,16 +246,16 @@ const GUIDE_SECTIONS: GuideSection[] = [
             <div className="text-xs font-bold text-ink">친구 목록 빠른 선택</div>
             <div className="flex flex-wrap gap-1.5">
               <span className="rounded-full border border-primary bg-primary-light px-2.5 py-1 text-xs font-semibold text-primary-dark">
-                김철수 ✓
+                김철수
               </span>
               <span className="rounded-full border border-primary bg-primary-light px-2.5 py-1 text-xs font-semibold text-primary-dark">
-                이영희 ✓
+                이영희
               </span>
               <span className="rounded-full border border-black/10 bg-white px-2.5 py-1 text-xs font-medium text-ink-soft">
                 + 새 친구 추가
               </span>
             </div>
-            <div className="text-[10px] text-ink-soft">초대된 사용자에게 실시간 알림이 전송됩니다.</div>
+            <div className="text-xs text-ink-soft">초대된 사용자에게 실시간 알림이 전송됩니다.</div>
           </div>
         ),
       },
@@ -367,28 +368,28 @@ const GUIDE_SECTIONS: GuideSection[] = [
           <div className="flex h-36 w-full flex-col justify-between rounded-xl border border-black/10 bg-white p-3">
             <div className="flex justify-between text-xs font-bold text-ink">
               <span>2026년 8월 식사 캘린더</span>
-              <span className="text-[10px] font-semibold text-primary-dark">기록 8회</span>
+              <span className="text-xs font-semibold text-primary-dark">기록 8회</span>
             </div>
             <div className="grid grid-cols-5 gap-1.5 text-center text-xs">
               <div className="rounded-lg bg-slate-50 p-1">
-                <div className="text-[9px] text-ink-soft">17(월)</div>
-                <div className="text-[10px] font-semibold text-ink">돈까스</div>
+                <div className="text-xs text-ink-soft">17(월)</div>
+                <div className="text-xs font-semibold text-ink">돈까스</div>
               </div>
               <div className="rounded-lg border border-primary/30 bg-primary-light p-1">
-                <div className="text-[9px] font-bold text-primary-dark">18(화)</div>
-                <div className="text-[10px] font-bold text-primary-dark">찌개마을</div>
+                <div className="text-xs font-bold text-primary-dark">18(화)</div>
+                <div className="text-xs font-bold text-primary-dark">찌개마을</div>
               </div>
               <div className="rounded-lg bg-slate-50 p-1">
-                <div className="text-[9px] text-ink-soft">19(수)</div>
-                <div className="text-[10px] text-ink-soft">-</div>
+                <div className="text-xs text-ink-soft">19(수)</div>
+                <div className="text-xs text-ink-soft">-</div>
               </div>
               <div className="rounded-lg bg-slate-50 p-1">
-                <div className="text-[9px] text-ink-soft">20(목)</div>
-                <div className="text-[10px] text-ink-soft">-</div>
+                <div className="text-xs text-ink-soft">20(목)</div>
+                <div className="text-xs text-ink-soft">-</div>
               </div>
               <div className="rounded-lg bg-slate-50 p-1">
-                <div className="text-[9px] text-ink-soft">21(금)</div>
-                <div className="text-[10px] text-ink-soft">-</div>
+                <div className="text-xs text-ink-soft">21(금)</div>
+                <div className="text-xs text-ink-soft">-</div>
               </div>
             </div>
           </div>
@@ -400,17 +401,17 @@ const GUIDE_SECTIONS: GuideSection[] = [
         renderPreview: () => (
           <div className="flex h-36 w-full flex-col justify-center gap-2 rounded-xl border border-black/10 bg-slate-50 p-3.5">
             <div className="flex items-center justify-between rounded-lg bg-white p-2 shadow-xs">
-              <span className="text-xs font-bold text-ink">❤️ 즐겨찾는 식당 등록됨</span>
-              <span className="text-[10px] text-ink-soft">상단 즐겨찾기 필터로 조회</span>
+              <span className="flex items-center gap-1 text-xs font-bold text-ink"><Icon name="heart" filled className="h-3.5 w-3.5 text-primary" />즐겨찾는 식당 등록됨</span>
+              <span className="text-xs text-ink-soft">상단 즐겨찾기 필터로 조회</span>
             </div>
             <div className="flex items-center justify-between rounded-lg bg-white p-2 shadow-xs">
               <span className="text-xs text-ink-soft">제로페이 결제 되나요?</span>
               <div className="flex gap-1">
                 <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-white">
-                  👍 12
+                  <span className="flex items-center gap-1"><Icon name="thumbsUp" className="h-3 w-3" />12</span>
                 </span>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-ink-soft">
-                  👎 0
+                  <span className="flex items-center gap-1"><Icon name="thumbsDown" className="h-3 w-3" />0</span>
                 </span>
               </div>
             </div>
@@ -452,14 +453,14 @@ const GUIDE_SECTIONS: GuideSection[] = [
           <div className="flex h-36 w-full flex-col justify-center gap-2 rounded-xl border border-black/10 bg-white p-4">
             <div className="flex items-center justify-between text-xs font-bold text-ink">
               <span>정보수정요청 내역</span>
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
                 대기중
               </span>
             </div>
             <div className="text-xs text-ink-soft">
               영업시간 변경: 11:30 ~ 21:00 → 11:00 ~ 21:00
             </div>
-            <div className="text-[10px] text-ink-soft">관리자 확인 후 반영됩니다.</div>
+            <div className="text-xs text-ink-soft">관리자 확인 후 반영됩니다.</div>
           </div>
         ),
       },
@@ -559,10 +560,10 @@ export default function UserGuideModal({ open, onClose }: UserGuideModalProps) {
             {/* 상단 인터랙티브 프리뷰 박스 */}
             <div className="mb-5">
               <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-ink-soft">
+                <span className="text-xs font-semibold text-ink-soft">
                   화면 예시: <strong className="text-ink">{currentItem.label}</strong>
                 </span>
-                <span className="text-[10px] text-ink-soft">아래 항목을 클릭하면 해당 화면 예시로 전환됩니다</span>
+                <span className="text-xs text-ink-soft">아래 항목을 클릭하면 해당 화면 예시로 전환됩니다</span>
               </div>
               <div
                 key={`${activeTab}-${selectedItemIndex}`}
@@ -596,7 +597,7 @@ export default function UserGuideModal({ open, onClose }: UserGuideModalProps) {
                         {item.label}
                       </div>
                       {isSelected && (
-                        <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                        <span className="rounded bg-primary px-1.5 py-0.5 text-xs font-semibold text-white">
                           예시 표시중
                         </span>
                       )}
@@ -612,7 +613,7 @@ export default function UserGuideModal({ open, onClose }: UserGuideModalProps) {
             {/* TIP 박스 */}
             {currentSection.tip && (
               <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-primary-light/60 p-3.5 text-xs text-primary-dark md:text-sm border border-primary/10">
-                <span className="shrink-0 font-bold uppercase tracking-wider text-[11px] bg-primary-dark/10 px-1.5 py-0.5 rounded">
+                <span className="shrink-0 font-bold uppercase tracking-wider text-xs bg-primary-dark/10 px-1.5 py-0.5 rounded">
                   TIP
                 </span>
                 <span className="leading-relaxed">{currentSection.tip}</span>

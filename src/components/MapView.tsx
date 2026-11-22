@@ -741,7 +741,7 @@ export function buildRestaurantMarkerIcon(
     : "";
   // 2026-08-06 신규: 최근 거꾸로엄지척이 많아져 재확인이 필요한 곳은 마커에도 작은 경고 배지를 얹는다.
   const needsReviewBadge = restaurant.isZeroPayNeedsReview
-    ? `<span class="absolute -left-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-[8px] ring-1 ring-white">⚠️</span>`
+    ? `<span class="absolute -left-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-[8px] font-bold text-white ring-1 ring-white">!</span>`
     : "";
 
   const focused = options.focused ?? false;
@@ -769,7 +769,7 @@ export function buildRestaurantMarkerIcon(
     `,
       () => ({
         html: `
-        <span class="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-ink px-2 py-1 text-[10px] font-medium text-white shadow-soft">
+        <span class="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-ink px-2 py-1 text-xs font-medium text-white shadow-soft">
           ${displayName}
         </span>
       `,
@@ -893,7 +893,7 @@ function buildClusterMarkerIcon(
             onwheel="event.stopPropagation()"
             onmousedown="event.stopPropagation()"
           >
-            <div class="sticky top-0 bg-ink py-1.5 text-[11px] font-semibold text-white/60">총 ${count}곳</div>
+            <div class="sticky top-0 bg-ink py-1.5 text-xs font-semibold text-white/60">총 ${count}곳</div>
             ${namesHtml}
           </div>
         `,

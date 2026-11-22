@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SECURITY_QUESTIONS, CUSTOM_QUESTION_OPTION } from "@/lib/security-questions";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface PinResetModalProps {
   companyCode: string;
@@ -117,7 +118,7 @@ export default function PinResetModal({
         setError(data.error ?? "질문 등록에 실패했어요.");
         return;
       }
-      onNotify?.("비밀번호 찾기용 질문을 등록했어요. 이어서 PIN을 변경해줘.");
+      onNotify?.("PIN 찾기 질문을 등록했어요. 이어서 PIN을 변경해 주세요.");
       setQuestion(finalQuestion);
       setAnswer(setupAnswer.trim());
       setStep("question");
@@ -188,14 +189,14 @@ export default function PinResetModal({
       >
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-ink">
-            {mode === "forgot" ? "비밀번호 찾기" : "비밀번호(PIN) 변경"}
+            {mode === "forgot" ? "PIN 찾기" : "PIN 변경"}
           </h3>
           <button
             onClick={onClose}
             aria-label="닫기"
-            className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 
@@ -223,8 +224,8 @@ export default function PinResetModal({
         {step === "setup-question" && mode === "forgot" && (
           <div className="flex flex-col gap-2">
             <p className="text-sm leading-relaxed text-ink-soft">
-              이 계정은 비밀번호 찾기용 질문이 설정되어 있지 않아요. PIN을 기억하고 있다면 로그인
-              후 우측 상단 닉네임 메뉴의 &ldquo;비밀번호 변경&rdquo;에서 새로 설정할 수 있어요.
+              이 계정은 PIN 찾기 질문이 설정되어 있지 않아요. PIN을 기억하고 있다면 로그인
+              후 우측 상단 닉네임 메뉴의 &ldquo;PIN 변경&rdquo;에서 새로 설정할 수 있어요.
             </p>
             <button
               type="button"
@@ -239,7 +240,7 @@ export default function PinResetModal({
         {step === "setup-question" && mode === "change" && (
           <form onSubmit={handleSetupQuestion} className="flex flex-col gap-2">
             <p className="text-xs leading-relaxed text-ink-soft">
-              아직 비밀번호 찾기용 질문이 설정되어 있지 않아요. 먼저 질문/답변을 등록하면 곧바로
+              아직 PIN 찾기 질문이 설정되어 있지 않아요. 먼저 질문/답변을 등록하면 곧바로
               PIN 변경으로 넘어가요.
             </p>
             <label className="text-xs font-medium text-ink-soft">질문 선택</label>
@@ -326,7 +327,7 @@ export default function PinResetModal({
           </form>
         )}
 
-        {step === "done" && <p className="text-sm text-ink">✅ PIN이 변경됐어요.</p>}
+        {step === "done" && <p className="text-sm text-ink">PIN을 변경했어요.</p>}
       </div>
     </div>
   );

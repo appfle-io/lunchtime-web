@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TraceStep } from "@/lib/zeropay-official";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 export interface AuditLogItem {
   storeId: string;
@@ -279,7 +280,7 @@ export default function AuditLogModal({
   const copyLogsToClipboard = () => {
     const text = logs
       .map((l, i) => {
-        const header = `[${i + 1}/${logs.length}] ${l.storeName} (${l.address}) ➔ ${l.summary}`;
+        const header = `[${i + 1}/${logs.length}] ${l.storeName} (${l.address}) → ${l.summary}`;
         const stepsText = l.steps.map((s) => `   - [${s.status.toUpperCase()}] ${s.step}: ${s.message}`).join("\n");
         return `${header}\n${stepsText}`;
       })
@@ -296,7 +297,7 @@ export default function AuditLogModal({
 
   if (!open) return null;
 
-  const title = type === "zeropay" ? "🛡️ 제로페이 가맹점 실시간 점검 로그" : "🔄 네이버 정보 실시간 갱신 로그";
+  const title = type === "zeropay" ? "제로페이 가맹점 점검" : "네이버 정보 갱신";
   const progressPercent = total > 0 ? Math.round((current / total) * 100) : 0;
 
   return (
@@ -322,7 +323,7 @@ export default function AuditLogModal({
             )}
             {status === "completed" && (
               <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-semibold text-emerald-400 border border-emerald-500/30">
-                ✓ 점검 완료 ({total}개 완료)
+                점검 완료 ({total}개)
               </span>
             )}
             {status === "error" && (
@@ -335,9 +336,9 @@ export default function AuditLogModal({
             type="button"
             onClick={onClose}
             aria-label="닫기"
-            className="rounded-full p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 
@@ -372,7 +373,7 @@ export default function AuditLogModal({
                 filterTab === "success" ? "bg-emerald-600/30 text-emerald-300 font-bold border border-emerald-500/30" : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              ✅ 매칭/갱신 ({stats.successCount})
+              확인됨 ({stats.successCount})
             </button>
             <button
               onClick={() => setFilterTab("fail")}
@@ -380,7 +381,7 @@ export default function AuditLogModal({
                 filterTab === "fail" ? "bg-zinc-800 text-zinc-300 font-bold border border-zinc-700" : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              ❌ 미지원/탈락 ({stats.failCount})
+              못 찾음 ({stats.failCount})
             </button>
             <button
               onClick={() => setFilterTab("diff")}
@@ -388,7 +389,7 @@ export default function AuditLogModal({
                 filterTab === "diff" ? "bg-amber-600/30 text-amber-300 font-bold border border-amber-500/30" : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              ⚠️ 변경 Diff ({stats.diffCount})
+              변경 제안 ({stats.diffCount})
             </button>
           </div>
 
@@ -397,20 +398,20 @@ export default function AuditLogModal({
               type="text"
               value={filterQuery}
               onChange={(e) => setFilterQuery(e.target.value)}
-              placeholder="🔍 가맹점/사유 검색"
+              placeholder="가맹점·사유 검색"
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs text-white placeholder-zinc-500 outline-none focus:border-blue-500"
             />
             <button
               onClick={expandedStoreIds.size > 0 ? collapseAll : expandAll}
-              className="rounded-lg border border-zinc-700 bg-zinc-800/80 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-700 transition"
+              className="rounded-lg border border-zinc-700 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-700 transition"
             >
               {expandedStoreIds.size > 0 ? "모두 접기" : "모두 펼치기"}
             </button>
             <button
               onClick={copyLogsToClipboard}
-              className="rounded-lg border border-zinc-700 bg-zinc-800/80 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-700 transition"
+              className="rounded-lg border border-zinc-700 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-700 transition"
             >
-              📋 로그 복사
+              로그 복사
             </button>
           </div>
         </div>
@@ -419,7 +420,7 @@ export default function AuditLogModal({
         <div ref={logListRef} className="flex-1 overflow-y-auto p-6 space-y-3 font-mono text-xs">
           {errorMessage && (
             <div className="rounded-xl border border-red-500/30 bg-red-950/40 p-4 text-red-300">
-              <p className="font-bold">⚠️ 오류 발생</p>
+              <p className="font-bold">오류 발생</p>
               <p className="mt-1 text-xs">{errorMessage}</p>
             </div>
           )}
@@ -427,7 +428,7 @@ export default function AuditLogModal({
           {logs.length === 0 && !errorMessage && (
             <div className="flex flex-col items-center justify-center py-20 text-zinc-500 space-y-3">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-500 border-t-blue-400"></div>
-              <p className="text-sm">가맹점 정보를 조회하고 점검 파이프라인을 실행하는 중입니다...</p>
+              <p className="text-sm">가맹점 정보를 조회하는 중입니다...</p>
             </div>
           )}
 
@@ -441,28 +442,28 @@ export default function AuditLogModal({
             let borderColor = "border-zinc-800/80";
             let bgCard = "bg-zinc-900/70";
             let badgeBg = "bg-zinc-800 text-zinc-400 border-zinc-700";
-            let badgeText = "ℹ️ 변경없음";
+            let badgeText = "변경 없음";
 
             if (isSuccess) {
               borderColor = "border-emerald-500/40";
               bgCard = "bg-emerald-950/20";
               badgeBg = "bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
-              badgeText = "✅ 매칭/갱신 성공";
+              badgeText = "확인됨";
             } else if (isMismatchFixed) {
               borderColor = "border-amber-500/40";
               bgCard = "bg-amber-950/20";
               badgeBg = "bg-amber-500/20 text-amber-400 border-amber-500/40";
-              badgeText = "⚠️ 오매칭 감지 및 수정";
+              badgeText = "오매칭 수정";
             } else if (isFail) {
               borderColor = "border-zinc-800";
               bgCard = "bg-zinc-900/50";
               badgeBg = "bg-zinc-800 text-zinc-400 border-zinc-700";
-              badgeText = "❌ 매칭 실패 / 미지원";
+              badgeText = "못 찾음";
             } else if (isError) {
               borderColor = "border-red-500/40";
               bgCard = "bg-red-950/20";
               badgeBg = "bg-red-500/20 text-red-400 border-red-500/40";
-              badgeText = "⚠️ 오류";
+              badgeText = "오류";
             }
 
             return (
@@ -478,8 +479,8 @@ export default function AuditLogModal({
                   <div className="flex-1 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-white text-sm">{log.storeName}</span>
-                      <span className="text-[11px] text-zinc-400">({log.address})</span>
-                      <span className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${badgeBg}`}>
+                      <span className="text-xs text-zinc-400">({log.address})</span>
+                      <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${badgeBg}`}>
                         {badgeText}
                       </span>
                     </div>
@@ -488,7 +489,7 @@ export default function AuditLogModal({
                     </p>
                     {log.diff?.confidence === "review" && (
                       <div
-                        className="mt-1.5 rounded-lg border border-sky-500/30 bg-sky-950/30 p-2 text-[11px] text-sky-200"
+                        className="mt-1.5 rounded-lg border border-sky-500/30 bg-sky-950/30 p-2 text-xs text-sky-200"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <label className="flex cursor-pointer items-center gap-2 font-semibold">
@@ -514,44 +515,47 @@ export default function AuditLogModal({
                   </div>
                   <button
                     type="button"
-                    className="rounded-lg bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-400 hover:bg-zinc-700 hover:text-white transition shrink-0"
+                    className="rounded-lg bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-400 hover:bg-zinc-700 hover:text-white transition shrink-0"
                   >
-                    {isExpanded ? "▲ 과정 접기" : "▼ 상세 과정 보기"}
+                    {isExpanded ? "과정 접기" : "과정 보기"}
                   </button>
                 </div>
 
                 {/* 아코디언 상세 단계별 로그 */}
                 {isExpanded && (
-                  <div className="mt-3.5 space-y-2 border-t border-zinc-800/80 pt-3 text-[11px]">
-                    <p className="font-semibold text-zinc-400 text-[10px] tracking-wider uppercase">
-                      🔍 탐색 및 검증 파이프라인 단계별 기록:
-                    </p>
+                  <div className="mt-3.5 space-y-2 border-t border-zinc-800/80 pt-3 text-xs">
+                    <p className="font-semibold text-zinc-400 text-xs">단계별 기록</p>
                     <div className="space-y-1.5 rounded-lg bg-zinc-950/80 p-3 border border-zinc-800">
                       {log.steps.length === 0 ? (
                         <p className="text-zinc-500 italic">기록된 상세 단계가 없습니다.</p>
                       ) : (
                         log.steps.map((step, sIdx) => {
-                          let stepIcon = "ℹ️";
+                          // 단계 결과는 이모지 대신 글자 배지로 표시 (색약 화면에서도 구분되게 글자를 함께 쓴다)
+                          let stepLabel = "정보";
+                          let stepBadge = "border-zinc-700 text-zinc-400";
                           let stepColor = "text-zinc-300";
                           if (step.status === "pass") {
-                            stepIcon = "🟢";
+                            stepLabel = "통과";
+                            stepBadge = "border-emerald-500/40 text-emerald-400";
                             stepColor = "text-emerald-400 font-medium";
                           } else if (step.status === "fail") {
-                            stepIcon = "🔴";
+                            stepLabel = "실패";
+                            stepBadge = "border-red-500/40 text-red-400";
                             stepColor = "text-red-400";
                           } else if (step.status === "skip") {
-                            stepIcon = "⚪";
+                            stepLabel = "건너뜀";
+                            stepBadge = "border-zinc-800 text-zinc-500";
                             stepColor = "text-zinc-500";
                           }
 
                           return (
                             <div key={sIdx} className="flex items-start gap-2">
-                              <span className="shrink-0">{stepIcon}</span>
+                              <span className={`w-12 shrink-0 rounded border px-1 text-center ${stepBadge}`}>{stepLabel}</span>
                               <div className="flex-1 space-y-0.5">
                                 <span className="font-semibold text-zinc-400 mr-2">[{step.step}]</span>
                                 <span className={stepColor}>{step.message}</span>
                                 {step.details && (
-                                  <pre className="mt-1 overflow-x-auto rounded bg-zinc-900 p-1.5 text-[10px] text-zinc-400 leading-tight">
+                                  <pre className="mt-1 overflow-x-auto rounded bg-zinc-900 p-1.5 text-xs text-zinc-400 leading-tight">
                                     {JSON.stringify(step.details, null, 2)}
                                   </pre>
                                 )}
@@ -562,11 +566,11 @@ export default function AuditLogModal({
                       )}
                     </div>
 
-                    {/* Diff가 있을 경우 Before/After 요약 박스 */}
+                    {/* 변경 제안이 있으면 바뀔 값 요약 */}
                     {log.diff && (
                       <div className="rounded-lg bg-amber-950/20 border border-amber-500/30 p-2.5 text-amber-200">
-                        <span className="font-bold text-[11px] block mb-1">📝 변경 예정 데이터 (Patch):</span>
-                        <pre className="overflow-x-auto text-[10px] text-amber-300 leading-tight">
+                        <span className="font-bold text-xs block mb-1">바뀔 값</span>
+                        <pre className="overflow-x-auto text-xs text-amber-300 leading-tight">
                           {JSON.stringify(log.diff.patch, null, 2)}
                         </pre>
                       </div>
@@ -588,7 +592,7 @@ export default function AuditLogModal({
                 onChange={(e) => setAutoScroll(e.target.checked)}
                 className="rounded border-zinc-700 bg-zinc-800 text-blue-500 focus:ring-0"
               />
-              실시간 자동 스크롤
+              자동 스크롤
             </label>
             <span>
               발견된 변경사항: <strong className="text-amber-400 font-bold">{diffs.length}건</strong>

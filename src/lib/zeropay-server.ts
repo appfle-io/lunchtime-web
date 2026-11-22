@@ -2,7 +2,7 @@ import { db } from "@/lib/firebase";
 import { invalidateRestaurantsCache } from "@/lib/restaurant-server";
 
 // 2026-08-06 신규: "제로페이 되나요?" 사내 투표 기능 - 사용자 제안으로, 공공데이터/크롤링 대신
-// 엄지척(👍 됨)/거꾸로엄지척(👎 재확인 필요)으로 실사용자들이 직접 확정해가는 방식을 채택.
+// 엄지척(됨)/거꾸로엄지척(재확인 필요)으로 실사용자들이 직접 확정해가는 방식을 채택.
 //
 // - companies/{code}/restaurants/{id}/zeroPayVotes/{nicknameId} : 사람마다 최신 투표 1건만 유지.
 //   같은 버튼을 다시 누르면 취소(토글), 반대 버튼을 누르면 투표를 바꾼다.

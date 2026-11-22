@@ -147,10 +147,10 @@ export async function POST(request: NextRequest) {
                   naverMatchedAddress: null,
                   naverEnrichedAt: new Date().toISOString(),
                 },
-                reason: `네이버 브랜드 상호 불일치 오매칭 (DB: '${name}' != 네이버: '${currentNaverMatchedName}') ➔ 오매칭 초기화`,
+                reason: `네이버 브랜드 상호 불일치 오매칭 (DB: '${name}' != 네이버: '${currentNaverMatchedName}') → 오매칭 초기화`,
               };
               logStatus = "mismatch_fixed";
-              logSummary = `⚠️ 기존 네이버 오매칭 감지: '${currentNaverMatchedName}' 불일치 ➔ 초기화`;
+              logSummary = `기존 네이버 오매칭 감지: '${currentNaverMatchedName}' 불일치 → 초기화`;
               steps.push({
                 step: "기존 DB 정합성 검증",
                 status: "fail",
@@ -204,7 +204,7 @@ export async function POST(request: NextRequest) {
                 reason: changesSummary.join(", "),
               };
               logStatus = "match_success";
-              logSummary = `✅ 정보 갱신 항목 발견: ${changesSummary.join(", ")}`;
+              logSummary = `정보 갱신 항목 발견: ${changesSummary.join(", ")}`;
             } else if (targetSet) {
               diffItem = {
                 id,
@@ -220,10 +220,10 @@ export async function POST(request: NextRequest) {
                 reason: "네이버 플레이스 최신 정보 동기화",
               };
               logStatus = "match_success";
-              logSummary = `✅ 네이버 플레이스 최신 정보 확인 완료 (전화번호: ${proposedPhone ?? "없음"}, 메뉴: ${proposedMenus.length}개)`;
+              logSummary = `네이버 플레이스 최신 정보 확인 완료 (전화번호: ${proposedPhone ?? "없음"}, 메뉴: ${proposedMenus.length}개)`;
             } else {
               logStatus = "unchanged";
-              logSummary = `ℹ️ 최신 정보와 일치 (변경 항목 없음)`;
+              logSummary = `최신 정보와 일치 (변경 항목 없음)`;
             }
           } catch (enrichErr) {
             logStatus = "error";

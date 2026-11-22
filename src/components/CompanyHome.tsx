@@ -204,10 +204,10 @@ export default function CompanyHome({
   const [voteFocusId, setVoteFocusId] = useState<string | null>(null);
   // 2026-08-08 신규: "오늘 뭐 먹지?" 룰렛 모달 상태.
   const [showRecommend, setShowRecommend] = useState(false);
-  // 2026-08-08 신규: 돋보기(🔍) 가맹점 검색 모달 상태.
+  // 2026-08-08 신규: 돋보기 가맹점 검색 모달 상태.
   const [showSearch, setShowSearch] = useState(false);
   const [openedFromSearch, setOpenedFromSearch] = useState(false);
-  // 2026-08-12 신규: "🎮 미니게임"(제비뽑기/룰렛/사다리타기/팀나누기) 모달 상태.
+  // 2026-08-12 신규: "미니게임"(제비뽑기/룰렛/사다리타기/팀나누기) 모달 상태.
   const [showMiniGame, setShowMiniGame] = useState(false);
   // 2026-08-06 3차 신규: 닉네임 드롭다운의 "비밀번호 변경" 버튼을 눌렀을 때 띄우는 모달 상태.
   const [showPasswordChange, setShowPasswordChange] = useState(false);
@@ -509,7 +509,7 @@ export default function CompanyHome({
         willFavorite ? next.delete(restaurant.id) : next.add(restaurant.id);
         return next;
       });
-      setToastMessage("즐겨찾기 변경에 실패했어요. 다시 시도해줘.");
+      setToastMessage("즐겨찾기 변경에 실패했어요. 다시 시도해 주세요.");
     }
   }
 
@@ -839,7 +839,7 @@ export default function CompanyHome({
         companyUsers={companyUsers}
       />
 
-      {/* 2026-08-08 신규: 돋보기(🔍) 가맹점 검색. 다른 모달들과 마찬가지로 회사 식당 전체(restaurants,
+      {/* 2026-08-08 신규: 돋보기 가맹점 검색. 다른 모달들과 마찬가지로 회사 식당 전체(restaurants,
           필터바/클러스터/뷰포트가 적용되기 전 전체)를 대상으로 한다 - 지금 화면에 뭐가
           보이는지와 무관하게 회사에 등록된 모든 가맹점을 바로바로 찾을 수 있어야 한다. 결과를
           고르면 focusRestaurant/handleSelectRestaurant를 그대로 재사용해서(다른 포커스 이동

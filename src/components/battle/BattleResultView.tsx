@@ -142,11 +142,11 @@ export default function BattleResultView({
                 >
                   <div>
                     <div className="flex items-center justify-between">
-                      <span className="rounded-md bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700 border border-purple-200">
+                      <span className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-bold text-purple-700 border border-purple-200">
                         후보 {idx + 1}
                       </span>
                       {matchedRest?.isZeroPay && (
-                        <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
+                        <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
                           제로페이
                         </span>
                       )}
@@ -154,7 +154,7 @@ export default function BattleResultView({
                     <h3 className="mt-2 text-base font-black text-ink">{cand.name}</h3>
                     <p className="text-xs text-ink-soft">{cand.category || "메뉴"} · 추천: {cand.addedByNickname}</p>
                     {matchedRest?.address && (
-                      <p className="mt-2 text-[11px] text-ink-soft line-clamp-2">{matchedRest.address}</p>
+                      <p className="mt-2 text-xs text-ink-soft line-clamp-2">{matchedRest.address}</p>
                     )}
                   </div>
                   {matchedRest?.naverPlaceUrl && (
@@ -181,7 +181,7 @@ export default function BattleResultView({
               <div className="flex items-center justify-between">
                 <span className="font-bold text-sm text-ink">{winnerRestaurant.name}</span>
                 {winnerRestaurant.isZeroPay && (
-                  <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
+                  <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
                     제로페이 가맹점
                   </span>
                 )}

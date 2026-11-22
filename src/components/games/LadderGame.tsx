@@ -289,7 +289,7 @@ export default function LadderGame({ participants, winnerCount, onFinish }: Ladd
                   title={p.name}
                   style={{ width: COL_WIDTH }}
                   className={[
-                    "shrink-0 truncate rounded-t-lg border-x border-t px-1 py-1.5 text-[11px] font-semibold transition",
+                    "shrink-0 truncate rounded-t-lg border-x border-t px-1 py-1.5 text-xs font-semibold transition",
                     revealed
                       ? revealed.isWinner
                         ? "border-primary bg-primary-light text-primary-dark"

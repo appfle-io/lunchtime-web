@@ -141,7 +141,7 @@ export async function enrichRestaurantByIdWithTrace(
         steps.push({
           step: "2. 네이버 Place 검색 및 ID 획득",
           status: "pass",
-          message: `네이버 지역 검색 ➔ Place ID '${placeId}' 발견 (검색매칭명: '${naverDetail.matchedName}', 주소: '${naverDetail.matchedAddress}')`,
+          message: `네이버 지역 검색 → Place ID '${placeId}' 발견 (검색매칭명: '${naverDetail.matchedName}', 주소: '${naverDetail.matchedAddress}')`,
           details: { placeId, matchedName: naverDetail.matchedName, matchedAddress: naverDetail.matchedAddress },
         });
       } else {
@@ -179,7 +179,7 @@ export async function enrichRestaurantByIdWithTrace(
           update.phone = fullDetails.phone;
           enrichedSummary.phone = fullDetails.phone;
           if (fullDetails.phone !== currentPhone) {
-            changesSummary.push(`전화번호: ${currentPhone ?? "(없음)"} ➔ ${fullDetails.phone}`);
+            changesSummary.push(`전화번호: ${currentPhone ?? "(없음)"} → ${fullDetails.phone}`);
           }
           collectedItems.push(`전화: ${fullDetails.phone}`);
         }
@@ -203,7 +203,7 @@ export async function enrichRestaurantByIdWithTrace(
           update.menus = fullDetails.menus;
           enrichedSummary.menusCount = fullDetails.menus.length;
           if (fullDetails.menus.length !== currentMenus.length) {
-            changesSummary.push(`메뉴: ${currentMenus.length}개 ➔ ${fullDetails.menus.length}개 수집`);
+            changesSummary.push(`메뉴: ${currentMenus.length}개 → ${fullDetails.menus.length}개 수집`);
           }
           collectedItems.push(`메뉴 ${fullDetails.menus.length}개`);
         }
@@ -269,7 +269,7 @@ export async function enrichRestaurantByIdWithTrace(
         enrichedSummary.isZeroPay = true;
         enrichedSummary.zeroPaySource = "official_zeropay_api";
         if (!currentZeroPay) {
-          changesSummary.push(`제로페이: 미지원 ➔ 지원 (공식 등록명: '${zpTrace.result.officialName}')`);
+          changesSummary.push(`제로페이: 미지원 → 지원 (공식 등록명: '${zpTrace.result.officialName}')`);
         }
       } else if (zpTrace.result.status === "review") {
         changesSummary.push(`제로페이: 관리자 확인 필요 - ${zpTrace.result.message}`);

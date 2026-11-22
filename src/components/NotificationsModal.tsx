@@ -173,7 +173,7 @@ export default function NotificationsModal({
                             {n.requestStatus === "rejected" ? "거절됐어요." : "처리됐어요."}
                           </p>
                         )}
-                        <p className="mt-1 text-[11px] text-ink-soft">{formatRelativeTime(n.createdAt)}</p>
+                        <p className="mt-1 text-xs text-ink-soft">{formatRelativeTime(n.createdAt)}</p>
                       </div>
                     </div>
 

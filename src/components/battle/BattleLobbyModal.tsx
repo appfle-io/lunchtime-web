@@ -141,19 +141,19 @@ function BattleLobbyContent({
     switch (mode) {
       case "speed-vote":
         return (
-          <span className="rounded-md bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-primary border border-primary/20">
+          <span className="rounded-md bg-orange-50 px-2 py-0.5 text-xs font-semibold text-primary border border-primary/20">
             스피드 투표
           </span>
         );
       case "worldcup":
         return (
-          <span className="rounded-md bg-purple-50 px-2 py-0.5 text-[11px] font-semibold text-purple-700 border border-purple-200">
+          <span className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700 border border-purple-200">
             메뉴 월드컵
           </span>
         );
       case "roulette":
         return (
-          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200">
+          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
             운명의 룰렛
           </span>
         );
@@ -279,7 +279,7 @@ function BattleLobbyContent({
                             <div className="flex items-center gap-1.5">
                               {getModeBadge(room.gameMode)}
                               {room.hasPassword && (
-                                <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium text-ink-soft border border-black/5">
+                                <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-xs font-medium text-ink-soft border border-black/5">
                                   비공개
                                 </span>
                               )}
@@ -299,15 +299,15 @@ function BattleLobbyContent({
                         <div className="mt-4 flex items-center justify-between border-t border-black/5 pt-3">
                           <div className="flex items-center gap-1.5">
                             {isInGame ? (
-                              <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 border border-amber-200">
+                              <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 border border-amber-200">
                                 진행 중
                               </span>
                             ) : isFull ? (
-                              <span className="rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700 border border-rose-200">
+                              <span className="rounded-md bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 border border-rose-200">
                                 정원 마감
                               </span>
                             ) : (
-                              <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200">
+                              <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
                                 입장 가능
                               </span>
                             )}
@@ -316,7 +316,7 @@ function BattleLobbyContent({
                             {isMyRoom && (
                               <button
                                 onClick={() => setRoomToDelete(room)}
-                                className="rounded-md px-2 py-0.5 text-[11px] font-medium text-rose-600 hover:bg-rose-50 transition border border-rose-200"
+                                className="rounded-md px-2 py-0.5 text-xs font-medium text-rose-600 hover:bg-rose-50 transition border border-rose-200"
                                 title="방 삭제 또는 나가기"
                               >
                                 삭제
@@ -408,7 +408,7 @@ function BattleLobbyContent({
                     }`}
                   >
                     <div className="text-xs">스피드 투표</div>
-                    <div className="text-[10px] text-ink-soft mt-0.5">15초 다수결</div>
+                    <div className="text-xs text-ink-soft mt-0.5">15초 다수결</div>
                   </button>
 
                   <button
@@ -421,7 +421,7 @@ function BattleLobbyContent({
                     }`}
                   >
                     <div className="text-xs">메뉴 월드컵</div>
-                    <div className="text-[10px] text-ink-soft mt-0.5">1:1 토너먼트</div>
+                    <div className="text-xs text-ink-soft mt-0.5">1:1 토너먼트</div>
                   </button>
 
                   <button
@@ -434,7 +434,7 @@ function BattleLobbyContent({
                     }`}
                   >
                     <div className="text-xs">운명의 룰렛</div>
-                    <div className="text-[10px] text-ink-soft mt-0.5">랜덤 추첨</div>
+                    <div className="text-xs text-ink-soft mt-0.5">랜덤 추첨</div>
                   </button>
                 </div>
               </div>
@@ -511,7 +511,7 @@ function BattleLobbyContent({
               />
 
               {joinError && (
-                <div className="text-[11px] font-medium text-rose-500">{joinError}</div>
+                <div className="text-xs font-medium text-rose-500">{joinError}</div>
               )}
 
               <div className="flex justify-end gap-2 pt-2">

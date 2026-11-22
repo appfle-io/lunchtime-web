@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     const randomPick = pool[Math.floor(Math.random() * pool.length)];
     return NextResponse.json({
       restaurant: randomPick,
-      reason: "AI 추천을 잠깐 불러오지 못해서 랜덤으로 골라봤어요! 🎲",
+      reason: "AI 추천을 불러오지 못해 무작위로 골랐어요.",
       isFallback: true,
     });
   }
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
     const randomPick = pool[Math.floor(Math.random() * pool.length)];
     return NextResponse.json({
       restaurant: randomPick,
-      reason: "AI 추천을 잠깐 불러오지 못해서 랜덤으로 골라봤어요! 🎲",
+      reason: "AI 추천을 불러오지 못해 무작위로 골랐어요.",
       isFallback: true,
     });
   }

@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
   }
   const companyCode = normalizeCompanyCode(body.companyCode);
   if (!/^\d{4}$/.test(newPin)) {
-    return NextResponse.json({ error: "PIN은 숫자 4자리로 입력해줘." }, { status: 400 });
+    return NextResponse.json({ error: "PIN은 숫자 4자리로 입력해 주세요." }, { status: 400 });
   }
 
   const payload = verifyVerifyToken(verifyToken);
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     payload.nicknameId !== nicknameId
   ) {
     return NextResponse.json(
-      { error: "인증이 만료됐거나 올바르지 않아요. 다시 시도해줘." },
+      { error: "인증이 만료됐거나 올바르지 않아요. 다시 시도해 주세요." },
       { status: 400 }
     );
   }

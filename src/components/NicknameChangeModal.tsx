@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface NicknameChangeModalProps {
   open: boolean;
@@ -67,7 +68,7 @@ export default function NicknameChangeModal({
       }
 
       onSuccess(data.nickname);
-      onNotify?.(`닉네임이 "${data.nickname}"(으)로 변경되었어요! 🎉`);
+      onNotify?.(`닉네임이 "${data.nickname}"(으)로 바꿨어요.`);
       onClose();
     } catch {
       setError("네트워크 오류로 닉네임을 변경하지 못했어요. 다시 시도해주세요.");
@@ -90,9 +91,9 @@ export default function NicknameChangeModal({
             type="button"
             onClick={onClose}
             aria-label="닫기"
-            className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 
@@ -117,8 +118,8 @@ export default function NicknameChangeModal({
             />
           </div>
 
-          <div className="rounded-xl bg-surface-muted p-2.5 text-[11px] text-ink-soft leading-relaxed">
-            💡 닉네임을 변경하면 나를 친구로 등록한 동료들의 친구 목록 및 진행 중인 투표에서도 새 닉네임으로 자동 반영됩니다.
+          <div className="rounded-xl bg-surface-muted p-2.5 text-xs text-ink-soft leading-relaxed">
+            친구 목록과 진행 중인 투표에도 새 닉네임이 반영돼요.
           </div>
 
           {error && <p className="text-xs text-primary-dark">{error}</p>}

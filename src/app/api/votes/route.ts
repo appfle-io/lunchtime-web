@@ -49,13 +49,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
   if (!options || options.length === 0) {
-    return NextResponse.json({ error: "메뉴(식당) 옵션을 1개 이상 골라줘." }, { status: 400 });
+    return NextResponse.json({ error: "식당 후보를 1개 이상 골라 주세요." }, { status: 400 });
   }
   const cleanOptions = options
     .filter((o) => o.label?.trim())
     .map((o) => ({ label: o.label!.trim(), restaurantId: o.restaurantId }));
   if (cleanOptions.length === 0) {
-    return NextResponse.json({ error: "메뉴(식당) 옵션을 1개 이상 골라줘." }, { status: 400 });
+    return NextResponse.json({ error: "식당 후보를 1개 이상 골라 주세요." }, { status: 400 });
   }
 
   const requestedParticipants = Array.from(new Set(participantNicknameIds ?? []));

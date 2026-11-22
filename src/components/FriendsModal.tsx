@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 export interface FriendEntry {
   nicknameId: string;
@@ -271,9 +272,9 @@ export default function FriendsModal({
           <button
             onClick={onClose}
             aria-label="닫기"
-            className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 

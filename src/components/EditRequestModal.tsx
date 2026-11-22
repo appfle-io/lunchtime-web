@@ -10,6 +10,7 @@ import {
 } from "@/lib/restaurant-edit-request";
 import { CATEGORY_LABELS } from "@/lib/restaurant-category";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface EditRequestModalProps {
   open: boolean;
@@ -171,13 +172,13 @@ export default function EditRequestModal({
         className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-xl2 bg-surface p-5 shadow-soft"
       >
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-ink">📝 정보 수정 요청</h3>
+          <h3 className="text-base font-bold text-ink">정보 수정 요청</h3>
           <button
             onClick={onClose}
             aria-label="닫기"
-            className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
         <p className="mt-1 text-xs text-ink-soft">{restaurantName}</p>
@@ -229,7 +230,7 @@ export default function EditRequestModal({
               onChange={(e) => setCategoryLabel(e.target.value)}
               className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
             >
-              <option value="">올바른 카테고리를 선택해줘</option>
+              <option value="">올바른 카테고리를 선택해 주세요</option>
               {CATEGORY_LABELS.map((label) => (
                 <option key={label} value={label}>
                   {label}
@@ -329,7 +330,7 @@ export default function EditRequestModal({
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder={type === "other" ? "무엇이 잘못됐는지 자유롭게 적어줘" : "덧붙일 말이 있으면 적어줘"}
+              placeholder={type === "other" ? "무엇이 잘못됐는지 적어 주세요" : "덧붙일 말이 있으면 적어 주세요"}
               rows={2}
               className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-primary"
             />

@@ -57,7 +57,7 @@ interface FilterBarProps {
 // 선택 여부와 무관하게 둘 다 옅은 배경(bg-surface-muted)에 테두리가 없어서 알약끼리도, 알약과
 // 뒷배경(bg-surface/95)도 잘 구분이 안 됐다(사용자가 스크린샷으로 "안 이쁘다"고 지적). 이제
 // 선택 안 된 알약은 옅은 테두리로 경계를 뚜렷하게 주고, 선택된 알약은 진한 배경+테두리+굵은 글씨+
-// 체크마크(✓)까지 붙여서 "켜져 있다"는 게 색약/저채도 화면에서도 확실히 보이게 한다.
+// 체크마크까지 붙여서 "켜져 있다"는 게 색약/저채도 화면에서도 확실히 보이게 한다.
 function filterChipClassName(active: boolean) {
   return [
     "shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition",

@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   const result = await getSecurityQuestion(code, nickname);
   if (!result) {
     return NextResponse.json(
-      { error: "이 계정에는 비밀번호 찾기용 질문이 설정되어 있지 않아요." },
+      { error: "이 계정에는 PIN 찾기 질문이 설정되어 있지 않아요." },
       { status: 404 }
     );
   }
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
   const { companyCode, question, answer } = body;
   if (!companyCode || !question?.trim() || !answer?.trim()) {
-    return NextResponse.json({ error: "질문과 답변을 모두 입력해줘." }, { status: 400 });
+    return NextResponse.json({ error: "질문과 답변을 모두 입력해 주세요." }, { status: 400 });
   }
 
   const sessionToken = cookies().get(SESSION_COOKIE_NAME)?.value;

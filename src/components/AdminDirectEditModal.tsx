@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import type { RestaurantSummary } from "@/types";
 import { CATEGORY_LABELS } from "@/lib/restaurant-category";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "./ui/Icon";
 
 interface AdminDirectEditModalProps {
   open: boolean;
@@ -184,9 +185,10 @@ export default function AdminDirectEditModal({
           </div>
           <button
             onClick={onClose}
-            className="rounded-full p-1 text-ink-soft hover:bg-surface-muted"
+            aria-label="닫기"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-surface-muted"
           >
-            ✕
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
 
@@ -291,7 +293,7 @@ export default function AdminDirectEditModal({
           </div>
 
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
-            <label className="block text-xs font-semibold text-emerald-900 mb-1.5">🎁 사내 제휴 혜택</label>
+            <label className="block text-xs font-semibold text-emerald-900 mb-1.5">사내 제휴 혜택</label>
             <div className="flex flex-col gap-2">
               <input
                 type="text"
@@ -342,9 +344,10 @@ export default function AdminDirectEditModal({
                   <button
                     type="button"
                     onClick={() => handleRemoveMenu(idx)}
+                    aria-label="메뉴 삭제"
                     className="text-red-500 hover:text-red-700 px-1 text-sm font-bold"
                   >
-                    ✕
+                    <Icon name="close" className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ))}
