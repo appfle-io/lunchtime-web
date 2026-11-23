@@ -38,6 +38,9 @@ interface VoteCommentEntry {
   createdAt: string;
 }
 
+// 투표함에 기본으로 보여 줄 기간 (일). 더 오래된 투표는 "지난 투표 보기"로 연다.
+const RECENT_VOTE_DAYS = 7;
+
 interface VoteSummary {
   id: string;
   title: string;
@@ -111,6 +114,7 @@ export default function LunchVoteModal({
   const [loading, setLoading] = useState(false);
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [votes, setVotes] = useState<VoteSummary[]>([]);
+  const [showOldVotes, setShowOldVotes] = useState(false);
   const [expandedVoteId, setExpandedVoteId] = useState<string | null>(null);
 
   // 투표함(목록) 탭 - 검색 + 페이징
@@ -147,6 +151,7 @@ export default function LunchVoteModal({
     loadAll();
     setVoteSearch("");
     setVotePage(0);
+    setShowOldVotes(false);
     if (focusVoteId) {
       setTab("list");
       setExpandedVoteId(focusVoteId);
@@ -157,9 +162,15 @@ export default function LunchVoteModal({
   // 알림함 "투표하러 가기"로 들어왔을 때, 그 투표가 몇 페이지째에 있는지 찾아서 페이지를 맞춰준다.
   useEffect(() => {
     if (!focusVoteId) return;
-    const idx = votes.findIndex((v) => v.id === focusVoteId);
-    if (idx === -1) return;
-    setVotePage(Math.floor(idx / VOTES_PAGE_SIZE));
+    const target = votes.find((v) => v.id === focusVoteId);
+    if (!target) return;
+    // 지난 투표면 지난 투표까지 펼친 목록 기준으로, 최근 투표면 최근 목록 기준으로 페이지를 찾는다.
+    const isOld = new Date(target.createdAt).getTime() < Date.now() - RECENT_VOTE_DAYS * 24 * 60 * 60 * 1000;
+    if (isOld) setShowOldVotes(true);
+    const list = isOld
+      ? votes
+      : votes.filter((v) => new Date(v.createdAt).getTime() >= Date.now() - RECENT_VOTE_DAYS * 24 * 60 * 60 * 1000);
+    setVotePage(Math.floor(list.findIndex((v) => v.id === focusVoteId) / VOTES_PAGE_SIZE));
   }, [votes, focusVoteId]);
 
   // voteSearch가 바뀌면 항상 첫 페이지로.
@@ -167,11 +178,22 @@ export default function LunchVoteModal({
     setVotePage(0);
   }, [voteSearch]);
 
+  // 기본은 최근 투표만 보여 준다 (몇 달 전 시험용 투표가 "오늘 점심 투표" 첫 화면을 채우고 있었다).
+  // 검색할 때와 "지난 투표 보기"를 눌렀을 때는 전체에서 찾는다.
+  const recentCutoff = Date.now() - RECENT_VOTE_DAYS * 24 * 60 * 60 * 1000;
+  const recentVotes = useMemo(
+    () => votes.filter((v) => new Date(v.createdAt).getTime() >= recentCutoff),
+    // recentCutoff는 렌더마다 바뀌지만 하루 단위 기준이라 votes가 바뀔 때만 다시 계산해도 충분하다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [votes]
+  );
+  const oldVoteCount = votes.length - recentVotes.length;
+
   const filteredVotes = useMemo(() => {
     const q = voteSearch.trim().toLowerCase();
-    if (!q) return votes;
-    return votes.filter((v) => v.title.toLowerCase().includes(q));
-  }, [votes, voteSearch]);
+    if (q) return votes.filter((v) => v.title.toLowerCase().includes(q));
+    return showOldVotes ? votes : recentVotes;
+  }, [votes, recentVotes, voteSearch, showOldVotes]);
 
   const totalVotePages = Math.max(1, Math.ceil(filteredVotes.length / VOTES_PAGE_SIZE));
   const pagedVotes = filteredVotes.slice(
@@ -298,7 +320,7 @@ export default function LunchVoteModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-ink">오늘 점심 투표</h3>
+          <h3 className="text-base font-bold text-ink">점심 투표</h3>
           <div className="flex items-center gap-1">
             {/* 2026-08-11 신규: 다른 참가자가 투표를 새로 만들거나 메뉴를 추가한 걸 반영하려면
                 모달을 닫았다 다시 열 필요 없이 이 버튼으로 목록 전체를 다시 불러올 수 있게 한다.
@@ -309,9 +331,9 @@ export default function LunchVoteModal({
               disabled={loading}
               aria-label="새로고침"
               title="새로고침"
-              className="rounded-full p-1 text-ink-soft transition hover:bg-surface-muted disabled:opacity-50"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-surface-muted disabled:opacity-50"
             >
-              ⟳
+              <Icon name="refresh" className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
             <button
               onClick={onClose}
@@ -331,7 +353,7 @@ export default function LunchVoteModal({
               tab === "list" ? "bg-primary text-white" : "bg-surface-muted text-ink-soft",
             ].join(" ")}
           >
-            투표함 {votes.length > 0 ? `(${votes.length})` : ""}
+            투표함 {recentVotes.length > 0 ? `(${recentVotes.length})` : ""}
           </button>
           <button
             onClick={() => setTab("create")}
@@ -340,7 +362,7 @@ export default function LunchVoteModal({
               tab === "create" ? "bg-primary text-white" : "bg-surface-muted text-ink-soft",
             ].join(" ")}
           >
-            + 새 투표 만들기
+            새 투표 만들기
           </button>
         </div>
 
@@ -360,7 +382,7 @@ export default function LunchVoteModal({
                 <li className="rounded-xl2 border border-black/5 p-4 text-sm text-ink-soft">
                   {voteSearch.trim()
                     ? "검색 결과가 없어요."
-                    : '아직 투표가 없어요. "+ 새 투표 만들기"로 시작해보세요.'}
+                    : `최근 ${RECENT_VOTE_DAYS}일 동안 만든 투표가 없어요. "새 투표 만들기"로 시작해 보세요.`}
                 </li>
               )}
               {pagedVotes.map((vote) => (
@@ -377,6 +399,18 @@ export default function LunchVoteModal({
                 />
               ))}
             </ul>
+
+            {!voteSearch.trim() && oldVoteCount > 0 && (
+              <button
+                onClick={() => {
+                  setShowOldVotes((v) => !v);
+                  setVotePage(0);
+                }}
+                className="self-center rounded-full px-3 py-1.5 text-xs font-medium text-ink-soft transition hover:bg-surface-muted"
+              >
+                {showOldVotes ? "지난 투표 숨기기" : `지난 투표 ${oldVoteCount}개 보기`}
+              </button>
+            )}
 
             {filteredVotes.length > VOTES_PAGE_SIZE && (
               <div className="flex items-center justify-between text-xs text-ink-soft">

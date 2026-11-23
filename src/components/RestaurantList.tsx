@@ -7,6 +7,7 @@ import BottomSheet from "./BottomSheet";
 import LoadingOverlay from "./LoadingOverlay";
 import Icon, { type IconName } from "./ui/Icon";
 import type { RestaurantSummary } from "@/types";
+import { getCategoryVisual } from "@/lib/restaurant-category";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 // 식당이 많을 때(1000+건) 전부 DOM으로 그리면 무거워서 가상 스크롤(react-window)을 쓴다.
@@ -99,6 +100,9 @@ function RestaurantRow({ index, style, data }: ListChildComponentProps<Restauran
   const r = restaurants[index];
   const isFavorite = favoriteIds.has(r.id);
   const walking = formatWalking(r);
+  // 원본 업종값("음식점>치킨,닭강정", "기타 간이")이 아니라 상세·지도와 같은 정리된 라벨을 보여 준다. "기타"는 정보가 없어 생략.
+  const categoryLabel = getCategoryVisual(r.category, r.categoryLabel, r.name).label;
+  const category = categoryLabel === "기타" ? null : categoryLabel;
 
   return (
     <li style={style as CSSProperties} className="box-border py-1">
@@ -113,8 +117,8 @@ function RestaurantRow({ index, style, data }: ListChildComponentProps<Restauran
         >
           <p className="truncate font-semibold text-ink">{r.name}</p>
           <div className="mt-1 flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-ink-soft">
-            {r.category && <span className="shrink-0">{r.category}</span>}
-            {r.category && walking && <span aria-hidden className="text-ink-soft/50">·</span>}
+            {category && <span className="shrink-0">{category}</span>}
+            {category && walking && <span aria-hidden className="text-ink-soft/50">·</span>}
             {walking && <span className="shrink-0">{walking}</span>}
             {r.isZeroPay && (
               <span className="shrink-0 rounded-full bg-primary-light px-2 py-0.5 font-medium text-primary-dark">

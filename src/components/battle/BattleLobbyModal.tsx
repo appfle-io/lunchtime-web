@@ -8,6 +8,7 @@ import BattleRoomView from "./BattleRoomView";
 import BattleGameView from "./BattleGameView";
 import BattleResultView from "./BattleResultView";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import Icon from "../ui/Icon";
 
 interface BattleLobbyModalProps {
   open: boolean;
@@ -37,6 +38,8 @@ function BattleLobbyContent({
 }: BattleLobbyModalProps) {
   const {
     isConnected,
+    authError,
+    retryAuth,
     rooms,
     currentRoom,
     messages,
@@ -212,56 +215,70 @@ function BattleLobbyContent({
         ) : (
           /* 로비 화면 (방 목록 및 방 만들기) */
           <div className="flex h-full flex-col overflow-hidden bg-surface">
-            {/* 로비 상단 헤더 */}
-            <div className="flex shrink-0 items-center justify-between border-b border-black/5 bg-surface px-5 py-4">
-              <div>
-                <div className="flex items-center gap-2.5">
-                  <h2 className="text-lg font-bold text-ink tracking-tight">같이 밥먹을 사람 찾기</h2>
-                  <div className="flex items-center gap-1.5 rounded-full bg-surface-muted px-2.5 py-0.5 text-xs text-ink-soft">
-                    <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-amber-400 animate-pulse"}`} />
-                    <span>{isConnected ? "실시간 연결" : "연결 중"}</span>
-                  </div>
+            {/* 로비 상단 헤더: 모바일에서 버튼 글자가 세로로 꺾이지 않게 제목 줄과 동작 줄을 나눈다 */}
+            <div className="shrink-0 border-b border-black/5 bg-surface px-4 py-3 sm:px-5 sm:py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-bold tracking-tight text-ink">같이 밥 먹을 사람 찾기</h2>
+                  <p className="mt-0.5 hidden text-xs text-ink-soft sm:block">
+                    동료들과 실시간으로 대화하고 투표로 점심 메뉴를 정해 보세요.
+                  </p>
                 </div>
-                <p className="mt-0.5 text-xs text-ink-soft">
-                  동료들과 실시간으로 대화하고 투표로 점심 메뉴를 결정해 보세요.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={refreshRooms}
-                  disabled={isLoadingRooms}
-                  className="rounded-xl border border-black/10 bg-surface p-2 text-ink-soft transition hover:bg-surface-muted hover:text-ink"
-                  title="목록 새로고침"
-                >
-                  <svg className={`h-4 w-4 ${isLoadingRooms ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => setIsCreateModalOpen(true)}
-                  className="flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-white transition hover:bg-primary-dark shadow-xs"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  방 만들기
-                </button>
                 <button
                   onClick={onClose}
-                  className="rounded-xl p-2 text-ink-soft hover:bg-surface-muted hover:text-ink transition"
+                  className="-mr-1 shrink-0 rounded-xl p-2 text-ink-soft transition hover:bg-surface-muted hover:text-ink"
                   aria-label="닫기"
                 >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <Icon name="close" className="h-5 w-5" />
                 </button>
+              </div>
+              <div className="mt-2.5 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-surface-muted px-2.5 py-1 text-xs text-ink-soft">
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      authError ? "bg-danger" : isConnected ? "bg-success" : "animate-pulse bg-warning"
+                    }`}
+                  />
+                  <span>{authError ? "연결 안 됨" : isConnected ? "실시간 연결" : "연결 중"}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={refreshRooms}
+                    disabled={isLoadingRooms || Boolean(authError)}
+                    className="rounded-xl border border-black/10 bg-surface p-2 text-ink-soft transition hover:bg-surface-muted hover:text-ink disabled:opacity-40"
+                    aria-label="목록 새로고침"
+                  >
+                    <Icon name="refresh" className={`h-4 w-4 ${isLoadingRooms ? "animate-spin" : ""}`} />
+                  </button>
+                  <button
+                    onClick={() => setIsCreateModalOpen(true)}
+                    disabled={Boolean(authError)}
+                    className="flex items-center gap-1.5 whitespace-nowrap rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-primary-dark disabled:opacity-40"
+                  >
+                    <Icon name="plus" className="h-4 w-4" />
+                    방 만들기
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* 방 목록 컨텐츠 */}
             <div className="flex-1 overflow-y-auto bg-surface-muted/40 p-4 sm:p-5 min-h-0">
-              {rooms.length > 0 ? (
+              {authError ? (
+                <div className="flex h-full flex-col items-center justify-center py-12 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-black/10 bg-surface text-danger shadow-xs">
+                    <Icon name="alert" className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-base font-bold text-ink">연결하지 못했어요</h3>
+                  <p className="mt-1 text-xs text-ink-soft">{authError}</p>
+                  <button
+                    onClick={retryAuth}
+                    className="mt-4 rounded-xl border border-black/10 bg-surface px-4 py-2 text-xs font-bold text-ink shadow-xs transition hover:bg-surface-muted"
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              ) : rooms.length > 0 ? (
                 <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                   {rooms.map((room) => {
                     const isFull = room.playerCount >= room.maxPlayers;
@@ -347,7 +364,7 @@ function BattleLobbyContent({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                     </svg>
                   </div>
-                  <h3 className="font-bold text-ink text-base">개설된 방이 없습니다</h3>
+                  <h3 className="font-bold text-ink text-base">열린 방이 없어요</h3>
                   <p className="mt-1 text-xs text-ink-soft">
                     방을 만들어 동료들을 초대하고 함께 점심을 결정해 보세요.
                   </p>

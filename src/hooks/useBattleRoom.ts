@@ -113,6 +113,9 @@ export function useBattleRoom({
 }: UseBattleRoomProps) {
   const myKey = useMemo(() => toBattleKey(myNicknameId), [myNicknameId]);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  // 배틀용 Firebase 로그인 실패 메시지 (사용자에게 보여 줄 문장). 실패하면 방 목록·방 만들기가 동작하지 않는다.
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authAttempt, setAuthAttempt] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
   const [rooms, setRooms] = useState<BattleRoomSummary[]>([]);
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
@@ -135,12 +138,15 @@ export function useBattleRoom({
       setIsConnected(snap.val() === true);
     });
 
+    setAuthError(null);
     ensureBattleAuth(companyCode, myNicknameId)
       .then(() => {
         if (!cancelled) setIsAuthReady(true);
       })
       .catch((err: Error) => {
-        if (!cancelled) onNotifyRef.current?.(err.message);
+        // Firebase 원문 오류("auth/configuration-not-found" 등)는 사용자에게 보여 주지 않고 콘솔에만 남긴다.
+        console.error("[battle] 실시간 배틀 로그인 실패:", err);
+        if (!cancelled) setAuthError("잠시 후 다시 시도해 주세요. 계속 안 되면 관리자에게 알려 주세요.");
       });
 
     return () => {
@@ -150,7 +156,9 @@ export function useBattleRoom({
       // 연결을 끊으면 onDisconnect로 걸어둔 내 플레이어/로비 멤버 항목도 서버에서 자동 정리된다.
       goOffline(rtdb);
     };
-  }, [companyCode, myNicknameId]);
+  }, [companyCode, myNicknameId, authAttempt]);
+
+  const retryAuth = useCallback(() => setAuthAttempt((n) => n + 1), []);
 
   // 1. 로비 목록 실시간 구독 (요약 노드만 - 한국시간 기준 당일 방만 표시, 오래된/빈 방 정리)
   useEffect(() => {
@@ -1333,6 +1341,8 @@ export function useBattleRoom({
 
   return {
     isConnected,
+    authError,
+    retryAuth,
     rooms,
     currentRoom,
     messages,
