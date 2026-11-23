@@ -326,6 +326,22 @@ export function isSameFullName(dbName: string, officialName: string): boolean {
   return a === b || a.includes(b) || b.includes(a);
 }
 
+/**
+ * 핵심 상호(지점명·지역명 제외)에 일반 음식 단어가 아닌 두 글자 이상 공통 부분이 있는지.
+ * "월화고기"/"월화미트"는 true, "에스파냐도넛"/"루루도넛"("도넛"만 겹침)은 false.
+ * 주소가 이미 같은 경우에만 같은 가게 근거로 쓴다 (네이버 매칭, naver-match.ts).
+ */
+export function sharesDistinctiveName(a: string, b: string, extraGenericWords: string[] = []): boolean {
+  const ca = coreBusinessName(a);
+  const cb = coreBusinessName(b);
+  if (ca && ca === cb) return true; // "킹"/"킹"처럼 한 글자 상호도 완전히 같으면 인정
+  let common = longestCommonSubstring(ca, cb);
+  if (common.length < 2) return false;
+  if (isGenericOnly(common)) return false;
+  for (const w of extraGenericWords) common = common.split(w).join("");
+  return common.length >= 2 && !isGenericOnly(common);
+}
+
 /** 상호가 같다고 보긴 어렵지만 관계가 있어 보이는지 (같은 주소 후보를 관리자 검토로 올릴지 판단). */
 function hasWeakNameRelation(dbName: string, officialName: string): boolean {
   if (/주식회사|\(주\)|㈜|유한회사|농업회사법인/.test(officialName)) return true; // 사업자명이 법인명인 경우

@@ -1,10 +1,11 @@
 import { db } from "@/lib/firebase";
 import { invalidateRestaurantsCache, toRestaurantSummary } from "@/lib/restaurant-server";
 import {
-  lookupNaverPlaceDetail,
-  resolveNaverPlaceId,
-  fetchNaverPlaceFullDetails,
-} from "@/lib/naver-place-detail";
+  findVerifiedNaverPlace,
+  naverClearFields,
+  naverFieldsFromDetails,
+  naverMatchFailFields,
+} from "@/lib/naver-verify";
 import { checkZeroPayOfficialWithTrace, type TraceStep, type ZeroPayOfficialCheckResult } from "@/lib/zeropay-official";
 
 /**
@@ -58,6 +59,7 @@ export interface EnrichResult {
     zeroPaySource?: string;
     categoryLabel?: string;
     menusCount?: number;
+    naverMatchStatus?: string;
   };
 }
 
@@ -123,129 +125,59 @@ export async function enrichRestaurantByIdWithTrace(
   };
   const enrichedSummary: EnrichResult["enrichedFields"] = {};
 
-  // 1. 네이버 Place ID 파싱 또는 검색
-  let placeId = existingPlaceId || (await resolveNaverPlaceId(existingPlaceUrl));
+  // 1~2. 네이버 플레이스 확인 및 상세 정보 수집.
+  // 상호·주소를 비교해 같은 가게로 확인된 플레이스만 반영한다 (naver-verify.ts, naver-match.ts).
+  try {
+    const naver = await findVerifiedNaverPlace(
+      {
+        name,
+        address,
+        naverPlaceId: existingPlaceId || null,
+        naverPlaceUrl: existingPlaceUrl || null,
+        naverMatchStatus: (storeData.naverMatchStatus as string | undefined) ?? null,
+      },
+      { districtKeyword, steps }
+    );
+    enrichedSummary.naverMatchStatus = naver.status ?? undefined;
 
-  if (placeId) {
-    steps.push({
-      step: "2. 네이버 Place ID 확인",
-      status: "pass",
-      message: `기존 등록된 Place ID 확인: '${placeId}' (URL: ${existingPlaceUrl || "없음"})`,
-      details: { placeId },
-    });
-  } else {
-    try {
-      const naverDetail = await lookupNaverPlaceDetail(name, { districtKeyword });
-      if (naverDetail?.naverPlaceId) {
-        placeId = naverDetail.naverPlaceId;
-        steps.push({
-          step: "2. 네이버 Place 검색 및 ID 획득",
-          status: "pass",
-          message: `네이버 지역 검색 → Place ID '${placeId}' 발견 (검색매칭명: '${naverDetail.matchedName}', 주소: '${naverDetail.matchedAddress}')`,
-          details: { placeId, matchedName: naverDetail.matchedName, matchedAddress: naverDetail.matchedAddress },
-        });
-      } else {
-        steps.push({
-          step: "2. 네이버 Place 검색",
-          status: "fail",
-          message: `네이버 지역 검색을 시도했으나 '${name}'에 일치하는 Place ID를 찾지 못했습니다.`,
-          details: { name, districtKeyword },
-        });
+    if (naver.details && (naver.status === "verified" || naver.status === "manual")) {
+      const details = naver.details;
+      // 붙어 있던 플레이스가 다른 가게였다면 그 가게에서 온 정보(영업시간 등)가 남지 않게 먼저 비운다.
+      if (naver.existingRejected) {
+        Object.assign(update, naverClearFields(naver.reason));
+        changesSummary.push(`네이버: 다른 가게 정보 교체 ('${storeData.naverMatchedName ?? existingPlaceId}' → '${details.matchedName}')`);
       }
-    } catch (naverErr) {
-      steps.push({
-        step: "2. 네이버 Place 검색",
-        status: "fail",
-        message: `네이버 검색 API 호출 예외: ${(naverErr as Error).message}`,
-      });
-    }
-  }
+      Object.assign(update, naverFieldsFromDetails(details, naver.status, naver.reason));
+      enrichedSummary.naverPlaceId = details.naverPlaceId;
+      enrichedSummary.naverPlaceUrl = details.naverPlaceUrl;
 
-  // 2. 네이버 Place 상세 정보(메뉴, 영업시간, 전화번호, 편의시설 등) 수집
-  if (placeId) {
-    try {
-      const fullDetails = await fetchNaverPlaceFullDetails(placeId);
-      if (fullDetails) {
-        update.naverPlaceId = fullDetails.naverPlaceId;
-        update.naverPlaceUrl = fullDetails.naverPlaceUrl;
-        update.naverMatchedName = fullDetails.matchedName || name;
-        update.naverMatchedAddress = fullDetails.matchedAddress || address;
-        enrichedSummary.naverPlaceId = fullDetails.naverPlaceId;
-        enrichedSummary.naverPlaceUrl = fullDetails.naverPlaceUrl;
-
-        const collectedItems: string[] = [];
-
-        if (fullDetails.phone) {
-          update.phone = fullDetails.phone;
-          enrichedSummary.phone = fullDetails.phone;
-          if (fullDetails.phone !== currentPhone) {
-            changesSummary.push(`전화번호: ${currentPhone ?? "(없음)"} → ${fullDetails.phone}`);
-          }
-          collectedItems.push(`전화: ${fullDetails.phone}`);
+      if (details.phone) {
+        enrichedSummary.phone = details.phone;
+        if (details.phone !== currentPhone) {
+          changesSummary.push(`전화번호: ${currentPhone ?? "(없음)"} → ${details.phone}`);
         }
-
-        if (fullDetails.businessHours) {
-          update.businessHours = fullDetails.businessHours;
-          collectedItems.push("영업시간 파싱 완료");
-        }
-
-        if (fullDetails.facilities && fullDetails.facilities.length > 0) {
-          update.facilities = fullDetails.facilities;
-          collectedItems.push(`편의시설 ${fullDetails.facilities.length}개`);
-        }
-
-        if (fullDetails.paymentMethods && fullDetails.paymentMethods.length > 0) {
-          update.paymentMethods = fullDetails.paymentMethods;
-          collectedItems.push(`결제수단 ${fullDetails.paymentMethods.length}개`);
-        }
-
-        if (fullDetails.menus && fullDetails.menus.length > 0) {
-          update.menus = fullDetails.menus;
-          enrichedSummary.menusCount = fullDetails.menus.length;
-          if (fullDetails.menus.length !== currentMenus.length) {
-            changesSummary.push(`메뉴: ${currentMenus.length}개 → ${fullDetails.menus.length}개 수집`);
-          }
-          collectedItems.push(`메뉴 ${fullDetails.menus.length}개`);
-        }
-
-        if (fullDetails.aiBriefing) {
-          update.aiBriefing = fullDetails.aiBriefing;
-        }
-
-        if (fullDetails.mainImage) {
-          update.mainImage = fullDetails.mainImage;
-        }
-
-        steps.push({
-          step: "3. 플레이스 상세 크롤링",
-          status: "pass",
-          message: `크롤링 성공: ${collectedItems.join(", ")}`,
-          details: {
-            phone: fullDetails.phone,
-            businessHours: fullDetails.businessHours ? "수집됨" : "없음",
-            menusCount: fullDetails.menus.length,
-            facilitiesCount: fullDetails.facilities.length,
-          },
-        });
-      } else {
-        steps.push({
-          step: "3. 플레이스 상세 크롤링",
-          status: "fail",
-          message: `Place ID '${placeId}' 상세 페이지 파싱 실패 (내용 없음)`,
-        });
       }
-    } catch (fullDetailErr) {
-      steps.push({
-        step: "3. 플레이스 상세 크롤링",
-        status: "fail",
-        message: `크롤링 중 예외 발생: ${(fullDetailErr as Error).message}`,
-      });
+      if (details.menus.length > 0) {
+        enrichedSummary.menusCount = details.menus.length;
+        if (details.menus.length !== currentMenus.length) {
+          changesSummary.push(`메뉴: ${currentMenus.length}개 → ${details.menus.length}개 수집`);
+        }
+      }
+      if (existingPlaceId && existingPlaceId !== details.naverPlaceId && !naver.existingRejected) {
+        changesSummary.push(`네이버 플레이스: ${existingPlaceId} → ${details.naverPlaceId}`);
+      }
+    } else if (naver.status === "mismatch" || naver.status === "not_found") {
+      // 같은 가게를 못 찾으면 아무것도 반영하지 않고 판정 기록만 남긴다. 기존 정보 삭제는 관리자 점검에서만.
+      Object.assign(update, naverMatchFailFields(naver.status, naver.reason));
+      if (naver.status === "mismatch") {
+        changesSummary.push(`네이버: 붙어 있는 정보가 다른 가게로 보임 - ${naver.reason}`);
+      }
     }
-  } else {
+  } catch (naverErr) {
     steps.push({
-      step: "3. 플레이스 상세 크롤링",
-      status: "skip",
-      message: "Place ID가 없어 네이버 상세 정보 크롤링을 건너뜁니다.",
+      step: "네이버 플레이스 확인",
+      status: "fail",
+      message: `네이버 조회 예외: ${(naverErr as Error).message}`,
     });
   }
 
@@ -255,7 +187,7 @@ export async function enrichRestaurantByIdWithTrace(
       const zpTrace = await checkZeroPayOfficialWithTrace({
         name,
         address,
-        phone: (update.phone as string | undefined) ?? currentPhone,
+        phone: "phone" in update ? (update.phone as string | null) : currentPhone, // 다른 가게 전화번호를 지운 경우 그 번호로 대조하지 않는다
       });
       zpTrace.steps.forEach((s) => steps.push(s));
 

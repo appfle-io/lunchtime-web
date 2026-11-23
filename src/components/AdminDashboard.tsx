@@ -297,7 +297,8 @@ export default function AdminDashboard({
     setFormPaymentMethods((restaurant.paymentMethods ?? []).join(", "));
     setFormIsZeroPay(restaurant.isZeroPay);
     setFormNaverPlaceUrl(restaurant.naverPlaceUrl ?? "");
-    setFormNaverMatchedName(restaurant.naverMatchedName ?? restaurant.displayName ?? restaurant.name);
+    // 확인되지 않은 네이버 상호(다른 가게 이름일 수 있음)를 미리 채우지 않는다. 저장하면 DB 상호까지 바뀌기 때문.
+    setFormNaverMatchedName(restaurant.displayName ?? restaurant.name);
     setFormZeroPayOfficialName(restaurant.zeroPayOfficialName ?? "");
     setFormBusinessName(restaurant.businessName ?? "");
     setFormDiscountBenefit(restaurant.discountInfo?.benefit ?? "");

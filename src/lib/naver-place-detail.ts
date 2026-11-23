@@ -3,17 +3,18 @@ import { type BrowserContext } from "playwright";
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-export interface NaverPlaceDetail {
+// 네이버가 응답하지 않으면 관리자 점검/식당 추가 요청 전체가 멈추므로 요청마다 시간 제한을 둔다.
+const NAVER_TIMEOUT_MS = 8_000;
+
+function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(NAVER_TIMEOUT_MS) });
+}
+
+/** 네이버 검색에서 찾은 플레이스 후보. 이름/주소는 지도 검색 결과에서만 채워진다 (통합검색은 ID만 준다). */
+export interface NaverPlaceCandidate {
   naverPlaceId: string;
   matchedName: string;
   matchedAddress: string;
-  phone?: string;
-}
-
-export interface NaverPlaceDetailOptions {
-  minSimilarity?: number;
-  districtKeyword?: string;
-  context?: BrowserContext;
 }
 
 export interface NaverEnrichedMenuItem {
@@ -59,13 +60,13 @@ export async function resolveNaverPlaceId(inputUrl: string): Promise<string | nu
 
   if (inputUrl && inputUrl.includes("naver.me")) {
     try {
-      const res = await fetch(inputUrl, { method: "HEAD", redirect: "follow" });
+      const res = await fetchWithTimeout(inputUrl, { method: "HEAD", redirect: "follow" });
       const finalUrl = res.url;
       const extracted = extractNaverPlaceId(finalUrl);
       if (extracted) return extracted;
     } catch {
       try {
-        const res = await fetch(inputUrl, { method: "GET", redirect: "follow" });
+        const res = await fetchWithTimeout(inputUrl, { method: "GET", redirect: "follow" });
         const finalUrl = res.url;
         return extractNaverPlaceId(finalUrl);
       } catch (_) {}
@@ -149,7 +150,7 @@ function parseBusinessHoursFromApollo(apollo: any, base: any): string | null {
 async function fetchNaverPlaceViaPureHttp(placeId: string): Promise<NaverPlaceFullDetails | null> {
   try {
     const url = `https://pcmap.place.naver.com/restaurant/${placeId}/home`;
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: {
         "User-Agent": BROWSER_UA,
         "Accept-Language": "ko-KR,ko;q=0.9",
@@ -221,74 +222,69 @@ async function fetchNaverPlaceViaPureHttp(placeId: string): Promise<NaverPlaceFu
   }
 }
 
-export async function lookupNaverPlaceDetail(
+/**
+ * 상호로 네이버 플레이스 후보를 찾는다. 결과를 그대로 믿지 않는다: 호출하는 쪽이 각 후보의 상세 정보를 받아
+ * `judgeNaverPlaceMatch`(naver-match.ts)로 DB 식당과 같은 가게인지 확인한 뒤에만 반영해야 한다.
+ * (예전 lookupNaverPlaceDetail은 첫 결과를 검증 없이 써서 다른 지역/다른 가게 정보가 붙었다.)
+ */
+export async function searchNaverPlaceCandidates(
   name: string,
-  options: NaverPlaceDetailOptions = {}
-): Promise<NaverPlaceDetail | null> {
-  const { districtKeyword } = options;
+  options: { districtKeyword?: string; limit?: number } = {}
+): Promise<NaverPlaceCandidate[]> {
+  const { districtKeyword, limit = 3 } = options;
   const query = districtKeyword ? `${districtKeyword} ${name}` : name;
+  const found = new Map<string, NaverPlaceCandidate>();
 
-  // 1. search.naver.com 렌더링 HTML에서 Place ID 직접 추출 (Pure HTTP, Captcha 차단 없음, Vercel 100% 동작)
-  try {
-    const searchUrl = `https://search.naver.com/search.naver?where=nexsearch&query=${encodeURIComponent(query)}`;
-    const res = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": BROWSER_UA,
-        "Accept-Language": "ko-KR,ko;q=0.9",
-      },
-    });
-
-    if (res.ok) {
-      const html = await res.text();
-      const match = html.match(/map\.naver\.com\/p\/entry\/place\/(\d+)|place\.naver\.com\/(?:restaurant|place)\/(\d+)/i);
-      if (match) {
-        const placeId = match[1] || match[2];
-        if (placeId) {
-          return {
-            naverPlaceId: placeId,
-            matchedName: name,
-            matchedAddress: "",
-          };
-        }
-      }
-    }
-  } catch (_) {}
-
-  // 2. map.naver.com API 폴백
+  // 1. 지도 검색: 이름과 주소가 같이 오므로 우선 쓴다.
   try {
     const searchUrl = `https://map.naver.com/p/api/search/allSearch?query=${encodeURIComponent(query)}&type=all&searchCoord=126.9075977%3B37.5198698`;
-    const res = await fetch(searchUrl, {
+    const res = await fetchWithTimeout(searchUrl, {
       headers: {
         "User-Agent": BROWSER_UA,
         "Accept-Language": "ko-KR,ko;q=0.9",
         "Referer": "https://map.naver.com/",
       },
     });
-
     if (res.ok) {
       const json = await res.json().catch(() => null);
       const places = json?.result?.place?.list ?? json?.result?.place?.items ?? [];
-
       for (const p of places) {
         const pid = String(p.id ?? p.placeId ?? "");
-        const pname = String(p.name ?? p.title ?? "");
-        const paddr = String(p.roadAddress ?? p.address ?? p.jibunAddress ?? "");
-        const tel = String(p.tel ?? p.phone ?? "").trim() || undefined;
-
-        if (!pid) continue;
-        if (districtKeyword && !paddr.includes(districtKeyword)) continue;
-
-        return {
+        if (!pid || found.has(pid)) continue;
+        found.set(pid, {
           naverPlaceId: pid,
-          matchedName: pname,
-          matchedAddress: paddr,
-          phone: tel,
-        };
+          matchedName: String(p.name ?? p.title ?? ""),
+          matchedAddress: String(p.roadAddress ?? p.address ?? p.jibunAddress ?? ""),
+        });
+        if (found.size >= limit) break;
       }
     }
   } catch (_) {}
 
-  return null;
+  // 2. 통합검색 HTML: 지도 검색이 막히거나 결과가 없을 때. 페이지에 나온 순서대로 ID만 모은다.
+  if (found.size < limit) {
+    try {
+      const searchUrl = `https://search.naver.com/search.naver?where=nexsearch&query=${encodeURIComponent(query)}`;
+      const res = await fetchWithTimeout(searchUrl, {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          "Accept-Language": "ko-KR,ko;q=0.9",
+        },
+      });
+      if (res.ok) {
+        const html = await res.text();
+        const re = /map\.naver\.com\/p\/entry\/place\/(\d+)|place\.naver\.com\/(?:restaurant|place)\/(\d+)/gi;
+        for (const m of Array.from(html.matchAll(re))) {
+          const pid = m[1] || m[2];
+          if (!pid || found.has(pid)) continue;
+          found.set(pid, { naverPlaceId: pid, matchedName: "", matchedAddress: "" });
+          if (found.size >= limit) break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  return Array.from(found.values());
 }
 
 /**

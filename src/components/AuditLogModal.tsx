@@ -44,7 +44,7 @@ export default function AuditLogModal({
   const [filterQuery, setFilterQuery] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [expandedStoreIds, setExpandedStoreIds] = useState<Set<string>>(new Set());
-  // 제로페이 점검에서 "관리자 확인 필요(review)" 제안은 기본으로 반영하지 않고, 체크한 것만 반영한다.
+  // "관리자 확인 필요(review)" 제안(제로페이 판정 변경, 네이버 정보 삭제)은 기본으로 반영하지 않고, 체크한 것만 반영한다.
   const [includedReviewIds, setIncludedReviewIds] = useState<Set<string>>(new Set());
 
   const logListRef = useRef<HTMLDivElement>(null);
@@ -75,7 +75,7 @@ export default function AuditLogModal({
     const endpoint = type === "zeropay" ? "/api/admin/zeropay/check-all" : "/api/admin/naver/check-all";
 
     // 스트림 1회 실행. 정상 종료면 서버가 시간 제한으로 처리하지 못한 id 목록을 돌려준다.
-    // isChunked: 제로페이 분할 점검일 때는 진행 개수/변경 목록을 누적하고 완료 처리는 호출부가 한다.
+    // isChunked: 분할 점검일 때는 진행 개수/변경 목록을 누적하고 완료 처리는 호출부가 한다.
     async function runStream(
       requestBody: Record<string, unknown>,
       isChunked: boolean
@@ -148,9 +148,9 @@ export default function AuditLogModal({
       return { ok: !failed, unprocessedIds };
     }
 
-    // 제로페이: 대상 id를 받아 CHUNK_SIZE개씩 나눠 요청한다. 서버는 한 요청을 약 40초 안에 끊고
+    // 제로페이/네이버 공통: 대상 id를 받아 CHUNK_SIZE개씩 나눠 요청한다. 서버는 한 요청을 약 40초 안에 끊고
     // 남은 id를 돌려주므로, Vercel 함수 실행시간 제한에 걸리지 않고 전체를 끝까지 점검할 수 있다.
-    async function runZeroPayChunked() {
+    async function runChunked() {
       let ids = targetIdsRef.current;
       if (!ids || ids.length === 0) {
         const planRes = await fetch(endpoint, {
@@ -181,12 +181,7 @@ export default function AuditLogModal({
 
     async function startStream() {
       try {
-        if (type === "zeropay") {
-          await runZeroPayChunked();
-        } else {
-          const { ok } = await runStream({ companyCode, targetIds: targetIdsRef.current }, false);
-          if (ok) setStatus("completed");
-        }
+        await runChunked();
       } catch (err: any) {
         if (err.name === "AbortError") {
           return;
@@ -499,7 +494,13 @@ export default function AuditLogModal({
                             onChange={() => toggleReviewInclude(log.diff.id)}
                             className="rounded border-zinc-600 bg-zinc-800"
                           />
-                          확인 후 반영 ({log.diff.proposedIsZeroPay ? "제로페이 지원으로 변경" : "제로페이 미지원으로 변경"})
+                          확인 후 반영 (
+                          {type === "naver"
+                            ? "네이버 정보 지우기"
+                            : log.diff.proposedIsZeroPay
+                            ? "제로페이 지원으로 변경"
+                            : "제로페이 미지원으로 변경"}
+                          )
                         </label>
                         {Array.isArray(log.diff.candidates) && log.diff.candidates.length > 0 && (
                           <ul className="mt-1 space-y-0.5 pl-6 text-sky-300/90">

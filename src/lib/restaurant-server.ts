@@ -3,6 +3,7 @@ import { db } from "@/lib/firebase";
 import { getCompanyByCode } from "@/lib/company-server";
 import { searchNaverLocal, stripHtmlTags, parseNaverCoords } from "@/lib/naver-local-search";
 import { haversineMeters, calculateEstimatedWalkingMeters, calculateWalkingMinutes } from "@/lib/geo";
+import { judgeNaverPlaceMatch } from "@/lib/naver-match";
 import type { RestaurantSummary } from "@/types";
 
 export function normalizeName(name: string): string {
@@ -254,14 +255,32 @@ async function refreshRestaurantsInCache(companyCode: string, ids: string[]): Pr
   await batch.commit();
 }
 
+/**
+ * 네이버 상호를 화면 표시명으로 써도 되는지. 매칭 확인(verified)·관리자 지정(manual)이면 그대로 쓰고,
+ * 확인 기록이 없는 옛 데이터는 저장된 네이버 상호·주소로 다시 판정한다.
+ */
+function isTrustedNaverName(data: Record<string, unknown>, rawName: string, naverMatchedName: string | null): boolean {
+  if (!naverMatchedName) return false;
+  const status = data.naverMatchStatus as string | undefined;
+  if (status === "verified" || status === "manual") return true;
+  if (status) return false; // mismatch / not_found
+  return (
+    judgeNaverPlaceMatch(
+      { name: rawName, address: (data.address as string) ?? "" },
+      { name: naverMatchedName, address: (data.naverMatchedAddress as string) ?? "" }
+    ).verdict === "match"
+  );
+}
+
 export function toRestaurantSummary(id: string, data: Record<string, unknown>): RestaurantSummary {
   const rawName = (data.name as string) ?? "";
   const naverMatchedName = (data.naverMatchedName as string | null | undefined) ?? null;
   const zeroPayOfficialName = (data.zeroPayOfficialName as string | null | undefined) ?? null;
   const businessName = (data.businessName as string | null | undefined) ?? (data.originalName as string | null | undefined) ?? rawName;
 
-  // 메인 화면 표시 상호명: naverMatchedName이 존재하면 최우선 사용, 없으면 원본 상호명
-  const displayName = naverMatchedName || rawName;
+  // 메인 화면 표시 상호명: 같은 가게로 확인된 네이버 상호만 쓰고, 아니면 원본 상호명.
+  // 예전 수집기는 검색 첫 결과를 검증 없이 붙여서 다른 가게 이름("코리아" -> "팜코리아약국")이 보였다.
+  const displayName = isTrustedNaverName(data, rawName, naverMatchedName) ? naverMatchedName! : rawName;
 
   const distanceMeters = typeof data.distanceMeters === "number" ? data.distanceMeters : undefined;
   const walkingMeters = typeof distanceMeters === "number" ? calculateEstimatedWalkingMeters(distanceMeters) : undefined;
@@ -582,10 +601,12 @@ export interface RestaurantAdminUpdate {
 export async function updateRestaurantAdminFields(
   companyCode: string,
   restaurantId: string,
-  update: RestaurantAdminUpdate
+  update: RestaurantAdminUpdate,
+  // 서버가 정한 추가 필드 (요청 본문으로는 받지 않는다). 예: 네이버 링크 지정 시 naverPlaceId/naverMatchStatus
+  serverFields: Record<string, unknown> = {}
 ): Promise<RestaurantSummary> {
   const docRef = db.collection("companies").doc(companyCode).collection("restaurants").doc(restaurantId);
-  const patch: Record<string, unknown> = { ...update };
+  const patch: Record<string, unknown> = { ...update, ...serverFields };
   // 관리자가 제로페이 여부를 직접 바꾸면 "수동 설정"으로 표시한다. 이후 공식 사이트 점검/투표가
   // 이 값을 덮어쓰지 않는다 (우선순위: 관리자 > 공식 사이트 > 사용자 투표).
   if (typeof update.isZeroPay === "boolean") {
