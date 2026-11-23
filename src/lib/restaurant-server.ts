@@ -301,7 +301,9 @@ export function toRestaurantSummary(id: string, data: Record<string, unknown>): 
     categoryLabel: data.categoryLabel ?? null,
     isZeroPay: Boolean(data.isZeroPay),
     // 2026-08-06 신규: 제로페이 엄지척 투표에서 계산되어 캐시된 값 (lib/zeropay-server.ts 참고).
-    isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview),
+    // 지금 규칙은 "제로페이 가능인데 최근 반대 제보가 많음"일 때만 해당한다. 2.0.0 이전 코드가 남긴 표시가
+    // 제로페이 불가 식당 350여 곳에 그대로 남아 있어서, 제로페이 가능일 때만 인정한다.
+    isZeroPayNeedsReview: Boolean(data.isZeroPayNeedsReview) && Boolean(data.isZeroPay),
     distanceMeters,
     walkingMeters,
     walkingMinutes,
@@ -311,6 +313,9 @@ export function toRestaurantSummary(id: string, data: Record<string, unknown>): 
     // 그래야 지금까지 등록된 1000+건이 마이그레이션 없이 전부 "사용중"으로 보인다.
     isActive: data.isActive !== false,
     adminMemo: (data.adminMemo as string | null | undefined) ?? null,
+    // 관리자 화면 "데이터 점검" 필터용 판정 기록 (enrich-server.ts, naver-verify.ts). 없으면 아직 점검 전.
+    zeroPayCheckStatus: (data.zeroPayCheckStatus as string | null | undefined) ?? null,
+    naverMatchStatus: (data.naverMatchStatus as string | null | undefined) ?? null,
   } as RestaurantSummary;
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "lunchtime",
-  "version": "2.4.0",
+  "version": "2.6.0",
   "private": true,
   "description": "회사 점심 메뉴 추천 서비스 (lunchtime.seeuson.com)",
   "scripts": {

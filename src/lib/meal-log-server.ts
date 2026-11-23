@@ -1,4 +1,5 @@
 import { db } from "@/lib/firebase";
+import { adjustMealVisit } from "@/lib/meal-stats-server";
 
 // 2026-08-06 저녁 신규: "내가 언제 어디서 밥 먹었는지" 개인 기록(캘린더뷰) 기능.
 // companies/{code}/users/{nicknameId}/mealLogs/{autoId} - 하루에 여러 건도 기록할 수 있다
@@ -125,6 +126,7 @@ export async function addMealLog(
     updatedAt: now,
   };
   const ref = await mealLogsRef(companyCode, nicknameId).add(data);
+  await adjustMealVisit(companyCode, data.date, data.restaurantId, 1); // "많이 간 식당" 집계
   return { id: ref.id, ...data };
 }
 
@@ -140,9 +142,14 @@ export async function updateMealLog(
     memo?: string;
   }
 ): Promise<void> {
-  await mealLogsRef(companyCode, nicknameId)
-    .doc(id)
-    .set({ ...updates, updatedAt: new Date().toISOString() }, { merge: true });
+  const ref = mealLogsRef(companyCode, nicknameId).doc(id);
+  const before = (await ref.get()).data();
+  await ref.set({ ...updates, updatedAt: new Date().toISOString() }, { merge: true });
+  // 식당을 바꿨으면 "많이 간 식당" 집계도 옮긴다 (날짜는 수정 대상이 아니다).
+  if (before && updates.restaurantId !== undefined && (updates.restaurantId ?? null) !== (before.restaurantId ?? null)) {
+    await adjustMealVisit(companyCode, before.date, before.restaurantId, -1);
+    await adjustMealVisit(companyCode, before.date, updates.restaurantId, 1);
+  }
 }
 
 export async function deleteMealLog(
@@ -150,5 +157,8 @@ export async function deleteMealLog(
   nicknameId: string,
   id: string
 ): Promise<void> {
-  await mealLogsRef(companyCode, nicknameId).doc(id).delete();
+  const ref = mealLogsRef(companyCode, nicknameId).doc(id);
+  const before = (await ref.get()).data();
+  await ref.delete();
+  if (before) await adjustMealVisit(companyCode, before.date, before.restaurantId, -1);
 }

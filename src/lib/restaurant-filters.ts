@@ -16,12 +16,12 @@ export const SPECIAL_FILTERS: { key: SpecialFilterKey; label: string }[] = [
   { key: "walk5", label: "도보 5분" },
   { key: "favorite", label: "즐겨찾기" },
   { key: "groupdining", label: "회식" },
-  { key: "recentlyPopular", label: "최근많이찾는" },
+  { key: "recentlyPopular", label: "요즘 인기" },
   { key: "summer", label: "여름별미" },
 ];
 
 // popularIds: 최근 24시간 클릭 집계 상위 N개 식당 id 목록 (CompanyHome이 /api/popular로 10분마다 갱신).
-// 아직 클릭 데이터가 안 쌓였으면 빈 Set이 들어오고, 그러면 "최근많이찾는" 태그는 결과가 항상 0개가 된다.
+// 최근 7일 2번 이상 간 곳 + 최근 24시간 2명 이상 본 곳. 데이터가 없으면 빈 Set이 들어오고, 그러면 "요즘 인기" 태그는 결과가 항상 0개가 된다.
 function matchesSpecialFilter(
   key: SpecialFilterKey,
   restaurant: RestaurantSummary,

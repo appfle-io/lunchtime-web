@@ -87,6 +87,10 @@ export interface RestaurantSummary {
 
   // 관리자 전용 메모 (언제, 어떤 상태값을 왜 변경했는지 내역 기록)
   adminMemo?: string | null;
+  // 제로페이 공식 판정 결과 (confirmed / review / not_found / error). 없으면 판정 기록 없음.
+  zeroPayCheckStatus?: string | null;
+  // 네이버 매칭 판정 (verified / manual / mismatch / not_found). 없으면 2.3.0 이전 매칭.
+  naverMatchStatus?: string | null;
 }
 
 export interface ReviewSummary {

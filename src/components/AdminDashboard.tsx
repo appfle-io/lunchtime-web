@@ -52,6 +52,47 @@ function getSortValue(r: RestaurantSummary, column: SortColumn): string | number
   }
 }
 
+// 데이터 점검 필터: 점검·정리가 필요한 가맹점만 골라 본다. 표에서 전체 선택 후 위의 "선택 점검"을 누르면
+// 이 가맹점들만 점검할 수 있다.
+type IssueKey = "zeropayReview" | "naverSuspect" | "noNaver" | "noPhone" | "noMenu";
+
+const ISSUE_FILTERS: { key: IssueKey; label: string; description: string; test: (r: RestaurantSummary) => boolean }[] = [
+  {
+    key: "zeropayReview",
+    label: "제로페이 확인 필요",
+    description: "공식 판정이 애매하거나(review) 결제 안 된다는 제보가 많은 곳",
+    test: (r) => r.zeroPayCheckStatus === "review" || (r.isZeroPay && Boolean(r.isZeroPayNeedsReview)),
+  },
+  {
+    key: "naverSuspect",
+    label: "네이버 다른 가게 의심",
+    description: "붙어 있는 네이버 정보가 상호·주소와 맞지 않는 곳 (네이버 점검으로 정리)",
+    test: (r) =>
+      r.naverMatchStatus === "mismatch" ||
+      (!r.naverMatchStatus && Boolean(r.naverMatchedName) && r.displayName !== r.naverMatchedName),
+  },
+  {
+    key: "noNaver",
+    label: "네이버 연결 없음",
+    description: "네이버 지도 링크가 없는 곳 (상세편집에서 링크를 넣으면 바로 연결)",
+    test: (r) => !r.naverPlaceUrl,
+  },
+  { key: "noPhone", label: "전화 없음", description: "전화번호가 비어 있는 곳", test: (r) => !r.phone },
+  { key: "noMenu", label: "메뉴 없음", description: "메뉴가 하나도 없는 곳", test: (r) => !r.menus?.length },
+];
+
+// 표에서 바로 고치는 칸. 저장된 값과 다를 때만 "저장" 버튼을 켠다.
+function isRowDirty(r: RestaurantSummary, saved: RestaurantSummary | undefined): boolean {
+  if (!saved) return false;
+  return (
+    r.name !== saved.name ||
+    (r.categoryLabel ?? null) !== (saved.categoryLabel ?? null) ||
+    (r.phone ?? "") !== (saved.phone ?? "") ||
+    r.isZeroPay !== saved.isZeroPay ||
+    (r.isActive !== false) !== (saved.isActive !== false)
+  );
+}
+
 export default function AdminDashboard({
   companyCode,
   nickname,
@@ -64,6 +105,10 @@ export default function AdminDashboard({
   const [isNavigatingHome, startHomeTransition] = useTransition();
   const [tab, setTab] = useState<Tab>("restaurants");
   const [rows, setRows] = useState<RestaurantSummary[]>(initialRestaurants);
+  // 서버에 저장된 상태 (표에서 고친 칸과 비교해 저장 버튼을 켜고 끄는 기준)
+  const [savedById, setSavedById] = useState<Map<string, RestaurantSummary>>(
+    () => new Map(initialRestaurants.map((r) => [r.id, r]))
+  );
   const [pendingRequests, setPendingRequests] = useState<RestaurantEditRequest[]>(initialPendingRequests);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -72,6 +117,7 @@ export default function AdminDashboard({
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterZeroPay, setFilterZeroPay] = useState<"all" | "Y" | "N">("all");
   const [filterIsActive, setFilterIsActive] = useState<"all" | "Y" | "N">("all");
+  const [filterIssue, setFilterIssue] = useState<IssueKey | null>(null);
   const [page, setPage] = useState(0);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
   const [enrichingId, setEnrichingId] = useState<string | null>(null);
@@ -128,9 +174,26 @@ export default function AdminDashboard({
       if (filterIsActive === "Y" && !isActive) return false;
       if (filterIsActive === "N" && isActive) return false;
 
+      // 5. 데이터 점검 필터
+      if (filterIssue) {
+        const issue = ISSUE_FILTERS.find((f) => f.key === filterIssue);
+        if (issue && !issue.test(savedById.get(r.id) ?? r)) return false;
+      }
+
       return true;
     });
-  }, [rows, searchQuery, filterCategory, filterZeroPay, filterIsActive]);
+  }, [rows, searchQuery, filterCategory, filterZeroPay, filterIsActive, filterIssue, savedById]);
+
+  // 데이터 점검 칩의 건수 (저장된 값 기준, 다른 필터와 무관하게 전체에서 센다)
+  const issueCounts = useMemo(() => {
+    const counts = new Map<IssueKey, number>();
+    for (const f of ISSUE_FILTERS) counts.set(f.key, 0);
+    savedById.forEach((r) => {
+      for (const f of ISSUE_FILTERS) if (f.test(r)) counts.set(f.key, (counts.get(f.key) ?? 0) + 1);
+    });
+    return counts;
+  }, [savedById]);
+  const dirtyCount = useMemo(() => rows.filter((r) => isRowDirty(r, savedById.get(r.id))).length, [rows, savedById]);
 
   // 점검 실시간 로그 모달 상태
   const [auditModalType, setAuditModalType] = useState<"zeropay" | "naver" | null>(null);
@@ -169,15 +232,7 @@ export default function AdminDashboard({
         return;
       }
       const updatedIds = diffs.map((s) => s.id);
-      setRows((prev) =>
-        prev.map((r) => {
-          const matched = diffs.find((s) => s.id === r.id);
-          if (matched) {
-            return { ...r, ...matched.patch };
-          }
-          return r;
-        })
-      );
+      for (const d of diffs) commitRow(d.id, d.patch);
       setCompletedStoreIds((prev) => new Set([...Array.from(prev), ...updatedIds]));
       setToastMessage(`선택한 ${data.updatedCount ?? diffs.length}개 가맹점 정보가 DB에 성공적으로 반영되었습니다.`);
       setAuditModalType(null);
@@ -250,6 +305,17 @@ export default function AdminDashboard({
 
   function updateRow(id: string, patch: Partial<RestaurantSummary>) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+
+  // 서버가 돌려준(저장된) 값으로 행과 저장 기준을 같이 바꾼다.
+  function commitRow(id: string, server: Partial<RestaurantSummary>) {
+    updateRow(id, server);
+    setSavedById((prev) => {
+      const next = new Map(prev);
+      const before = next.get(id);
+      if (before) next.set(id, { ...before, ...server });
+      return next;
+    });
   }
 
   function businessHoursToText(raw: unknown): string {
@@ -331,7 +397,7 @@ export default function AdminDashboard({
         setToastMessage(data.error ?? "저장하지 못했어요.");
         return;
       }
-      updateRow(restaurant.id, data.restaurant);
+      commitRow(restaurant.id, data.restaurant);
       setToastMessage(`${restaurant.name} 저장했어요.`);
     } catch {
       setToastMessage("네트워크 오류로 저장하지 못했어요.");
@@ -353,7 +419,7 @@ export default function AdminDashboard({
         setToastMessage(data.error ?? "정보를 불러오지 못했어요.");
         return;
       }
-      updateRow(restaurant.id, data.restaurant);
+      commitRow(restaurant.id, data.restaurant);
       if (detailId === restaurant.id) {
         openDetail(data.restaurant);
       }
@@ -423,7 +489,7 @@ export default function AdminDashboard({
         setToastMessage(data.error ?? "저장하지 못했어요.");
         return;
       }
-      updateRow(detailId, data.restaurant);
+      commitRow(detailId, data.restaurant);
       setToastMessage("저장했어요.");
       setDetailId(null);
     } catch {
@@ -586,15 +652,56 @@ export default function AdminDashboard({
               </select>
             </div>
 
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs font-semibold text-ink-soft">데이터 점검</span>
+              {ISSUE_FILTERS.map((f) => {
+                const active = filterIssue === f.key;
+                const count = issueCounts.get(f.key) ?? 0;
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    title={f.description}
+                    aria-pressed={active}
+                    onClick={() => {
+                      setFilterIssue(active ? null : f.key);
+                      setPage(0);
+                    }}
+                    className={[
+                      "rounded-full border px-2.5 py-1 text-xs font-medium transition",
+                      active
+                        ? "border-primary bg-primary text-white"
+                        : count > 0
+                        ? "border-black/10 bg-surface text-ink hover:border-primary/40"
+                        : "border-black/5 bg-surface text-ink-soft/60",
+                    ].join(" ")}
+                  >
+                    {f.label} <span className={active ? "text-white/80" : "text-ink-soft"}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {filterIssue && (
+              <p className="mt-1.5 text-xs text-ink-soft">
+                {ISSUE_FILTERS.find((f) => f.key === filterIssue)?.description}. 표 맨 위 체크박스로 전체 선택한 뒤
+                위의 &quot;선택 점검&quot;을 누르면 이 가맹점들만 점검해요.
+              </p>
+            )}
+
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
+                {dirtyCount > 0 && (
+                  <span className="rounded-full bg-warning-light px-2 py-0.5 text-xs font-semibold text-warning-dark">
+                    저장 안 한 행 {dirtyCount}개
+                  </span>
+                )}
                 <p className="text-xs text-ink-soft">
                   총 <span className="font-bold text-ink">{filteredRows.length}개</span>
-                  {(searchQuery || filterCategory || filterZeroPay !== "all" || filterIsActive !== "all") && (
+                  {(searchQuery || filterCategory || filterZeroPay !== "all" || filterIsActive !== "all" || filterIssue) && (
                     <span className="ml-1 font-semibold text-primary">(전체 {rows.length}개 중 필터됨)</span>
                   )}
                 </p>
-                {(searchQuery || filterCategory || filterZeroPay !== "all" || filterIsActive !== "all") && (
+                {(searchQuery || filterCategory || filterZeroPay !== "all" || filterIsActive !== "all" || filterIssue) && (
                   <button
                     type="button"
                     onClick={() => {
@@ -602,6 +709,7 @@ export default function AdminDashboard({
                       setFilterCategory("");
                       setFilterZeroPay("all");
                       setFilterIsActive("all");
+                      setFilterIssue(null);
                       setPage(0);
                     }}
                     className="text-xs text-rose-600 underline font-semibold hover:text-rose-800"
@@ -690,13 +798,20 @@ export default function AdminDashboard({
                     const isActive = r.isActive !== false;
                     const isTableChecked = tableSelectedIds.has(r.id);
                     const isCompleted = completedStoreIds.has(r.id);
+                    const isDirty = isRowDirty(r, savedById.get(r.id));
 
                     return (
                       <tr
                         key={r.id}
                         className={[
                           "border-b border-black/5 last:border-0",
-                          isTableChecked ? "bg-primary-light/10" : isActive ? "" : "bg-black/[0.03] opacity-60",
+                          isDirty
+                            ? "bg-warning-light/40"
+                            : isTableChecked
+                            ? "bg-primary-light/10"
+                            : isActive
+                            ? ""
+                            : "bg-black/[0.03] opacity-60",
                         ].join(" ")}
                       >
                         <td className="px-2 py-1.5 text-center shrink-0">
@@ -810,8 +925,15 @@ export default function AdminDashboard({
                         <td className="px-2 py-1.5 text-center">
                           <button
                             onClick={() => handleSaveRow(r)}
-                            disabled={savingRowId === r.id}
-                            className="rounded-full bg-primary px-2.5 py-1 text-xs font-medium text-white transition hover:bg-primary-dark disabled:opacity-60"
+                            disabled={savingRowId === r.id || !isDirty}
+                            title={isDirty ? "이 행에서 고친 내용을 저장" : "고친 내용이 없어요"}
+                            className={[
+                              "rounded-full px-2.5 py-1 text-xs font-medium transition",
+                              isDirty
+                                ? "bg-primary text-white hover:bg-primary-dark"
+                                : "bg-surface-muted text-ink-soft/50",
+                              "disabled:cursor-default",
+                            ].join(" ")}
                           >
                             {savingRowId === r.id ? "..." : "저장"}
                           </button>

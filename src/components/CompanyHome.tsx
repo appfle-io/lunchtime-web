@@ -27,13 +27,14 @@ import type { RestaurantSummary } from "@/types";
 import { filterRestaurants, type SpecialFilterKey } from "@/lib/restaurant-filters";
 import { logRestaurantClick } from "@/lib/analytics-client";
 import type { PopularEntry } from "@/lib/popular-server";
+import type { VisitEntry } from "@/lib/meal-stats-server";
 import type { ZeroPayStatus } from "@/lib/zeropay-server";
 import type { CompanyUserEntry } from "@/lib/user-server";
 import type { CurrentWeather } from "@/lib/weather";
 import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
 import { toNicknameId } from "@/lib/nickname";
 
-// 인기 Top3(위젯)과 "최근많이찾는" 필터 태그가 같은 데이터를 쓰므로, top10 정도를 한 번만 받아와서
+// 인기 Top3(위젯)과 "요즘 인기" 필터 태그가 같은 데이터를 쓰므로, top10 정도를 한 번만 받아와서
 // 위젯은 앞 3개만 자르고 필터 태그는 id Set으로 전체를 쓴다.
 const POPULAR_FETCH_LIMIT = 10;
 
@@ -132,6 +133,8 @@ export default function CompanyHome({
     () => new Set(["zeropay"])
   );
   const [popularEntries, setPopularEntries] = useState<PopularEntry[]>([]);
+  // 최근 7일 "오늘 여기서 먹었어요" 기록 순위 (많이 간 식당). 조회수보다 실제로 간 곳이라 위젯에서 우선한다.
+  const [visitEntries, setVisitEntries] = useState<VisitEntry[]>([]);
   const [isRefreshingPopular, setIsRefreshingPopular] = useState(false);
   // 2026-08-12 신규: 회사 주변 날씨(기온+아이콘). 못 불러와도(키 미설정/기상청 API 실패 등)
   // null 그대로 두면 WeatherWidget이 조용히 안 보여준다 - 부가 기능이라 실패해도 지도/추천
@@ -333,18 +336,22 @@ export default function CompanyHome({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyCode]);
 
-  // 실시간 인기 Top3 (2026-08-06 신규, 2026-08-06 갱신주기 변경): 위젯 노출용 top3와 "최근많이찾는"
+  // 실시간 인기 Top3 (2026-08-06 신규, 2026-08-06 갱신주기 변경): 위젯 노출용 top3와 "요즘 인기"
   // 필터 태그용 id Set이 같은 응답을 공유한다.
   // 2026-08-11 캐싱 2차 개선: force가 아니면 sessionStorage 캐시가 TTL 안일 때 fetch를 스킵한다.
   // 수동 새로고침 버튼(handleManualPopularRefresh)과 업무시간 정각 자동 갱신은 "지금 최신값을
   // 봐야 하는" 상황이라 force=true로 캐시를 건너뛰고 항상 새로 불러온 뒤 캐시도 갱신한다.
-  const popularCacheKey = `lt:popular:${companyCode}`;
+  const popularCacheKey = `lt:popular2:${companyCode}`; // 응답 모양이 바뀌어 키를 바꿨다 (조회 + 방문)
   const fetchPopular = useCallback(
     async (force = false) => {
       if (!force) {
-        const cached = readSessionCache<PopularEntry[]>(popularCacheKey, POPULAR_CACHE_TTL_MS);
+        const cached = readSessionCache<{ entries: PopularEntry[]; visits: VisitEntry[] }>(
+          popularCacheKey,
+          POPULAR_CACHE_TTL_MS
+        );
         if (cached) {
-          setPopularEntries(cached);
+          setPopularEntries(cached.entries ?? []);
+          setVisitEntries(cached.visits ?? []);
           return;
         }
       }
@@ -354,10 +361,12 @@ export default function CompanyHome({
           `/api/popular?companyCode=${encodeURIComponent(companyCode)}&limit=${POPULAR_FETCH_LIMIT}`
         );
         if (!res.ok) return;
-        const data = (await res.json()) as { entries: PopularEntry[] };
+        const data = (await res.json()) as { entries: PopularEntry[]; visits?: VisitEntry[] };
         const entries = data.entries ?? [];
+        const visits = data.visits ?? [];
         setPopularEntries(entries);
-        writeSessionCache(popularCacheKey, entries);
+        setVisitEntries(visits);
+        writeSessionCache(popularCacheKey, { entries, visits });
       } catch {
         // 인기 위젯은 부가 기능이라 실패해도 조용히 무시한다.
       }
@@ -393,8 +402,13 @@ export default function CompanyHome({
   }, [fetchPopular]);
 
   const popularIds = useMemo(
-    () => new Set(popularEntries.map((e) => e.restaurantId)),
-    [popularEntries]
+    // "요즘 인기" 필터: 최근 7일 2번 이상 간 곳 + 최근 24시간 2명 이상 본 곳 (인기 위젯과 같은 기준)
+    () =>
+      new Set([
+        ...visitEntries.filter((v) => v.visitCount >= 2).map((v) => v.restaurantId),
+        ...popularEntries.filter((e) => e.clickCount >= 2).map((e) => e.restaurantId),
+      ]),
+    [popularEntries, visitEntries]
   );
 
   // 지도/리스트에 실제로 보여줄, 필터 적용된 식당 목록. FilterBar의 카테고리 태그 자체는
@@ -659,7 +673,8 @@ export default function CompanyHome({
       />
 
       <PopularWidget
-        entries={popularEntries.slice(0, 3)}
+        entries={popularEntries}
+        visits={visitEntries}
         restaurants={restaurants}
         onSelect={(restaurant) => {
           // 2026-08-12 신규: 실시간 인기 Top3는 지금 적용된 필터(카테고리/특수태그/클러스터
@@ -671,7 +686,8 @@ export default function CompanyHome({
           setActiveSpecialFilters(new Set());
           setClusterFilterIds(null);
           focusRestaurant(restaurant);
-          handleSelectRestaurant(restaurant);
+          // 인기 위젯에서 연 건 조회수로 세지 않는다 (많이 본 식당이 그 때문에 더 많이 본 식당이 되는 쏠림 방지).
+          setSelectedRestaurant(restaurant);
         }}
         onRefresh={handleManualPopularRefresh}
         isRefreshing={isRefreshingPopular}
